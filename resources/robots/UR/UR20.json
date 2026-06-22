@@ -1,0 +1,62 @@
+{
+  "manufacturer": "UniversalRobots",
+  "modelName": "UR20",
+  "family": "e-series",
+  "axisCount": 6,
+  "jointLimits": [
+    {
+      "minRadians": -6.283185,
+      "maxRadians": 6.283185,
+      "maxVelocityRadiansPerSecond": 3.141593,
+      "maxAccelerationRadiansPerSecondSquared": 6.283185
+    },
+    {
+      "minRadians": -6.283185,
+      "maxRadians": 6.283185,
+      "maxVelocityRadiansPerSecond": 3.141593,
+      "maxAccelerationRadiansPerSecondSquared": 6.283185
+    },
+    {
+      "minRadians": -6.283185,
+      "maxRadians": 6.283185,
+      "maxVelocityRadiansPerSecond": 3.141593,
+      "maxAccelerationRadiansPerSecondSquared": 6.283185
+    },
+    {
+      "minRadians": -6.283185,
+      "maxRadians": 6.283185,
+      "maxVelocityRadiansPerSecond": 3.141593,
+      "maxAccelerationRadiansPerSecondSquared": 6.283185
+    },
+    {
+      "minRadians": -6.283185,
+      "maxRadians": 6.283185,
+      "maxVelocityRadiansPerSecond": 3.141593,
+      "maxAccelerationRadiansPerSecondSquared": 6.283185
+    },
+    {
+      "minRadians": -6.283185,
+      "maxRadians": 6.283185,
+      "maxVelocityRadiansPerSecond": 3.141593,
+      "maxAccelerationRadiansPerSecondSquared": 6.283185
+    }
+  ],
+  "reachMeters": 1.75,
+  "payloadKg": 20,
+  "notes": "UR20 planning default",
+  "baseFrame": {
+    "x": 0,
+    "y": 0,
+    "z": 0,
+    "qw": 1
+  },
+  "toolFrame": {
+    "x": 0,
+    "y": 0,
+    "z": 0,
+    "qw": 1,
+    "name": "flange"
+  },
+  "sourceNote": "Approximate public datasheet values for visualization",
+  "disclaimer": "Preset values are planning/visualization defaults only, not physical compatibility guarantees."
+}

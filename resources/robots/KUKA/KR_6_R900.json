@@ -1,0 +1,62 @@
+{
+  "manufacturer": "Kuka",
+  "modelName": "KR 6 R900",
+  "family": "KR",
+  "axisCount": 6,
+  "jointLimits": [
+    {
+      "minRadians": -2.96706,
+      "maxRadians": 2.96706,
+      "maxVelocityRadiansPerSecond": 2.094395,
+      "maxAccelerationRadiansPerSecondSquared": 4.18879
+    },
+    {
+      "minRadians": -2.96706,
+      "maxRadians": 2.96706,
+      "maxVelocityRadiansPerSecond": 2.094395,
+      "maxAccelerationRadiansPerSecondSquared": 4.18879
+    },
+    {
+      "minRadians": -2.96706,
+      "maxRadians": 2.96706,
+      "maxVelocityRadiansPerSecond": 2.094395,
+      "maxAccelerationRadiansPerSecondSquared": 4.18879
+    },
+    {
+      "minRadians": -2.96706,
+      "maxRadians": 2.96706,
+      "maxVelocityRadiansPerSecond": 2.094395,
+      "maxAccelerationRadiansPerSecondSquared": 4.18879
+    },
+    {
+      "minRadians": -2.96706,
+      "maxRadians": 2.96706,
+      "maxVelocityRadiansPerSecond": 2.094395,
+      "maxAccelerationRadiansPerSecondSquared": 4.18879
+    },
+    {
+      "minRadians": -2.96706,
+      "maxRadians": 2.96706,
+      "maxVelocityRadiansPerSecond": 2.094395,
+      "maxAccelerationRadiansPerSecondSquared": 4.18879
+    }
+  ],
+  "reachMeters": 0.9,
+  "payloadKg": 6,
+  "notes": "KR 6 R900 planning default",
+  "baseFrame": {
+    "x": 0,
+    "y": 0,
+    "z": 0,
+    "qw": 1
+  },
+  "toolFrame": {
+    "x": 0,
+    "y": 0,
+    "z": 0,
+    "qw": 1,
+    "name": "flange"
+  },
+  "sourceNote": "Approximate public datasheet values for visualization",
+  "disclaimer": "Preset values are planning/visualization defaults only, not physical compatibility guarantees."
+}
