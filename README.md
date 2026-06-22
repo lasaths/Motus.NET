@@ -2,6 +2,8 @@
 
 Standalone .NET robotics motion-planning core for the Motus toolkit.
 
+Licensed under [MIT](LICENSE).
+
 ## Scope
 
 - Neutral robot model, joint states, trajectories, and planning interfaces
