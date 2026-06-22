@@ -11,7 +11,7 @@
 - **`JointState`** — joint angles in **radians**; validates against `JointLimit` list
 - **`JointLimit`** — min/max radians; optional max velocity and acceleration
 - **`Frame`**, **`BaseFrame`**, **`ToolFrame`** — position (meters) + unit quaternion
-- **`CartesianPose`** — frame + metadata placeholder for future Cartesian planning
+- **`CartesianPose`** — TCP frame for Cartesian planning
 
 ## Trajectory
 
@@ -20,14 +20,23 @@
 
 ## Planning
 
-- **`PlanningRequest`** — robot, start, goal, `PlanningOptions`
-- **`PlanningOptions`** — `MaxJointStepRadians`, `TimeStepSeconds`
+- **`PlanningRequest`** — robot, start, goal joint states, `PlanningOptions`
+- **`CartesianPlanningRequest`** — robot, start joints, Cartesian goal, options
+- **`PlanningOptions`** — step/timing limits; optional `CollisionScene`
 - **`PlanningResult`** — success flag, trajectory, errors, warnings
 - **`ValidationResult`** — validity, errors, warnings
 
-## Collision (placeholder)
+## Collision
 
-- **`CollisionScene`**, **`CollisionObject`** — stubs for future collision-aware planners
+- **`CollisionObject`** — sphere or axis-aligned box in world frame
+- **`CollisionScene`** — list of obstacles
+- **`ICollisionChecker`** — implemented by `SphereCollisionChecker` in Motus.Geometry
+
+## Kinematics (Motus.Geometry)
+
+- **`KinematicsProfiles`** — built-in DH chains per preset model name
+- **`DhForwardKinematics`** / **`NumericalInverseKinematics`** — FK/IK backends
+- **`KinematicsResolver`** — factory from `RobotPreset`
 
 ## Export
 

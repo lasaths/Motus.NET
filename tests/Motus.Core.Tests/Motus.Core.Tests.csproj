@@ -22,6 +22,8 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Motus.Core\Motus.Core.csproj" />
+    <ProjectReference Include="..\..\src\Motus.Geometry\Motus.Geometry.csproj" />
+    <ProjectReference Include="..\..\src\Motus.Presets\Motus.Presets.csproj" />
   </ItemGroup>
 
 </Project>

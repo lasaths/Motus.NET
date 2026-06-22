@@ -20,4 +20,12 @@
     <Using Include="Xunit" />
   </ItemGroup>
 
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Motus.Core\Motus.Core.csproj" />
+    <ProjectReference Include="..\..\src\Motus.Geometry\Motus.Geometry.csproj" />
+    <ProjectReference Include="..\..\src\Motus.OMPL.NET\Motus.OMPL.NET.csproj" />
+    <ProjectReference Include="..\..\src\Motus.OMPL.Native\Motus.OMPL.Native.csproj" />
+    <ProjectReference Include="..\..\src\Motus.Presets\Motus.Presets.csproj" />
+  </ItemGroup>
+
 </Project>

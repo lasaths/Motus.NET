@@ -1,33 +1,38 @@
 # Roadmap
 
-## Milestone 1 (current)
+## Milestone 1 — Motus.NET core
 
 - [x] Motus.Core data model and interfaces
 - [x] JSON robot presets (UR + KUKA defaults)
 - [x] `JointLinearPlanner`
 - [x] Trajectory validation and JSON/CSV export
 - [x] Unit tests
-- [x] Motus.Grasshopper components: preset, plan, validate, preview, export
-- [ ] Forward kinematics for accurate TCP preview
+- [x] Forward kinematics (DH profiles for all 14 presets)
 - [ ] Example `.gh` files saved from Rhino
 
-## Milestone 2
+## Milestone 2 — Motus.NET
 
-- Collision scene representation and `ICollisionChecker` implementation
-- FK/IK interfaces with UR/KUKA analytic or numerical backends
-- Cartesian pose goals (linear in joint space fallback)
+- [x] Collision scene primitives (sphere, box) and `SphereCollisionChecker`
+- [x] FK/IK via `DhForwardKinematics` + numerical IK (UR/KUKA profiles)
+- [x] `CartesianLinearPlanner` — Cartesian goal via IK, joint-linear path
 
-## Milestone 3
+## Milestone 3 — Motus.NET
 
-- Custom OMPL binding (`Motus.OMPL.Native` + `Motus.OMPL.NET`)
-- `RRTConnect` planner behind `IPlanner`
-- Path simplification and richer validation
+- [x] `RrtConnectPlanner` in `Motus.OMPL.NET` (pure C#; native OMPL C++ reserved)
+- [x] `PathSimplifier` for shortcut smoothing
+- [x] Richer `TrajectoryValidator` (collision + acceleration)
 
-## Milestone 4
+## Milestone 4 — Motus.Grasshopper / Motus.Rhino
 
-- Improved Rhino preview (meshes, tool frame, invalid segments)
-- Grasshopper cancellation for long plans
-- Optional continuous re-plan toggle
+- [x] Improved Rhino preview (FK meshes, tool frame, invalid segments)
+- [x] Grasshopper cancellation for long plans (RRT via `OnPingDocument`)
+- [x] Optional continuous re-plan toggle (`AutoReplan`)
+- [x] Motus.Grasshopper components: preset, plan, validate, preview, export, collision
+
+## Future optional
+
+- Native OMPL C++ binding in `Motus.OMPL.Native` (swap behind `IPlanner`)
+- Yak package distribution
 
 ## Out of scope (v1)
 

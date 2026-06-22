@@ -35,4 +35,4 @@ Expose only what Motus needs first:
 
 ## Current status
 
-`Motus.OMPL.Native` and `Motus.OMPL.NET` are placeholders. First milestone uses `JointLinearPlanner` only.
+`Motus.OMPL.NET` ships a **pure C# RRT-Connect** planner behind `IPlanner`, with `PathSimplifier` for shortcut smoothing. `Motus.OMPL.Native` remains reserved for a future optional OMPL C++ ABI swap — no native build required today.

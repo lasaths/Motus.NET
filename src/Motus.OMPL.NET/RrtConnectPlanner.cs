@@ -1,0 +1,193 @@
+using Motus.Core;
+using Motus.Geometry;
+
+namespace Motus.OMPL.NET;
+
+/// <summary>Joint-space RRT-Connect. ponytail: pure C# — swap Motus.OMPL.Native later for OMPL C++.</summary>
+public sealed class RrtConnectPlanner : IPlanner
+{
+    private readonly SphereCollisionChecker? _collision;
+    private readonly RrtConnectOptions _options;
+
+    public RrtConnectPlanner(RobotPreset preset, RrtConnectOptions? options = null)
+    {
+        _collision = KinematicsProfiles.TryGet(preset, out _) ? new SphereCollisionChecker(preset) : null;
+        _options = options ?? new RrtConnectOptions();
+    }
+
+    public RrtConnectPlanner(SphereCollisionChecker collision, RrtConnectOptions? options = null)
+    {
+        _collision = collision;
+        _options = options ?? new RrtConnectOptions();
+    }
+
+    public PlanningResult Plan(PlanningRequest request)
+    {
+        var robot = request.Robot;
+        var limits = robot.Preset.JointLimits;
+        var scene = request.Options.CollisionScene ?? new CollisionScene();
+        var n = robot.Preset.AxisCount;
+        var rng = new Random(_options.RandomSeed);
+
+        var startVal = request.Start.Validate(limits);
+        var goalVal = request.Goal.Validate(limits);
+        if (!startVal.IsValid) return PlanningResult.Failed(startVal.Errors.Select(e => $"Start: {e}"));
+        if (!goalVal.IsValid) return PlanningResult.Failed(goalVal.Errors.Select(e => $"Goal: {e}"));
+        if (_collision is not null)
+        {
+            if (!_collision.IsCollisionFree(request.Start, scene))
+                return PlanningResult.Failed(new[] { "Start configuration is in collision." });
+            if (!_collision.IsCollisionFree(request.Goal, scene))
+                return PlanningResult.Failed(new[] { "Goal configuration is in collision." });
+        }
+
+        var start = request.Start.Positions.ToArray();
+        var goal = request.Goal.Positions.ToArray();
+        var treeA = new RrtTree { Nodes = [new RrtNode(start, -1)] };
+        var treeB = new RrtTree { Nodes = [new RrtNode(goal, -1)] };
+
+        for (var iter = 0; iter < _options.MaxIterations; iter++)
+        {
+            if (_options.ShouldCancel?.Invoke() == true)
+                return PlanningResult.Failed(new[] { "Planning cancelled." });
+
+            var sample = Sample(rng, goal, limits);
+            var (extendedA, newIdxA) = Extend(treeA, sample, limits, scene);
+            if (extendedA && Connect(treeB, treeA.Nodes[newIdxA].Q, limits, scene, out var connectIdxB))
+            {
+                var pathA = Reconstruct(treeA, newIdxA);
+                var pathB = Reconstruct(treeB, connectIdxB);
+                pathB.Reverse();
+                var raw = pathA.Concat(pathB.Skip(1)).Select(q => new JointState(q)).ToList();
+                var simplified = PathSimplifier.Simplify(raw, robot, _collision, scene, _options.StepRadians * 0.5);
+                return BuildTrajectory(robot, simplified, request.Options, _collision is null);
+            }
+
+            (treeA, treeB) = (treeB, treeA);
+        }
+
+        return PlanningResult.Failed(new[] { $"RRT-Connect failed after {_options.MaxIterations} iterations." });
+    }
+
+    private double[] Sample(Random rng, double[] goal, IReadOnlyList<JointLimit> limits)
+    {
+        if (rng.NextDouble() < _options.GoalBias) return (double[])goal.Clone();
+        var q = new double[limits.Count];
+        for (var i = 0; i < limits.Count; i++)
+            q[i] = limits[i].MinRadians + rng.NextDouble() * (limits[i].MaxRadians - limits[i].MinRadians);
+        return q;
+    }
+
+    private (bool extended, int newIndex) Extend(RrtTree tree, double[] target, IReadOnlyList<JointLimit> limits, CollisionScene scene)
+    {
+        var nearest = Nearest(tree, target);
+        var steered = Steer(tree.Nodes[nearest].Q, target, limits);
+        if (ConfigurationDistance(tree.Nodes[nearest].Q, steered) < 1e-12) return (false, nearest);
+        if (!SegmentFree(tree.Nodes[nearest].Q, steered, scene)) return (false, nearest);
+        tree.Nodes.Add(new RrtNode(steered, nearest));
+        return (true, tree.Nodes.Count - 1);
+    }
+
+    private bool Connect(RrtTree tree, double[] target, IReadOnlyList<JointLimit> limits, CollisionScene scene, out int connectIndex)
+    {
+        connectIndex = Nearest(tree, target);
+        while (ConfigurationDistance(tree.Nodes[connectIndex].Q, target) > _options.ConnectThresholdRadians)
+        {
+            var steered = Steer(tree.Nodes[connectIndex].Q, target, limits);
+            if (ConfigurationDistance(tree.Nodes[connectIndex].Q, steered) < 1e-12) break;
+            if (!SegmentFree(tree.Nodes[connectIndex].Q, steered, scene)) return false;
+            tree.Nodes.Add(new RrtNode(steered, connectIndex));
+            connectIndex = tree.Nodes.Count - 1;
+        }
+        return ConfigurationDistance(tree.Nodes[connectIndex].Q, target) <= _options.ConnectThresholdRadians;
+    }
+
+    private bool SegmentFree(double[] from, double[] to, CollisionScene scene)
+    {
+        if (_collision is null) return true;
+        return _collision.SegmentCollisionFree(new JointState(from), new JointState(to), scene, _options.StepRadians);
+    }
+
+    private static int Nearest(RrtTree tree, double[] target)
+    {
+        var best = 0;
+        var bestDist = double.MaxValue;
+        for (var i = 0; i < tree.Nodes.Count; i++)
+        {
+            var d = ConfigurationDistance(tree.Nodes[i].Q, target);
+            if (d < bestDist) { bestDist = d; best = i; }
+        }
+        return best;
+    }
+
+    private double[] Steer(double[] from, double[] to, IReadOnlyList<JointLimit> limits)
+    {
+        var dist = ConfigurationDistance(from, to);
+        if (dist <= _options.StepRadians) return Clamp((double[])to.Clone(), limits);
+        var alpha = _options.StepRadians / dist;
+        var q = new double[from.Length];
+        for (var i = 0; i < from.Length; i++)
+            q[i] = from[i] + alpha * (to[i] - from[i]);
+        return Clamp(q, limits);
+    }
+
+    private static double[] Clamp(double[] q, IReadOnlyList<JointLimit> limits)
+    {
+        for (var i = 0; i < q.Length; i++)
+            q[i] = Math.Clamp(q[i], limits[i].MinRadians, limits[i].MaxRadians);
+        return q;
+    }
+
+    private static double ConfigurationDistance(double[] a, double[] b)
+    {
+        var sum = 0.0;
+        for (var i = 0; i < a.Length; i++)
+        {
+            var d = a[i] - b[i];
+            sum += d * d;
+        }
+        return Math.Sqrt(sum);
+    }
+
+    private static List<double[]> Reconstruct(RrtTree tree, int index)
+    {
+        var path = new List<double[]>();
+        var i = index;
+        while (i >= 0)
+        {
+            path.Add(tree.Nodes[i].Q);
+            i = tree.Nodes[i].Parent;
+        }
+        path.Reverse();
+        return path;
+    }
+
+    private static PlanningResult BuildTrajectory(RobotModel robot, IReadOnlyList<JointState> waypoints, PlanningOptions opts, bool noCollision)
+    {
+        var planner = new JointLinearPlanner();
+        var points = new List<TrajectoryPoint> { new(0, waypoints[0]) };
+        var t = 0.0;
+        for (var i = 1; i < waypoints.Count; i++)
+        {
+            var seg = planner.Plan(new PlanningRequest(robot, waypoints[i - 1], waypoints[i], opts));
+            if (!seg.Success) return PlanningResult.Failed(seg.Errors);
+            var segPts = seg.Trajectory!.Points;
+            for (var j = 1; j < segPts.Count; j++)
+            {
+                t += segPts[j].TimeSeconds - segPts[j - 1].TimeSeconds;
+                points.Add(new TrajectoryPoint(t, segPts[j].JointState));
+            }
+        }
+
+        var warnings = new List<string> { "RrtConnectPlanner: joint-space RRT-Connect path." };
+        if (noCollision) warnings.Add("RRT-Connect ran without collision checker (no kinematics profile).");
+        return PlanningResult.Succeeded(new Trajectory(robot, points), warnings);
+    }
+
+    private sealed class RrtTree
+    {
+        public List<RrtNode> Nodes { get; init; } = new();
+    }
+
+    private readonly record struct RrtNode(double[] Q, int Parent);
+}

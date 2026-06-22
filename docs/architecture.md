@@ -11,8 +11,11 @@ Motus.Rhino (Frame ↔ Plane, stick preview)
 Motus.Presets (JSON loader)
     ↓
 Motus.Core (data model, IPlanner, validation, export)
+Motus.Geometry (FK/IK, collision, CartesianLinearPlanner)
+    ↓
+Motus.OMPL.NET (RRT-Connect, path simplification)
     ↓ future optional
-Motus.OMPL.NET → Motus.OMPL.Native → OMPL C++
+Motus.OMPL.Native → OMPL C++
 ```
 
 ## Motus.Core principles

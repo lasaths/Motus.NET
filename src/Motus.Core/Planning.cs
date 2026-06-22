@@ -5,6 +5,7 @@ public sealed class PlanningOptions
     public double MaxJointStepRadians { get; init; } = 0.05;
     public double TimeStepSeconds { get; init; } = 0.04;
     public double MaxJointVelocityRadiansPerSecond { get; init; } = 1.5;
+    public CollisionScene? CollisionScene { get; init; }
 }
 
 public sealed class PlanningRequest

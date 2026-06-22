@@ -2,6 +2,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Motus.Core\Motus.Core.csproj" />
+    <ProjectReference Include="..\Motus.Geometry\Motus.Geometry.csproj" />
   </ItemGroup>
 
   <PropertyGroup>
