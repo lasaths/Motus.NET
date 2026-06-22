@@ -74,6 +74,17 @@ public class JointLinearPlannerTests
   }
 
   [Fact]
+  public void RejectsInvalidGoal()
+  {
+    var robot = Ur5e();
+    var start = new JointState(new double[6]);
+    var bad = new JointState(Enumerable.Repeat(99.0, 6).ToArray());
+    var result = new JointLinearPlanner().Plan(new PlanningRequest(robot, start, bad));
+    Assert.False(result.Success);
+    Assert.Contains(result.Errors, e => e.Contains("Goal"));
+  }
+
+  [Fact]
   public void RejectsMismatchedAxisCount()
   {
     var robot = Ur5e();
@@ -109,6 +120,32 @@ public class JointLinearPlannerTests
     var pts = result.Trajectory!.Points;
     for (var i = 1; i < pts.Count; i++)
       Assert.True(pts[i].TimeSeconds >= pts[i - 1].TimeSeconds);
+  }
+
+  [Fact]
+  public void VelocityTimingRespectsMaxJointVelocity()
+  {
+    var limits = Enumerable.Repeat(new JointLimit(-6.28, 6.28, maxVelocityRadiansPerSecond: 3.14), 6).ToList();
+    var robot = new RobotModel(new RobotPreset
+    {
+      Manufacturer = RobotManufacturer.UniversalRobots,
+      ModelName = "UR5e",
+      AxisCount = 6,
+      JointLimits = limits
+    });
+    var opts = new PlanningOptions { MaxJointStepRadians = 0.1, TimeStepSeconds = 0.04, MaxJointVelocityRadiansPerSecond = 0.5 };
+    var result = new JointLinearPlanner().Plan(new PlanningRequest(
+      robot, new JointState(new double[6]), new JointState(Enumerable.Repeat(1.0, 6).ToArray()), opts));
+    Assert.True(result.Success);
+    var pts = result.Trajectory!.Points;
+    var minDt = 0.1 / opts.MaxJointVelocityRadiansPerSecond;
+    for (var i = 1; i < pts.Count; i++)
+    {
+      var dt = pts[i].TimeSeconds - pts[i - 1].TimeSeconds;
+      Assert.True(dt >= minDt - 1e-9);
+      Assert.True(pts[i].TimeSeconds > pts[i - 1].TimeSeconds);
+    }
+    Assert.True(new TrajectoryValidator().Validate(result.Trajectory).IsValid);
   }
 }
 
