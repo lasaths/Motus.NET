@@ -1,9 +1,10 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>net8.0</TargetFramework>
-    <ImplicitUsings>enable</ImplicitUsings>
-    <Nullable>enable</Nullable>
+    <IsPackable>true</IsPackable>
+    <Description>Standalone .NET robotics motion-planning core: neutral robot model, joint states, trajectories, planning interfaces, validation, and JSON/CSV export.</Description>
+    <PackageTags>robotics;motion-planning;trajectory;kinematics;industrial-robots;dotnet</PackageTags>
+    <LangVersion>latest</LangVersion>
   </PropertyGroup>
 
 </Project>

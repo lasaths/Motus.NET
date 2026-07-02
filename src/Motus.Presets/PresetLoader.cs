@@ -13,30 +13,54 @@ public static class PresetLoader
         AllowTrailingCommas = true
     };
 
-    public static string DefaultResourcesPath =>
-        Path.Combine(AppContext.BaseDirectory, "resources", "robots");
+  public static string DefaultResourcesPath =>
+        Path.Combine(ResolvePluginRoot(), "resources", "robots");
 
-    public static RobotPreset LoadFromFile(string path)
+    private static string ResolvePluginRoot()
     {
-        var json = File.ReadAllText(path);
-        return LoadFromJson(json);
+        var assemblyPath = typeof(PresetLoader).Assembly.Location;
+        if (!string.IsNullOrEmpty(assemblyPath))
+        {
+            var dir = Path.GetDirectoryName(assemblyPath);
+            if (!string.IsNullOrEmpty(dir))
+                return dir;
+        }
+        return AppContext.BaseDirectory;
     }
 
-    public static RobotPreset LoadFromJson(string json)
+    public static RobotPreset LoadFromFile(string path) => LoadRobotModelFromFile(path).Preset;
+
+    public static RobotModel LoadRobotModelFromFile(string path)
+    {
+        var json = File.ReadAllText(path);
+        return LoadRobotModelFromJson(json, path);
+    }
+
+    public static RobotPreset LoadFromJson(string json) =>
+        LoadRobotModelFromJson(json, null).Preset;
+
+    public static RobotModel LoadRobotModelFromJson(string json, string? sourcePath = null)
     {
         var dto = JsonSerializer.Deserialize<PresetDto>(json, JsonOptions)
             ?? throw new InvalidOperationException("Empty preset JSON.");
-        return dto.ToPreset();
+        var preset = dto.ToPreset();
+        var collision = sourcePath is not null
+            ? CollisionPresetLoader.LoadFromDto(dto.CollisionLinks, sourcePath)
+            : null;
+        return new RobotModel(preset, collision);
     }
 
-    public static RobotPreset LoadByModelName(string modelName, string? resourcesRoot = null)
+    public static RobotPreset LoadByModelName(string modelName, string? resourcesRoot = null) =>
+        LoadRobotModelByName(modelName, resourcesRoot).Preset;
+
+    public static RobotModel LoadRobotModelByName(string modelName, string? resourcesRoot = null)
     {
         var root = resourcesRoot ?? DefaultResourcesPath;
         foreach (var file in Directory.EnumerateFiles(root, "*.json", SearchOption.AllDirectories))
         {
-            var preset = LoadFromFile(file);
-            if (string.Equals(preset.ModelName, modelName, StringComparison.OrdinalIgnoreCase))
-                return preset;
+            var model = LoadRobotModelFromFile(file);
+            if (string.Equals(model.Preset.ModelName, modelName, StringComparison.OrdinalIgnoreCase))
+                return model;
         }
         throw new FileNotFoundException($"No preset found for model '{modelName}' under {root}.");
     }
@@ -66,6 +90,7 @@ public static class PresetLoader
         public string? Notes { get; set; }
         public string? SourceNote { get; set; }
         public string? Disclaimer { get; set; }
+        public List<CollisionPresetLoader.CollisionLinkDto>? CollisionLinks { get; set; }
 
         public RobotPreset ToPreset()
         {

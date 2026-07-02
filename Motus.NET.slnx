@@ -1,14 +1,14 @@
-<Solution>
-  <Folder Name="/src/">
-    <Project Path="src/Motus.Core/Motus.Core.csproj" />
-    <Project Path="src/Motus.Geometry/Motus.Geometry.csproj" />
-    <Project Path="src/Motus.OMPL.Native/Motus.OMPL.Native.csproj" />
-    <Project Path="src/Motus.OMPL.NET/Motus.OMPL.NET.csproj" />
-    <Project Path="src/Motus.Presets/Motus.Presets.csproj" />
-  </Folder>
-  <Folder Name="/tests/">
-    <Project Path="tests/Motus.Core.Tests/Motus.Core.Tests.csproj" />
-    <Project Path="tests/Motus.OMPL.Tests/Motus.OMPL.Tests.csproj" />
-    <Project Path="tests/Motus.Presets.Tests/Motus.Presets.Tests.csproj" />
-  </Folder>
-</Solution>
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Motus.Core/Motus.Core.csproj" />
+    <Project Path="src/Motus.Geometry/Motus.Geometry.csproj" />
+    <Project Path="src/Motus.OMPL.Native/Motus.OMPL.Native.csproj" />
+    <Project Path="src/Motus.OMPL.NET/Motus.OMPL.NET.csproj" />
+    <Project Path="src/Motus.Presets/Motus.Presets.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Motus.Core.Tests/Motus.Core.Tests.csproj" />
+    <Project Path="tests/Motus.OMPL.Tests/Motus.OMPL.Tests.csproj" />
+    <Project Path="tests/Motus.Presets.Tests/Motus.Presets.Tests.csproj" />
+  </Folder>
+</Solution>

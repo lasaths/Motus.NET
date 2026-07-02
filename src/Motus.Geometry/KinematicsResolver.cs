@@ -4,14 +4,27 @@ namespace Motus.Geometry;
 
 public static class KinematicsResolver
 {
-    public static IForwardKinematics CreateForwardKinematics(RobotPreset preset) =>
-        new DhForwardKinematics(preset);
+    public static IFkSolver CreateFkSolver(RobotPreset preset, SerialJointChain? serialChain = null)
+    {
+        if (serialChain is not null)
+            return new SerialForwardKinematics(serialChain);
+        if (KinematicsProfiles.TryGet(preset, out var dh))
+            return new DhForwardKinematics(dh);
+        throw new InvalidOperationException($"No kinematics for model '{preset.ModelName}'. Load URDF or add a DH profile.");
+    }
 
-    public static IInverseKinematics CreateInverseKinematics(RobotPreset preset) =>
-        preset.Manufacturer == RobotManufacturer.UniversalRobots
-            ? new UrInverseKinematics(preset)
-            : new NumericalInverseKinematics(preset);
+    public static IForwardKinematics CreateForwardKinematics(RobotPreset preset, SerialJointChain? serialChain = null) =>
+        CreateFkSolver(preset, serialChain);
 
-    public static bool SupportsModel(RobotPreset preset) =>
-        KinematicsProfiles.TryGet(preset, out _);
+    public static IInverseKinematics CreateInverseKinematics(RobotPreset preset, SerialJointChain? serialChain = null)
+    {
+        if (serialChain is not null)
+            return new NumericalInverseKinematics(CreateFkSolver(preset, serialChain), preset);
+        if (preset.Manufacturer == RobotManufacturer.UniversalRobots && KinematicsProfiles.TryGet(preset, out _))
+            return new UrInverseKinematics(preset);
+        return new NumericalInverseKinematics(CreateFkSolver(preset), preset);
+    }
+
+    public static bool SupportsModel(RobotPreset preset, SerialJointChain? serialChain = null) =>
+        serialChain is not null || KinematicsProfiles.TryGet(preset, out _);
 }

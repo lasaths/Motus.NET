@@ -4,7 +4,8 @@ public enum CollisionShape
 {
     Sphere,
     Box,
-    Mesh  // PONYTAIL: Triangle mesh with AABB
+    Capsule,
+    Mesh
 }
 
 public sealed class CollisionObject
@@ -32,7 +33,7 @@ public sealed class CollisionObject
         Pose = pose;
         Shape = shape;
         ExtentX = extentX;
-        ExtentY = shape == CollisionShape.Box ? extentY : extentX;
+        ExtentY = shape == CollisionShape.Box ? extentY : shape == CollisionShape.Capsule ? extentY : extentX;
         ExtentZ = shape == CollisionShape.Box ? extentZ : extentX;
     }
     
@@ -57,6 +58,10 @@ public sealed class CollisionObject
 
     public static CollisionObject Box(string name, Frame pose, double halfX, double halfY, double halfZ) =>
         new(name, pose, CollisionShape.Box, halfX, halfY, halfZ);
+
+    /// <summary>Capsule aligned with local +Z; ExtentX = radius, ExtentY = half-length along Z.</summary>
+    public static CollisionObject Capsule(string name, Frame pose, double radiusMeters, double halfLengthMeters) =>
+        new(name, pose, CollisionShape.Capsule, radiusMeters, halfLengthMeters, 0);
     
     // PONYTAIL: Mesh factory
     public static CollisionObject Mesh(string name, Frame pose, List<double[]> vertices, List<int> indices) =>
@@ -80,15 +85,5 @@ public sealed class CollisionObject
         }
         
         return (min, max);
-    }
-}
-
-public sealed class CollisionScene
-{
-    public IReadOnlyList<CollisionObject> Objects { get; }
-
-    public CollisionScene(IReadOnlyList<CollisionObject>? objects = null)
-    {
-        Objects = objects ?? Array.Empty<CollisionObject>();
     }
 }

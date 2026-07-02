@@ -1,17 +1,23 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
+  <PropertyGroup>
+    <IsPackable>true</IsPackable>
+    <Description>JSON robot presets and URDF loader for Motus.NET with bundled UR and KUKA defaults.</Description>
+    <PackageTags>robotics;robot-presets;urdf;universal-robots;kuka;motion-planning;dotnet</PackageTags>
+  </PropertyGroup>
+
   <ItemGroup>
     <ProjectReference Include="..\Motus.Core\Motus.Core.csproj" />
+    <ProjectReference Include="..\Motus.Geometry\Motus.Geometry.csproj" />
   </ItemGroup>
 
   <ItemGroup>
-    <Content Include="..\..\resources\robots\**\*.json" Link="resources\robots\%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\..\resources\robots\**\*.json"
+             Link="resources\robots\%(RecursiveDir)%(Filename)%(Extension)"
+             CopyToOutputDirectory="PreserveNewest"
+             Pack="true"
+             PackagePath="contentFiles\any\any\resources\robots\%(RecursiveDir)%(Filename)%(Extension)"
+             PackageCopyToOutput="true" />
   </ItemGroup>
-
-  <PropertyGroup>
-    <TargetFramework>net8.0</TargetFramework>
-    <ImplicitUsings>enable</ImplicitUsings>
-    <Nullable>enable</Nullable>
-  </PropertyGroup>
 
 </Project>

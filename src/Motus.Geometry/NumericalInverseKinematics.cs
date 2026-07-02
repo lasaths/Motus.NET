@@ -2,17 +2,20 @@ using Motus.Core;
 
 namespace Motus.Geometry;
 
-/// <summary>Damped least-squares IK using the preset DH chain.</summary>
+/// <summary>Damped least-squares IK for any serial chain (DH or URDF).</summary>
 public sealed class NumericalInverseKinematics : IInverseKinematics
 {
-    private readonly DhForwardKinematics _fk;
+    private readonly IFkSolver _fk;
     private readonly BaseFrame _base;
     private readonly ToolFrame _tool;
     private readonly IReadOnlyList<JointLimit> _limits;
 
     public NumericalInverseKinematics(RobotPreset preset)
+        : this(KinematicsResolver.CreateFkSolver(preset), preset) { }
+
+    public NumericalInverseKinematics(IFkSolver fk, RobotPreset preset)
     {
-        _fk = new DhForwardKinematics(preset);
+        _fk = fk;
         _base = preset.BaseFrame;
         _tool = preset.ToolFrame;
         _limits = preset.JointLimits;
@@ -20,12 +23,26 @@ public sealed class NumericalInverseKinematics : IInverseKinematics
 
     public bool TrySolve(CartesianPose target, JointState seed, out JointState solution)
     {
-        if (TrySolveInternal(target, seed, out solution))
-            return true;
+        JointState? best = null;
+        var bestDelta = double.MaxValue;
 
-        // Random restarts from joint limits when the seed fails.
+        void Consider(JointState trySeed)
+        {
+            if (!TrySolveInternal(target, trySeed, out var candidate)) return;
+            var delta = MaxJointDelta(trySeed, candidate);
+            if (delta < bestDelta)
+            {
+                bestDelta = delta;
+                best = candidate;
+            }
+        }
+
+        Consider(seed);
+        Consider(PerturbSeed(seed, 1.0));
+        Consider(PerturbSeed(seed, -1.0));
+
         var rng = new Random(17);
-        for (var attempt = 0; attempt < 6; attempt++)
+        for (var attempt = 0; attempt < 10; attempt++)
         {
             var q = new double[_limits.Count];
             for (var i = 0; i < q.Length; i++)
@@ -33,24 +50,51 @@ public sealed class NumericalInverseKinematics : IInverseKinematics
                 var lim = _limits[i];
                 q[i] = lim.MinRadians + rng.NextDouble() * (lim.MaxRadians - lim.MinRadians);
             }
-            if (TrySolveInternal(target, new JointState(q), out solution))
-                return true;
+            Consider(new JointState(q));
+        }
+
+        if (best is not null)
+        {
+            solution = best;
+            return true;
         }
 
         solution = seed;
         return false;
     }
 
+    private static double MaxJointDelta(JointState a, JointState b)
+    {
+        var max = 0.0;
+        for (var i = 0; i < a.AxisCount; i++)
+            max = Math.Max(max, Math.Abs(b.Positions[i] - a.Positions[i]));
+        return max;
+    }
+
+    private JointState PerturbSeed(JointState seed, double fractionTowardLimits)
+    {
+        var q = new double[_limits.Count];
+        for (var i = 0; i < q.Length; i++)
+        {
+            var lim = _limits[i];
+            var span = lim.MaxRadians - lim.MinRadians;
+            var offset = span * 0.1 * fractionTowardLimits;
+            q[i] = Math.Clamp(seed.Positions[i] + offset, lim.MinRadians, lim.MaxRadians);
+        }
+        return new JointState(q);
+    }
+
     private bool TrySolveInternal(CartesianPose target, JointState seed, out JointState solution)
     {
         var q = (double[])seed.Positions.Clone();
         var targetM = Transforms.FromFrame(target.Tcp);
-        
-        // PONYTAIL: Adaptive convergence parameters
-        const int maxIter = 400;  // Increased from 200
-        double posTol = 5e-4;     // Relaxed from 2e-4
-        double rotTol = 5e-3;     // Relaxed from 2e-3
-        double lambda = 0.05;     // Damping parameter (adaptive below)
+
+        const int maxIter = 400;
+        const double posTol = 1e-2;
+        const double rotTol = 5e-2;
+        const double finalPosTol = 0.02;
+        const double finalRotTol = 0.15;
+        double lambda = 0.05;
         const double minLambda = 0.001;
         const double maxLambda = 0.5;
 
@@ -59,58 +103,38 @@ public sealed class NumericalInverseKinematics : IInverseKinematics
             var current = _fk.ComputeTcpTransform(q, _base.Frame, _tool.Frame);
             var posErr = PositionError(current, targetM);
             var rotErr = RotationError(current, targetM);
-            
-            // PONYTAIL: Check for convergence or stagnation
+
             if (posErr < posTol && rotErr < rotTol)
             {
                 solution = new JointState(Clamp(q));
                 return true;
             }
 
-            // PONYTAIL: Prevent infinite loops on stagnation
             if (iter > 50 && (posErr > 0.5 || rotErr > 1.0))
-            {
-                // PONYTAIL: Error not decreasing sufficiently, adjust lambda aggressively
                 lambda = Math.Min(lambda + 0.1, maxLambda);
-            }
 
             var j = Jacobian(q, targetM);
             var e = PoseErrorVector(current, targetM);
-            
-            // PONYTAIL: Higher damping for Cartesian-generated targets
-            var currentLambda = lambda;
-            if (iter < 20) currentLambda = Math.Max(currentLambda, 0.1);  // Start conservative
-            
+            var currentLambda = iter < 20 ? Math.Max(lambda, 0.1) : lambda;
             var dq = SolveDls(j, e, currentLambda);
-            
-            // PONYTAIL: Adaptive step size based on error
-            var stepScale = 1.0;
-            if (posErr > 0.1) stepScale = 0.8;  // Reduce step when far from target
-            
+            var stepScale = posErr > 0.1 ? 0.8 : 1.0;
+
             for (var i = 0; i < q.Length; i++)
                 q[i] += dq[i] * stepScale;
-            
+
             ClampInPlace(q);
-            
-            // PONYTAIL: Adaptive damping adjustment
+
             if (iter % 20 == 0)
             {
-                // PONYTAIL: Periodically adjust lambda based on convergence
                 if (posErr < 0.05) lambda = Math.Max(minLambda, lambda * 0.9);
                 else lambda = Math.Min(maxLambda, lambda * 1.1);
             }
         }
 
-        // PONYTAIL: Return best solution even if not converged
         solution = new JointState(Clamp(q));
-        
-        // PONYTAIL: Check if solution is "good enough" for use
         var finalCheck = _fk.ComputeTcpTransform(solution.Positions, _base.Frame, _tool.Frame);
-        var finalPosErr = PositionError(finalCheck, targetM);
-        var finalRotErr = RotationError(finalCheck, targetM);
-        
-        // PONYTAIL: Accept solutions within 5cm position, 0.1rad rotation error
-        return finalPosErr < 0.05 && finalRotErr < 0.1;
+        return PositionError(finalCheck, targetM) < finalPosTol
+            && RotationError(finalCheck, targetM) < finalRotTol;
     }
 
     private double[] Clamp(double[] q)

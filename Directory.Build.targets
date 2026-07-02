@@ -1,0 +1,8 @@
+<Project>
+
+  <!-- Imported after each project body, so IsPackable is final here -->
+  <ItemGroup Condition="'$(IsPackable)' == 'true'">
+    <None Include="$(MSBuildThisFileDirectory)README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,20 @@
+<?xml version="1.0"?>
+<robot name="prismatic_lift">
+  <link name="base_link"/>
+  <link name="lift_link"/>
+  <link name="tip_link"/>
+  <joint name="lift" type="prismatic">
+    <parent link="base_link"/>
+    <child link="lift_link"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="0" upper="0.5" velocity="0.5"/>
+  </joint>
+  <joint name="joint1" type="revolute">
+    <parent link="lift_link"/>
+    <child link="tip_link"/>
+    <origin xyz="0.15 0 0" rpy="0 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-3.14159" upper="3.14159" velocity="1"/>
+  </joint>
+</robot>

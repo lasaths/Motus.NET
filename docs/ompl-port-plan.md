@@ -1,13 +1,13 @@
 # OMPL Port Plan
 
-Long-term Motus will ship a **custom** OMPL .NET binding — not `Ompl.NetStandard.x64`.
+Today `Motus.OMPL.NET` is a pure C# planner. If a native OMPL binding is ever added, Motus would ship a **custom** OMPL .NET binding — not `Ompl.NetStandard.x64`.
 
-## Layering
+## Possible future native layering
 
 ```
 OMPL C++ library
     ↓
-Motus.OMPL.Native   (C ABI wrapper, no C++ types exported)
+native C ABI wrapper (C ABI, no C++ types exported)
     ↓
 Motus.OMPL.NET      (C# P/Invoke)
     ↓
@@ -35,4 +35,4 @@ Expose only what Motus needs first:
 
 ## Current status
 
-`Motus.OMPL.NET` ships a **pure C# RRT-Connect** planner behind `IPlanner`, with `PathSimplifier` for shortcut smoothing. `Motus.OMPL.Native` remains reserved for a future optional OMPL C++ ABI swap — no native build required today.
+`Motus.OMPL.NET` is the C# adapter layer. `Motus.OMPL.Native` exposes a C ABI (`native/include/motus_ompl.h`); the default build is a stub until OMPL C++ is linked with `MOTUS_USE_OMPL=ON`. A managed RRT-Connect fallback remains available for development and CI without native OMPL.

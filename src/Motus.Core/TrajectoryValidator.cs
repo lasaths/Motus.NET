@@ -39,8 +39,13 @@ public sealed class TrajectoryValidator : ITrajectoryValidator
             var val = pt.JointState.Validate(limits);
             if (!val.IsValid) errors.AddRange(val.Errors);
 
-            if (collision is not null && !collision.IsCollisionFree(pt.JointState, scene))
-                errors.Add($"Collision at t={pt.TimeSeconds:F4}s.");
+            if (collision is not null && scene.Objects.Count > 0)
+            {
+                if (!collision.IsCollisionFree(pt.JointState, scene))
+                    errors.Add($"Collision at t={pt.TimeSeconds:F4}s.");
+                if (prevPt is not null && !collision.SegmentCollisionFree(prevPt.JointState, pt.JointState, scene, 0.05))
+                    errors.Add($"Collision between t={prevPt.TimeSeconds:F4}s and t={pt.TimeSeconds:F4}s.");
+            }
 
             if (prevPt is not null)
             {

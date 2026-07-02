@@ -1,0 +1,47 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 9.0.x
+
+      - name: Restore
+        run: dotnet restore Motus.NET.slnx
+
+      - name: Build
+        run: dotnet build Motus.NET.slnx -c Release --no-restore
+
+      - name: Test
+        run: dotnet test Motus.NET.slnx -c Release --no-build --verbosity normal
+
+  native-ompl:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install OMPL
+        run: sudo apt-get update && sudo apt-get install -y libompl-dev cmake g++
+
+      - name: Build native OMPL library
+        working-directory: native
+        run: |
+          cmake -B build -DMOTUS_USE_OMPL=ON
+          cmake --build build --config Release
+
+      - name: Verify native library
+        working-directory: native/build
+        run: |
+          test -f libmotus_ompl_native.so || test -f libmotus_ompl_native.so.*
+          nm -D libmotus_ompl_native.so 2>/dev/null | grep motus_ompl_is_available

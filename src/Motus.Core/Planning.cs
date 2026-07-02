@@ -6,6 +6,8 @@ public sealed class PlanningOptions
     public double TimeStepSeconds { get; init; } = 0.04;
     public double MaxJointVelocityRadiansPerSecond { get; init; } = 1.5;
     public CollisionScene? CollisionScene { get; init; }
+    public ICollisionChecker? CollisionChecker { get; init; }
+    public bool RetimeTrajectory { get; init; }
 }
 
 public sealed class PlanningRequest

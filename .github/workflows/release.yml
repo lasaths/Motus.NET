@@ -1,0 +1,45 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 9.0.x
+
+      - name: Resolve version from tag
+        id: version
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Restore
+        run: dotnet restore Motus.NET.slnx
+
+      - name: Build
+        run: dotnet build Motus.NET.slnx -c Release --no-restore -p:Version=${{ steps.version.outputs.version }}
+
+      - name: Test
+        run: dotnet test Motus.NET.slnx -c Release --no-build --verbosity normal
+
+      - name: Pack
+        run: dotnet pack Motus.NET.slnx -c Release --no-build -p:Version=${{ steps.version.outputs.version }} -o artifacts
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" \
+            --title "Motus.NET ${{ steps.version.outputs.version }}" \
+            --notes "See CHANGELOG.md for details." \
+            artifacts/*.nupkg artifacts/*.snupkg

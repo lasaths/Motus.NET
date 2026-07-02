@@ -30,7 +30,7 @@ public static class KinematicsProfiles
             ? chain
             : throw new InvalidOperationException($"No kinematics profile for model '{preset.ModelName}'.");
 
-    // ponytail: one UR DH template, link lengths scaled per model row above
+    // UR models share one DH template; link lengths are scaled per model row above.
     private static KinematicsChain Ur(double d1, double a2, double a3, double d4, double d5, double d6)
     {
         var halfPi = Math.PI / 2;

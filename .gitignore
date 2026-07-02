@@ -1,7 +1,15 @@
 bin/
 obj/
+artifacts/
 .vs/
+.idea/
 *.user
 *.suo
+*.DotSettings.user
 TestResults/
 graphify-out/
+.env
+.env.*
+*.pfx
+*.key
+secrets.json

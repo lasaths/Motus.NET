@@ -51,7 +51,7 @@ public class RrtConnectTests
     }
 
     Assert.NotNull(scene);
-    var opts = new PlanningOptions { CollisionScene = scene, MaxJointStepRadians = 0.08 };
+    var opts = new PlanningOptions { CollisionScene = scene, MaxJointStepRadians = 0.08, CollisionChecker = checker };
     var planner = new RrtConnectPlanner(checker, new RrtConnectOptions { MaxIterations = 10000, RandomSeed = 11 });
     var result = planner.Plan(new PlanningRequest(robot, start, goal, opts));
     Assert.True(result.Success, string.Join("; ", result.Errors));
@@ -83,8 +83,8 @@ public class RrtConnectTests
   }
 
   [Fact]
-  public void NativeStatus_IsUnavailable()
+  public void NativeOmpl_IsUnavailableWithoutNativeBuild()
   {
-    Assert.False(Motus.OMPL.Native.OmplNativeStatus.IsAvailable);
+    Assert.False(Motus.OMPL.Native.NativeOmpl.IsAvailable);
   }
 }

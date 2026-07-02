@@ -26,29 +26,16 @@ public sealed class MeshCollisionChecker : ICollisionChecker
         
         var origins = _fk.ComputeLinkOrigins(state.Positions, _base.Frame);
         var radii = _fk.LinkRadiiMeters;
-        
-        foreach (var obj in scene.Objects)
-        {
-            for (var i = 0; i < origins.Count; i++)
-            {
-                if (Intersects(origins[i], radii[i], obj))
-                    return false;
-            }
-        }
-        return true;
+        return LinkEnvelopeCollision.SceneObstacleFree(origins, radii, scene, (link, r, obj) => Intersects(link, r, obj));
     }
 
     private void BuildBvhCache(CollisionScene scene)
     {
-        // PONYTAIL: BVH builder has indexing issues - disabled for now
-        // Falling back to AABB-only collision detection
-        // foreach (var meshObj in scene.Objects.Where(o => o.Shape == CollisionShape.Mesh))
-        // {
-        //     if (!_meshBvhCache.ContainsKey(meshObj.Name) && meshObj.MeshVertices != null)
-        //     {
-        //         _meshBvhCache[meshObj.Name] = BvhBuilder.Build(meshObj);
-        //     }
-        // }
+        foreach (var meshObj in scene.Objects.Where(o => o.Shape == CollisionShape.Mesh))
+        {
+            if (!_meshBvhCache.ContainsKey(meshObj.Name) && meshObj.MeshVertices is not null && meshObj.MeshIndices is not null)
+                _meshBvhCache[meshObj.Name] = BvhBuilder.Build(meshObj);
+        }
     }
 
     private bool SelfCollisionFree(JointState state)
@@ -121,14 +108,17 @@ public sealed class MeshCollisionChecker : ICollisionChecker
         
         // PONYTAIL: Narrow phase: SAT with potential triangles
         var potentialTriangles = bvh.GetPotentialTriangles(localSphereCenter, linkRadius);
-        foreach (var i in potentialTriangles)
+        foreach (var triIdx in potentialTriangles)
         {
-            if (mesh.MeshIndices == null || mesh.MeshVertices == null || i + 2 >= mesh.MeshIndices.Count)
+            if (mesh.MeshIndices is null || mesh.MeshVertices is null)
                 continue;
-            
-            var v0Idx = mesh.MeshIndices[i];
-            var v1Idx = mesh.MeshIndices[i + 1];
-            var v2Idx = mesh.MeshIndices[i + 2];
+            var baseIdx = triIdx * 3;
+            if (baseIdx + 2 >= mesh.MeshIndices.Count)
+                continue;
+
+            var v0Idx = mesh.MeshIndices[baseIdx];
+            var v1Idx = mesh.MeshIndices[baseIdx + 1];
+            var v2Idx = mesh.MeshIndices[baseIdx + 2];
             
             if (v0Idx >= mesh.MeshVertices.Count || v1Idx >= mesh.MeshVertices.Count || v2Idx >= mesh.MeshVertices.Count)
                 continue;

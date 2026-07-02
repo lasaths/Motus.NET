@@ -1,14 +1,15 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
+  <PropertyGroup>
+    <IsPackable>true</IsPackable>
+    <Description>OMPL adapter layer for Motus.NET: native RRT-Connect when built, managed fallback otherwise.</Description>
+    <PackageTags>robotics;motion-planning;rrt-connect;sampling-based-planning;ompl;dotnet</PackageTags>
+  </PropertyGroup>
+
   <ItemGroup>
     <ProjectReference Include="..\Motus.Core\Motus.Core.csproj" />
     <ProjectReference Include="..\Motus.Geometry\Motus.Geometry.csproj" />
+    <ProjectReference Include="..\Motus.OMPL.Native\Motus.OMPL.Native.csproj" />
   </ItemGroup>
-
-  <PropertyGroup>
-    <TargetFramework>net8.0</TargetFramework>
-    <ImplicitUsings>enable</ImplicitUsings>
-    <Nullable>enable</Nullable>
-  </PropertyGroup>
 
 </Project>

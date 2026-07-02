@@ -15,6 +15,14 @@
   "payloadKg": 5.0,
   "baseFrame": { "x": 0, "y": 0, "z": 0, "qw": 1 },
   "toolFrame": { "x": 0, "y": 0, "z": 0, "qw": 1, "name": "flange" },
+  "collisionLinks": [
+    { "link": 0, "shape": "capsule", "radius": 0.09, "length": 0.06 },
+    { "link": 1, "shape": "capsule", "radius": 0.085, "length": 0.22 },
+    { "link": 2, "shape": "capsule", "radius": 0.08, "length": 0.20 },
+    { "link": 3, "shape": "capsule", "radius": 0.07, "length": 0.12 },
+    { "link": 4, "shape": "capsule", "radius": 0.06, "length": 0.10 },
+    { "link": 5, "shape": "capsule", "radius": 0.05, "length": 0.08 }
+  ],
   "notes": "UR5e planning default",
   "sourceNote": "Approximate public datasheet values for visualization",
   "disclaimer": "Preset values are planning/visualization defaults only, not physical compatibility guarantees."

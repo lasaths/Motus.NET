@@ -34,6 +34,8 @@ public class TrueCartesianInterfaceTests
     Assert.Single(traj!.Points);
   }
 
+  private static JointState IkFriendlyStart => new(new[] { 0.0, -0.5, 1.0, -1.0, 0.0, 0.0 });
+
   [Fact]
   public void LIN_SmallLocalMove()
   {
@@ -41,7 +43,7 @@ public class TrueCartesianInterfaceTests
     var fk = new DhForwardKinematics(preset);
     var planner = new CartesianLinearPathPlanner(preset);
 
-    var startJoint = new JointState(new[] { 0.0, 0.0, 0.0, 0.0, 0.0, 0.0 });
+    var startJoint = IkFriendlyStart;
     var startPose = fk.ComputeTcp(startJoint, preset.BaseFrame, preset.ToolFrame);
 
     // PONYTAIL: 2cm local move along X
@@ -65,7 +67,7 @@ public class TrueCartesianInterfaceTests
     var fk = new DhForwardKinematics(preset);
     var planner = new CartesianLinearPathPlanner(preset);
 
-    var startJoint = new JointState(new[] { 0.0, 0.0, 0.0, 0.0, 0.0, 0.0 });
+    var startJoint = IkFriendlyStart;
     var startPos = fk.ComputeTcp(startJoint, preset.BaseFrame, preset.ToolFrame);
 
     // PONYTAIL: L-shaped toolpath, 2cm segments

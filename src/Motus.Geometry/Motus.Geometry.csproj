@@ -1,13 +1,13 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
+  <PropertyGroup>
+    <IsPackable>true</IsPackable>
+    <Description>Geometry for Motus.NET: serial-chain FK, numerical IK, URDF/DH kinematics, sphere collision, Cartesian planners.</Description>
+    <PackageTags>robotics;kinematics;forward-kinematics;inverse-kinematics;collision;motion-planning;dotnet</PackageTags>
+  </PropertyGroup>
+
   <ItemGroup>
     <ProjectReference Include="..\Motus.Core\Motus.Core.csproj" />
   </ItemGroup>
-
-  <PropertyGroup>
-    <TargetFramework>net8.0</TargetFramework>
-    <ImplicitUsings>enable</ImplicitUsings>
-    <Nullable>enable</Nullable>
-  </PropertyGroup>
 
 </Project>

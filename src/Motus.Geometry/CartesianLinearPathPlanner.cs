@@ -7,15 +7,22 @@ public sealed class CartesianLinearPathPlanner
 {
     private readonly RobotPreset _preset;
     private readonly IInverseKinematics _ik;
-    private readonly DhForwardKinematics _fk;
+    private readonly IFkSolver _fk;
     private readonly Random _rng;
+    private readonly BaseFrame _base;
+    private readonly ToolFrame _tool;
 
     public CartesianLinearPathPlanner(RobotPreset preset)
+        : this(preset, null) { }
+
+    public CartesianLinearPathPlanner(RobotPreset preset, SerialJointChain? chain)
     {
         _preset = preset;
-        _ik = KinematicsResolver.CreateInverseKinematics(preset);
-        _fk = new DhForwardKinematics(preset);
-        _rng = new Random(42);  // PONYTAIL: Deterministic for testing
+        _fk = KinematicsResolver.CreateFkSolver(preset, chain);
+        _ik = KinematicsResolver.CreateInverseKinematics(preset, chain);
+        _rng = new Random(42);
+        _base = preset.BaseFrame;
+        _tool = preset.ToolFrame;
     }
 
     /// <summary>Plan a straight-line TCP path from startPose to goalPose.</summary>
@@ -36,6 +43,9 @@ public sealed class CartesianLinearPathPlanner
         var dy = goalPos[1] - startPos[1];
         var dz = goalPos[2] - startPos[2];
         var distanceMeters = Math.Sqrt(dx * dx + dy * dy + dz * dz);
+        if (distanceMeters < 1e-9)
+            return new Trajectory(new RobotModel(_preset), [new TrajectoryPoint(0, startJoint)]);
+
         var steps = Math.Max(2, (int)Math.Ceiling(distanceMeters / stepMeters));
 
         var points = new List<TrajectoryPoint>(steps + 1);
@@ -56,16 +66,10 @@ public sealed class CartesianLinearPathPlanner
 
             // PONYTAIL: Try IK with geometric seed strategy
             JointState? solvedJoint = null;
-            for (var seedAttempts = 0; seedAttempts < 20 && solvedJoint is null; seedAttempts++)
+            for (var seedAttempts = 0; seedAttempts < 10 && solvedJoint is null; seedAttempts++)
             {
                 if (_ik.TrySolve(interpPose, seed, out var testJoint))
-                {
-                    var maxDelta = MaxJointDelta(currentJoint, testJoint);
-                    if (maxDelta < 3.0)  // PONYTAIL: Allow up to ~170° jumps to handle singularities
-                    {
-                        solvedJoint = testJoint;
-                    }
-                }
+                    solvedJoint = testJoint;
 
                 if (solvedJoint is null)
                 {
@@ -98,7 +102,7 @@ public sealed class CartesianLinearPathPlanner
             }
             else
             {
-                seed = GenerateGeometricSeed(solvedJoint, 5);  // Use perturbed search next iteration
+                seed = GenerateGeometricSeed(solvedJoint, 3);
             }
             currentJoint = solvedJoint;
             points.Add(new TrajectoryPoint(elapsedFrames++, currentJoint));
@@ -193,8 +197,8 @@ public sealed class CartesianLinearPathPlanner
         double aw, double ax, double ay, double az,
         double bw, double bx, double by, double bz, double t)
     {
-        // PONYTAIL: Quaternion SLERP
-var dot = aw * bw + ax * bx + ay * by + az * bz;
+        // Quaternion SLERP
+        var dot = aw * bw + ax * bx + ay * by + az * bz;
 
         if (dot < 0)
         {
@@ -233,39 +237,68 @@ var dot = aw * bw + ax * bx + ay * by + az * bz;
         return max;
     }
 
-    /// <summary>Generate geometric seed for IK solver with progressive search strategy.</summary>
-    /// <param name="currentJoint">Current joint configuration (for local search)</param>
-    /// <param name="attemptNumber">Retry attempt number (0-4: local, 5-19: global)</param>
-    /// <returns>Generated joint seed for next IK attempt</returns>
     private JointState GenerateGeometricSeed(JointState currentJoint, int attemptNumber)
     {
         var q = new double[_preset.AxisCount];
-        
-        // PONYTAIL: Attempts 0-4: Progressive perturbation around current joint (local search)
-        if (attemptNumber < 5)
+
+        if (attemptNumber < 3)
         {
-            // PONYTAIL: Grow perturbation radius with attempt number: 0.05 -> 0.25 rad
             var perturbationRadius = 0.05 + attemptNumber * 0.05;
-            
             for (var j = 0; j < q.Length; j++)
             {
                 var lim = _preset.JointLimits[j];
-                // Perturb current joint with gaussian-like distribution
                 var perturbation = (_rng.NextDouble() - 0.5) * 2.0 * perturbationRadius;
                 q[j] = Math.Clamp(currentJoint.Positions[j] + perturbation, lim.MinRadians, lim.MaxRadians);
             }
         }
-        // PONYTAIL: Attempts 5-19: Uniform workspace random (global search)
         else
         {
             for (var j = 0; j < q.Length; j++)
             {
                 var lim = _preset.JointLimits[j];
-                // Uniform random across joint limits
                 q[j] = lim.MinRadians + _rng.NextDouble() * (lim.MaxRadians - lim.MinRadians);
             }
         }
-        
+
         return new JointState(q);
+    }
+
+    /// <summary>Plan LIN from a Cartesian planning request (FK start pose → goal).</summary>
+    public PlanningResult PlanToResult(CartesianPlanningRequest request, double stepMeters = 0.005)
+    {
+        var robot = request.Robot;
+        var scene = request.CollisionScene ?? request.Options.CollisionScene;
+        var warnings = new List<string>();
+
+        if (!KinematicsResolver.SupportsModel(robot.Preset))
+            return PlanningResult.Failed(new[] { $"No kinematics profile for '{robot.Preset.ModelName}'." });
+
+        var startPose = new CartesianPose(Transforms.ToFrame(
+            _fk.ComputeTcpTransform(request.Start.Positions, _base.Frame, _tool.Frame)));
+        var traj = Plan(startPose, request.Goal, request.Start, stepMeters, continueOnIKFailure: false);
+        if (traj is null)
+            return PlanningResult.Failed(new[] { "Cartesian LIN planning failed (IK at intermediate poses)." });
+
+        var checker = request.Options.CollisionChecker;
+        if (PlanningCollision.SceneHasObstacles(scene) && checker is null)
+            checker = robot.CollisionModel is not null
+                ? new RobotMeshCollisionChecker(robot)
+                : new SphereCollisionChecker(robot.Preset);
+
+        if (PlanningCollision.SceneHasObstacles(scene))
+        {
+            if (checker is null)
+                return PlanningResult.Failed(new[] { "Collision scene provided but no collision checker available." });
+            var collisionFail = PlanningCollision.ValidateTrajectory(
+                traj, scene!, checker, request.Options.MaxJointStepRadians);
+            if (collisionFail is not null) return collisionFail;
+            warnings.Add("CartesianLinearPathPlanner: LIN path validated against collision scene.");
+        }
+
+        if (request.Options.RetimeTrajectory)
+            traj = TrajectoryRetimer.Retime(traj);
+
+        warnings.Add("CartesianLinearPathPlanner: true TCP-linear (LIN) motion.");
+        return PlanningResult.Succeeded(traj, warnings);
     }
 }

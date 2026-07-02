@@ -2,7 +2,7 @@ using Motus.Core;
 
 namespace Motus.Geometry;
 
-internal static class Transforms
+public static class Transforms
 {
     public static double[] Identity() =>
         [1, 0, 0, 0,
@@ -39,6 +39,17 @@ internal static class Transforms
             }
         }
         return r;
+    }
+
+    public static double[] TransformPoint(double[] m, double x, double y, double z)
+    {
+        return
+        [
+            m[0] * x + m[4] * y + m[8] * z + m[3],
+            m[1] * x + m[5] * y + m[9] * z + m[7],
+            m[2] * x + m[6] * y + m[10] * z + m[11],
+            1
+        ];
     }
 
     public static double[] FromFrame(Frame frame)
@@ -116,6 +127,55 @@ internal static class Transforms
             r[0], r[1], r[2], -(r[0] * tx + r[1] * ty + r[2] * tz),
             r[3], r[4], r[5], -(r[3] * tx + r[4] * ty + r[5] * tz),
             r[6], r[7], r[8], -(r[6] * tx + r[7] * ty + r[8] * tz),
+            0, 0, 0, 1
+        ];
+    }
+
+    public static double[] FromRpy(double x, double y, double z, double roll, double pitch, double yaw)
+    {
+        var t = FromRpyRotation(roll, pitch, yaw);
+        t[3] = x; t[7] = y; t[11] = z;
+        return t;
+    }
+
+    public static double[] FromRpyRotation(double roll, double pitch, double yaw)
+    {
+        var cr = Math.Cos(roll); var sr = Math.Sin(roll);
+        var cp = Math.Cos(pitch); var sp = Math.Sin(pitch);
+        var cy = Math.Cos(yaw); var sy = Math.Sin(yaw);
+        return
+        [
+            cy * cp, cy * sp * sr - sy * cr, cy * sp * cr + sy * sr, 0,
+            sy * cp, sy * sp * sr + cy * cr, sy * sp * cr - cy * sr, 0,
+            -sp, cp * sr, cp * cr, 0,
+            0, 0, 0, 1
+        ];
+    }
+
+    public static double[] FromPrismatic(double ax, double ay, double az, double distance)
+    {
+        var len = Math.Sqrt(ax * ax + ay * ay + az * az);
+        if (len < 1e-12) return Identity();
+        var m = Identity();
+        m[3] = ax / len * distance;
+        m[7] = ay / len * distance;
+        m[11] = az / len * distance;
+        return m;
+    }
+
+    public static double[] FromAxisAngle(double ax, double ay, double az, double theta)
+    {
+        var len = Math.Sqrt(ax * ax + ay * ay + az * az);
+        if (len < 1e-12) return Identity();
+        ax /= len; ay /= len; az /= len;
+        var c = Math.Cos(theta);
+        var s = Math.Sin(theta);
+        var t = 1 - c;
+        return
+        [
+            t * ax * ax + c, t * ax * ay - s * az, t * ax * az + s * ay, 0,
+            t * ax * ay + s * az, t * ay * ay + c, t * ay * az - s * ax, 0,
+            t * ax * az - s * ay, t * ay * az + s * ax, t * az * az + c, 0,
             0, 0, 0, 1
         ];
     }

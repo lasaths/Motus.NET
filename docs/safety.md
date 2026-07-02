@@ -15,6 +15,10 @@ Motus does **not**:
 - Send RTDE, RSI, or vendor motion commands
 - Bypass safety interlocks or speed limits on hardware
 
+## AI-assistance disclaimer
+
+This library and its robot presets were developed with AI assistance. All values are approximate and must be independently verified against official manufacturer datasheets and the real controller before any physical use.
+
 ## Preset disclaimer
 
 Robot presets are **planning and visualization defaults**. They are not certified for any specific physical installation. Users must independently verify:

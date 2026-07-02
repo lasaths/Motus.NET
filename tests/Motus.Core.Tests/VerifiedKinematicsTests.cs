@@ -158,4 +158,22 @@ public class VerifiedKinematicsTests
     var successRate = (double)successCount / runs;
     Assert.True(successRate > 0.9, $"Success rate {successRate:P1} below 90%");
   }
+
+  [Fact]
+  public void IK_Ur5e_FromHome_ExtendedPose()
+  {
+    var preset = PresetLoader.LoadByModelName("UR5e", ResourcesRoot);
+    var fk = new DhForwardKinematics(preset);
+    var ik = KinematicsResolver.CreateInverseKinematics(preset);
+    var home = new JointState(new double[6]);
+    var goalConfig = new JointState(new[] { 0.0, -0.02, 0.02, 0.0, 0.0, 0.0 });
+    var goalPose = fk.ComputeTcp(goalConfig, preset.BaseFrame, preset.ToolFrame);
+    Assert.True(ik.TrySolve(goalPose, home, out var solved), "IK from home should reach nearby extended pose");
+    var check = fk.ComputeTcp(solved, preset.BaseFrame, preset.ToolFrame);
+    var err = Math.Sqrt(
+      Math.Pow(check.Tcp.X - goalPose.Tcp.X, 2) +
+      Math.Pow(check.Tcp.Y - goalPose.Tcp.Y, 2) +
+      Math.Pow(check.Tcp.Z - goalPose.Tcp.Z, 2));
+    Assert.True(err < 0.01, $"FK error {err:F4}m");
+  }
 }

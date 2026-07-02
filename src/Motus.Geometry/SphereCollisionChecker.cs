@@ -1,17 +1,24 @@
 using Motus.Core;
+using Motus.Geometry;
 
 namespace Motus.Geometry;
 
-/// <summary>Sphere-envelope collision checker using DH link origins.</summary>
+/// <summary>Sphere-envelope collision checker using link origins.</summary>
 public sealed class SphereCollisionChecker : ICollisionChecker
 {
-    private readonly DhForwardKinematics _fk;
+    private readonly IFkSolver _fk;
     private readonly BaseFrame _base;
 
     public SphereCollisionChecker(RobotPreset preset)
+        : this(KinematicsResolver.CreateFkSolver(preset), preset.BaseFrame) { }
+
+    public SphereCollisionChecker(RobotPreset preset, SerialJointChain serialChain)
+        : this(KinematicsResolver.CreateFkSolver(preset, serialChain), preset.BaseFrame) { }
+
+    public SphereCollisionChecker(IFkSolver fk, BaseFrame baseFrame)
     {
-        _fk = new DhForwardKinematics(preset);
-        _base = preset.BaseFrame;
+        _fk = fk;
+        _base = baseFrame;
     }
 
     public bool IsCollisionFree(JointState state, CollisionScene scene)
@@ -19,15 +26,7 @@ public sealed class SphereCollisionChecker : ICollisionChecker
         if (!SelfCollisionFree(state)) return false;
         var origins = _fk.ComputeLinkOrigins(state.Positions, _base.Frame);
         var radii = _fk.LinkRadiiMeters;
-        foreach (var obj in scene.Objects)
-        {
-            for (var i = 0; i < origins.Count; i++)
-            {
-                if (Intersects(origins[i], radii[i], obj))
-                    return false;
-            }
-        }
-        return true;
+        return LinkEnvelopeCollision.SceneObstacleFree(origins, radii, scene, Intersects);
     }
 
     public bool SegmentCollisionFree(JointState from, JointState to, CollisionScene scene, double stepRadians)

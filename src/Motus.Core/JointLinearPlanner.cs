@@ -1,6 +1,6 @@
 namespace Motus.Core;
 
-/// <summary>Deterministic joint-space linear interpolation planner. No collision checking.</summary>
+/// <summary>Deterministic joint-space linear interpolation planner.</summary>
 public sealed class JointLinearPlanner : IPlanner
 {
     public PlanningResult Plan(PlanningRequest request)
@@ -9,6 +9,7 @@ public sealed class JointLinearPlanner : IPlanner
         var errors = new List<string>();
         var robot = request.Robot;
         var opts = request.Options;
+        var scene = opts.CollisionScene;
 
         if (request.Start.AxisCount != robot.Preset.AxisCount)
             errors.Add($"Start state has {request.Start.AxisCount} joints; robot expects {robot.Preset.AxisCount}.");
@@ -16,11 +17,28 @@ public sealed class JointLinearPlanner : IPlanner
             errors.Add($"Goal state has {request.Goal.AxisCount} joints; robot expects {robot.Preset.AxisCount}.");
         if (errors.Count > 0) return PlanningResult.Failed(errors);
 
+        if (PlanningCollision.SceneHasObstacles(scene) && opts.CollisionChecker is null)
+        {
+            return PlanningResult.Failed(new[]
+            {
+                "Collision scene provided but no ICollisionChecker in PlanningOptions. " +
+                "Supply CollisionChecker (e.g. SphereCollisionChecker) or use RrtConnectPlanner for obstacle avoidance."
+            });
+        }
+
         var startVal = request.Start.Validate(robot.Preset.JointLimits);
         var goalVal = request.Goal.Validate(robot.Preset.JointLimits);
         if (!startVal.IsValid) errors.AddRange(startVal.Errors.Select(e => $"Start: {e}"));
         if (!goalVal.IsValid) errors.AddRange(goalVal.Errors.Select(e => $"Goal: {e}"));
         if (errors.Count > 0) return PlanningResult.Failed(errors);
+
+        if (opts.CollisionChecker is not null && scene is not null)
+        {
+            if (!opts.CollisionChecker.IsCollisionFree(request.Start, scene))
+                return PlanningResult.Failed(new[] { "Start configuration is in collision." });
+            if (!opts.CollisionChecker.IsCollisionFree(request.Goal, scene))
+                return PlanningResult.Failed(new[] { "Goal configuration is in collision." });
+        }
 
         if (opts.MaxJointStepRadians <= 0)
             return PlanningResult.Failed(new[] { "MaxJointStepRadians must be positive." });
@@ -61,13 +79,23 @@ public sealed class JointLinearPlanner : IPlanner
                 var prev = points[^1].JointState.Positions;
                 for (var j = 0; j < n; j++)
                     maxJointDelta = Math.Max(maxJointDelta, Math.Abs(pos[j] - prev[j]));
-                // ponytail: stretch segment dt to respect velocity cap
                 t += Math.Max(opts.TimeStepSeconds, maxJointDelta / opts.MaxJointVelocityRadiansPerSecond);
             }
             points.Add(new TrajectoryPoint(t, state));
         }
 
-        warnings.Add("JointLinearPlanner: no collision checking.");
-        return PlanningResult.Succeeded(new Trajectory(robot, points), warnings);
+        var trajectory = new Trajectory(robot, points);
+        if (opts.CollisionChecker is not null && scene is not null)
+        {
+            var collisionFail = PlanningCollision.ValidateTrajectory(trajectory, scene, opts.CollisionChecker, opts.MaxJointStepRadians);
+            if (collisionFail is not null) return collisionFail;
+            warnings.Add("JointLinearPlanner: path validated against collision scene.");
+        }
+        else
+        {
+            warnings.Add("JointLinearPlanner: no collision scene.");
+        }
+
+        return PlanningResult.Succeeded(trajectory, warnings);
     }
 }

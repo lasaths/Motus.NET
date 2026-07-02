@@ -2,7 +2,7 @@ using Motus.Core;
 
 namespace Motus.Geometry;
 
-public sealed class DhForwardKinematics : IForwardKinematics
+public sealed class DhForwardKinematics : IFkSolver
 {
     private readonly KinematicsChain _chain;
 

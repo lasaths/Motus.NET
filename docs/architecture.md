@@ -14,14 +14,12 @@ Motus.Core (data model, IPlanner, validation, export)
 Motus.Geometry (FK/IK, collision, CartesianLinearPlanner)
     ↓
 Motus.OMPL.NET (RRT-Connect, path simplification)
-    ↓ future optional
-Motus.OMPL.Native → OMPL C++
 ```
 
 ## Motus.Core principles
 
 - **No UI dependencies** — pure .NET 8 class library
-- **Planners behind `IPlanner`** — `JointLinearPlanner` today; OMPL adapter later without changing GH workflow
+- **Planners behind `IPlanner`** — joint-linear, Cartesian-linear, and RRT-Connect implementations
 - **Presets are data** — JSON files loaded by Motus.Presets, not hardcoded switches
 - **Deterministic first planner** — joint-space linear interpolation with explicit step and timing options
 
@@ -31,13 +29,13 @@ Motus.OMPL.Native → OMPL C++
 |-----------|------|
 | `IPlanner` | Produce `PlanningResult` from `PlanningRequest` |
 | `ITrajectoryValidator` | Check trajectory against limits and timing |
-| `IForwardKinematics` / `IInverseKinematics` | Reserved for future FK/IK backends |
-| `ICollisionChecker` | Reserved; first planner skips collision |
+| `IForwardKinematics` / `IInverseKinematics` | DH FK and numerical IK (`Motus.Geometry`) |
+| `ICollisionChecker` | Sphere-envelope checking (`SphereCollisionChecker`) |
 
 ## Units
 
 Internal units: **radians**, **seconds**, **meters**. Conversion helpers live in `Units`.
 
-## OMPL (future)
+## OMPL
 
-OMPL remains optional. Motus.Core must compile and plan without it. See [ompl-port-plan.md](ompl-port-plan.md).
+`Motus.OMPL.NET` is the managed adapter over `Motus.OMPL.Native` (C ABI → OMPL C++). A managed RRT-Connect fallback runs when the native library is not built. See [ompl-port-plan.md](ompl-port-plan.md).
