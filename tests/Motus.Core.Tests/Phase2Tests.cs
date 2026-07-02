@@ -28,6 +28,23 @@ public class RobotCollisionTests
   }
 
   [Fact]
+  public void Ur10ePreset_LoadsCollisionLinks()
+  {
+    var model = PresetLoader.LoadRobotModelByName("UR10e", ResourcesRoot);
+    Assert.NotNull(model.CollisionModel);
+    Assert.Equal(6, model.CollisionModel!.Links.Count);
+  }
+
+  [Fact]
+  public void UrdfCollision_LoadsUr10eFixture()
+  {
+    var path = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "fixtures", "ur10e_collision.urdf"));
+    var urdf = UrdfRobotLoader.Load(path, new UrdfLoadOptions { BaseLink = "base_link", TipLink = "tool0" });
+    Assert.NotNull(urdf.CollisionModel);
+    Assert.True(urdf.CollisionModel!.Links.Count >= 2);
+  }
+
+  [Fact]
   public void UrdfCollision_LoadsFromFixture()
   {
     var path = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "fixtures", "ur5e_collision.urdf"));

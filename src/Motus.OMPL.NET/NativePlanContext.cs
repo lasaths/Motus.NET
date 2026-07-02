@@ -6,10 +6,10 @@ namespace Motus.OMPL.NET;
 
 internal sealed class NativePlanContext
 {
-    private readonly SphereCollisionChecker? _collision;
+    private readonly ICollisionChecker? _collision;
     private readonly CollisionScene _scene;
 
-    public NativePlanContext(SphereCollisionChecker? collision, CollisionScene scene)
+    public NativePlanContext(ICollisionChecker? collision, CollisionScene scene)
     {
         _collision = collision;
         _scene = scene;

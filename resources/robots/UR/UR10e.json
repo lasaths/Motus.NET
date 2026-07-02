@@ -43,20 +43,22 @@
   ],
   "reachMeters": 1.3,
   "payloadKg": 10,
-  "notes": "UR10e planning default",
   "baseFrame": {
     "x": 0,
     "y": 0,
     "z": 0,
     "qw": 1
   },
-  "toolFrame": {
-    "x": 0,
-    "y": 0,
-    "z": 0,
-    "qw": 1,
-    "name": "flange"
-  },
-  "sourceNote": "Approximate public datasheet values for visualization",
+  "toolFrame": { "x": 0, "y": 0, "z": 0, "qw": 1, "name": "flange" },
+  "collisionLinks": [
+    { "link": 0, "shape": "capsule", "radius": 0.10, "length": 0.08 },
+    { "link": 1, "shape": "capsule", "radius": 0.10, "length": 0.28 },
+    { "link": 2, "shape": "capsule", "radius": 0.095, "length": 0.26 },
+    { "link": 3, "shape": "capsule", "radius": 0.085, "length": 0.14 },
+    { "link": 4, "shape": "capsule", "radius": 0.075, "length": 0.12 },
+    { "link": 5, "shape": "capsule", "radius": 0.06, "length": 0.09 }
+  ],
+  "notes": "UR10e planning default",
+  "sourceNote": "Kinematics from Universal Robots ROS2 description; collision capsules approximate",
   "disclaimer": "Preset values are planning/visualization defaults only, not physical compatibility guarantees."
 }

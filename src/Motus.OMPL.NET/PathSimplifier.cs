@@ -8,7 +8,7 @@ public static class PathSimplifier
     public static IReadOnlyList<JointState> Simplify(
         IReadOnlyList<JointState> path,
         RobotModel robot,
-        SphereCollisionChecker? collision,
+        ICollisionChecker? collision,
         CollisionScene scene,
         double stepRadians)
     {

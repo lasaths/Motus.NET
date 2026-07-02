@@ -65,6 +65,41 @@ public class RrtConnectTests
   }
 
   [Fact]
+  public void PlansAroundObstacle_WithRobotMeshCheckerViaOptions()
+  {
+    var model = PresetLoader.LoadRobotModelByName("UR5e", ResourcesRoot);
+    var robot = model;
+    var start = new JointState(new double[6]);
+    var goal = new JointState(new[] { 0.6, -0.6, 0.6, -0.6, -0.6, 0.3 });
+    var checker = new RobotMeshCollisionChecker(model);
+    var candidates = new[]
+    {
+      new Frame(0.18, -0.22, 0.28),
+      new Frame(0.22, -0.18, 0.32),
+      new Frame(0.12, -0.28, 0.24),
+      new Frame(0.25, -0.30, 0.35),
+    };
+
+    CollisionScene? scene = null;
+    foreach (var pose in candidates)
+    {
+      var trial = new CollisionScene(new[] { CollisionObject.Sphere("block", pose, 0.05) });
+      if (checker.IsCollisionFree(start, trial) && checker.IsCollisionFree(goal, trial)
+          && !checker.SegmentCollisionFree(start, goal, trial, 0.08))
+      {
+        scene = trial;
+        break;
+      }
+    }
+
+    Assert.NotNull(scene);
+    var opts = new PlanningOptions { CollisionScene = scene, MaxJointStepRadians = 0.08, CollisionChecker = checker };
+    var planner = new RrtConnectPlanner(model.Preset, new RrtConnectOptions { MaxIterations = 10000, RandomSeed = 11 });
+    var result = planner.Plan(new PlanningRequest(robot, start, goal, opts));
+    Assert.True(result.Success, string.Join("; ", result.Errors));
+  }
+
+  [Fact]
   public void PathSimplifier_ReducesWaypoints()
   {
     var preset = PresetLoader.LoadByModelName("UR5e", ResourcesRoot);

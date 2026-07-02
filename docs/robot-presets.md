@@ -20,6 +20,7 @@ resources/robots/KUKA/   KR 6 R900, KR 10 R1100, … LBR iiwa 7/14
 | `payloadKg` | number? | Nominal payload |
 | `baseFrame` | object | x,y,z + quaternion (qw,qx,qy,qz) in meters |
 | `toolFrame` | object | Same + optional `name` |
+| `collisionLinks[]` | array? | Per-link capsule approximations for `RobotMeshCollisionChecker` |
 | `notes` | string? | Human notes |
 | `sourceNote` | string? | Verification reference |
 | `disclaimer` | string? | Defaults to planning-only disclaimer |

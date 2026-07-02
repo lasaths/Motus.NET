@@ -8,7 +8,7 @@ namespace Motus.OMPL.NET;
 /// <summary>Joint-space RRT-Connect via native OMPL when built; managed fallback otherwise.</summary>
 public sealed class RrtConnectPlanner : IPlanner
 {
-    private readonly SphereCollisionChecker? _collision;
+    private readonly ICollisionChecker? _defaultChecker;
     private readonly RrtConnectOptions _options;
 
     public RrtConnectPlanner(RobotPreset preset, RrtConnectOptions? options = null)
@@ -16,7 +16,7 @@ public sealed class RrtConnectPlanner : IPlanner
 
     public RrtConnectPlanner(RobotPreset preset, SerialJointChain? serialChain, RrtConnectOptions? options = null)
     {
-        _collision = KinematicsResolver.SupportsModel(preset, serialChain)
+        _defaultChecker = KinematicsResolver.SupportsModel(preset, serialChain)
             ? serialChain is null
                 ? new SphereCollisionChecker(preset)
                 : new SphereCollisionChecker(preset, serialChain)
@@ -24,11 +24,14 @@ public sealed class RrtConnectPlanner : IPlanner
         _options = options ?? new RrtConnectOptions();
     }
 
-    public RrtConnectPlanner(SphereCollisionChecker collision, RrtConnectOptions? options = null)
+    public RrtConnectPlanner(ICollisionChecker checker, RrtConnectOptions? options = null)
     {
-        _collision = collision;
+        _defaultChecker = checker;
         _options = options ?? new RrtConnectOptions();
     }
+
+    public RrtConnectPlanner(SphereCollisionChecker collision, RrtConnectOptions? options = null)
+        : this((ICollisionChecker)collision, options) { }
 
     public PlanningResult Plan(PlanningRequest request)
     {
@@ -41,8 +44,12 @@ public sealed class RrtConnectPlanner : IPlanner
         return PlanManaged(request);
     }
 
+    private static ICollisionChecker? ResolveChecker(PlanningRequest request, ICollisionChecker? defaultChecker) =>
+        request.Options.CollisionChecker ?? defaultChecker;
+
     private PlanningResult? TryNativePlan(PlanningRequest request)
     {
+        var checker = ResolveChecker(request, _defaultChecker);
         var robot = request.Robot;
         var limits = robot.Preset.JointLimits;
         var scene = request.Options.CollisionScene ?? new CollisionScene();
@@ -54,7 +61,7 @@ public sealed class RrtConnectPlanner : IPlanner
         var maxStates = Math.Max(16, _options.MaxPathStates);
         var buffer = new double[n * maxStates];
 
-        var ctx = new NativePlanContext(_collision, scene);
+        var ctx = new NativePlanContext(checker, scene);
         var handle = GCHandle.Alloc(ctx);
         try
         {
@@ -80,8 +87,8 @@ public sealed class RrtConnectPlanner : IPlanner
                 waypoints.Add(new JointState(q));
             }
 
-            var simplified = PathSimplifier.Simplify(waypoints, robot, _collision, scene, _options.StepRadians * 0.5);
-            return BuildTrajectory(robot, simplified, request.Options, _collision, usedNative: true);
+            var simplified = PathSimplifier.Simplify(waypoints, robot, checker, scene, _options.StepRadians * 0.5);
+            return BuildTrajectory(robot, simplified, request.Options, checker, usedNative: true);
         }
         finally
         {
@@ -91,6 +98,7 @@ public sealed class RrtConnectPlanner : IPlanner
 
     private PlanningResult PlanManaged(PlanningRequest request)
     {
+        var checker = ResolveChecker(request, _defaultChecker);
         var robot = request.Robot;
         var limits = robot.Preset.JointLimits;
         var scene = request.Options.CollisionScene ?? new CollisionScene();
@@ -100,11 +108,11 @@ public sealed class RrtConnectPlanner : IPlanner
         var goalVal = request.Goal.Validate(limits);
         if (!startVal.IsValid) return PlanningResult.Failed(startVal.Errors.Select(e => $"Start: {e}"));
         if (!goalVal.IsValid) return PlanningResult.Failed(goalVal.Errors.Select(e => $"Goal: {e}"));
-        if (_collision is not null)
+        if (checker is not null)
         {
-            if (!_collision.IsCollisionFree(request.Start, scene))
+            if (!checker.IsCollisionFree(request.Start, scene))
                 return PlanningResult.Failed(new[] { "Start configuration is in collision." });
-            if (!_collision.IsCollisionFree(request.Goal, scene))
+            if (!checker.IsCollisionFree(request.Goal, scene))
                 return PlanningResult.Failed(new[] { "Goal configuration is in collision." });
         }
 
@@ -119,15 +127,15 @@ public sealed class RrtConnectPlanner : IPlanner
                 return PlanningResult.Failed(new[] { "Planning cancelled." });
 
             var sample = Sample(rng, goal, limits);
-            var (extendedA, newIdxA) = Extend(treeA, sample, limits, scene);
-            if (extendedA && Connect(treeB, treeA.Nodes[newIdxA].Q, limits, scene, out var connectIdxB))
+            var (extendedA, newIdxA) = Extend(treeA, sample, limits, scene, checker);
+            if (extendedA && Connect(treeB, treeA.Nodes[newIdxA].Q, limits, scene, checker, out var connectIdxB))
             {
                 var pathA = Reconstruct(treeA, newIdxA);
                 var pathB = Reconstruct(treeB, connectIdxB);
                 pathB.Reverse();
                 var raw = pathA.Concat(pathB.Skip(1)).Select(q => new JointState(q)).ToList();
-                var simplified = PathSimplifier.Simplify(raw, robot, _collision, scene, _options.StepRadians * 0.5);
-                return BuildTrajectory(robot, simplified, request.Options, _collision, usedNative: false);
+                var simplified = PathSimplifier.Simplify(raw, robot, checker, scene, _options.StepRadians * 0.5);
+                return BuildTrajectory(robot, simplified, request.Options, checker, usedNative: false);
             }
 
             (treeA, treeB) = (treeB, treeA);
@@ -145,34 +153,37 @@ public sealed class RrtConnectPlanner : IPlanner
         return q;
     }
 
-    private (bool extended, int newIndex) Extend(RrtTree tree, double[] target, IReadOnlyList<JointLimit> limits, CollisionScene scene)
+    private (bool extended, int newIndex) Extend(
+        RrtTree tree, double[] target, IReadOnlyList<JointLimit> limits, CollisionScene scene, ICollisionChecker? checker)
     {
         var nearest = Nearest(tree, target);
         var steered = Steer(tree.Nodes[nearest].Q, target, limits);
         if (ConfigurationDistance(tree.Nodes[nearest].Q, steered) < 1e-12) return (false, nearest);
-        if (!SegmentFree(tree.Nodes[nearest].Q, steered, scene)) return (false, nearest);
+        if (!SegmentFree(tree.Nodes[nearest].Q, steered, scene, checker)) return (false, nearest);
         tree.Nodes.Add(new RrtNode(steered, nearest));
         return (true, tree.Nodes.Count - 1);
     }
 
-    private bool Connect(RrtTree tree, double[] target, IReadOnlyList<JointLimit> limits, CollisionScene scene, out int connectIndex)
+    private bool Connect(
+        RrtTree tree, double[] target, IReadOnlyList<JointLimit> limits, CollisionScene scene,
+        ICollisionChecker? checker, out int connectIndex)
     {
         connectIndex = Nearest(tree, target);
         while (ConfigurationDistance(tree.Nodes[connectIndex].Q, target) > _options.ConnectThresholdRadians)
         {
             var steered = Steer(tree.Nodes[connectIndex].Q, target, limits);
             if (ConfigurationDistance(tree.Nodes[connectIndex].Q, steered) < 1e-12) break;
-            if (!SegmentFree(tree.Nodes[connectIndex].Q, steered, scene)) return false;
+            if (!SegmentFree(tree.Nodes[connectIndex].Q, steered, scene, checker)) return false;
             tree.Nodes.Add(new RrtNode(steered, connectIndex));
             connectIndex = tree.Nodes.Count - 1;
         }
         return ConfigurationDistance(tree.Nodes[connectIndex].Q, target) <= _options.ConnectThresholdRadians;
     }
 
-    private bool SegmentFree(double[] from, double[] to, CollisionScene scene)
+    private bool SegmentFree(double[] from, double[] to, CollisionScene scene, ICollisionChecker? checker)
     {
-        if (_collision is null) return true;
-        return _collision.SegmentCollisionFree(new JointState(from), new JointState(to), scene, _options.StepRadians);
+        if (checker is null) return true;
+        return checker.SegmentCollisionFree(new JointState(from), new JointState(to), scene, _options.StepRadians);
     }
 
     private static int Nearest(RrtTree tree, double[] target)
@@ -231,16 +242,16 @@ public sealed class RrtConnectPlanner : IPlanner
 
     private static PlanningResult BuildTrajectory(
         RobotModel robot, IReadOnlyList<JointState> waypoints, PlanningOptions opts,
-        SphereCollisionChecker? collision, bool usedNative)
+        ICollisionChecker? checker, bool usedNative)
     {
-        var segmentOpts = collision is not null && PlanningCollision.SceneHasObstacles(opts.CollisionScene)
+        var segmentOpts = checker is not null && PlanningCollision.SceneHasObstacles(opts.CollisionScene)
             ? new PlanningOptions
             {
                 MaxJointStepRadians = opts.MaxJointStepRadians,
                 TimeStepSeconds = opts.TimeStepSeconds,
                 MaxJointVelocityRadiansPerSecond = opts.MaxJointVelocityRadiansPerSecond,
                 CollisionScene = opts.CollisionScene,
-                CollisionChecker = collision
+                CollisionChecker = checker
             }
             : opts;
         var planner = new JointLinearPlanner();
@@ -261,7 +272,7 @@ public sealed class RrtConnectPlanner : IPlanner
         var warnings = new List<string> { "RrtConnectPlanner: joint-space RRT-Connect path." };
         if (!usedNative)
             warnings.Add(NativeOmpl.StatusMessage);
-        if (collision is null)
+        if (checker is null)
             warnings.Add("RRT-Connect ran without collision checker (no kinematics chain).");
         return PlanningResult.Succeeded(new Trajectory(robot, points), warnings);
     }
