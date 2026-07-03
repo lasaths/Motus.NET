@@ -14,6 +14,7 @@ Licensed under [MIT](LICENSE).
 dotnet add package Motus.Core
 dotnet add package Motus.Geometry
 dotnet add package Motus.OMPL.NET
+dotnet add package Motus.OMPL.Native
 dotnet add package Motus.Presets
 ```
 

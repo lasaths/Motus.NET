@@ -1,9 +1,9 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>net8.0</TargetFramework>
-    <ImplicitUsings>enable</ImplicitUsings>
-    <Nullable>enable</Nullable>
+    <IsPackable>true</IsPackable>
+    <Description>C ABI stub for optional native OMPL; consumed by Motus.OMPL.NET.</Description>
+    <PackageTags>robotics;motion-planning;ompl;native;dotnet</PackageTags>
   </PropertyGroup>
 
 </Project>
