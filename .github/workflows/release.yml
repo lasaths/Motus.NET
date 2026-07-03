@@ -5,12 +5,13 @@ on:
     tags:
       - "v*"
 
-permissions:
-  contents: write
-
 jobs:
   release:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write # NuGet trusted publishing (OIDC)
+
     steps:
       - uses: actions/checkout@v4
 
@@ -35,11 +36,38 @@ jobs:
       - name: Pack
         run: dotnet pack Motus.NET.slnx -c Release --no-build -p:Version=${{ steps.version.outputs.version }} -o artifacts
 
+      - name: NuGet login (trusted publishing)
+        uses: NuGet/login@v1
+        id: login
+        with:
+          user: lasaths
+
+      - name: Push to NuGet
+        run: |
+          dotnet nuget push artifacts/*.nupkg \
+            --api-key "${{ steps.login.outputs.NUGET_API_KEY }}" \
+            --source https://api.nuget.org/v3/index.json \
+            --skip-duplicate
+          dotnet nuget push artifacts/*.snupkg \
+            --api-key "${{ steps.login.outputs.NUGET_API_KEY }}" \
+            --source https://api.nuget.org/v3/index.json \
+            --skip-duplicate
+
+      - name: Extract release notes
+        id: notes
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          perl -0ne "print \$1 if /## \[$VERSION\][^\n]*\n(.*?)(?=\n## \[|\z)/s" CHANGELOG.md > release-notes.md
+          if [ ! -s release-notes.md ]; then
+            echo "No CHANGELOG section for $VERSION" >&2
+            exit 1
+          fi
+
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh release create "${GITHUB_REF_NAME}" \
             --title "Motus.NET ${{ steps.version.outputs.version }}" \
-            --notes "See CHANGELOG.md for details." \
+            --notes-file release-notes.md \
             artifacts/*.nupkg artifacts/*.snupkg

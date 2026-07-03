@@ -7,11 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.3.1] - 2026-07-02
+## [0.3.1] - 2026-07-03
+
+### Added
+
+- UR10e preset `collisionLinks` and `tests/fixtures/ur10e_collision.urdf`
 
 ### Fixed
 
 - `RrtConnectPlanner` honors `PlanningOptions.CollisionChecker` (e.g. `RobotMeshCollisionChecker`) instead of always using internal sphere envelopes
+- `native-ompl` CI: CMake link against Ubuntu `libompl-dev`, OMPL 1.5 `PathGeometric` API compatibility
 
 ## [0.3.0] - 2026-07-02
 

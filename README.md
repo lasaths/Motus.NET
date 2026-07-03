@@ -67,6 +67,12 @@ cmake --build native/build
 
 Requires the .NET 9 SDK or newer to read the `.slnx` solution; the libraries target `net8.0`.
 
+## Releases
+
+Push a version tag (`v0.3.1`) to run [`.github/workflows/release.yml`](.github/workflows/release.yml): build, test, pack, publish to [nuget.org](https://www.nuget.org/profiles/lasaths) via [trusted publishing](https://learn.microsoft.com/en-us/nuget/nuget-org/trusted-publishing), and create a GitHub Release with `.nupkg` assets.
+
+Configure the nuget.org trusted publisher policy: owner `lasaths`, repo `Motus.NET`, workflow `release.yml`.
+
 ## Safety
 
 Motus does **not** send commands to physical robots. Robot presets and URDF imports are planning/visualization defaults — verify all limits and calibration before any hardware use. See [docs/safety.md](docs/safety.md).
