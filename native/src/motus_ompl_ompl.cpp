@@ -92,7 +92,8 @@ int motus_ompl_rrt_connect(
 
     auto path = std::static_pointer_cast<og::PathGeometric>(pathBase);
     const auto stateCount = path->getStateCount();
-    path->interpolate(std::min(static_cast<unsigned int>(max_states), stateCount));
+    path->interpolate(static_cast<unsigned int>(
+        std::min(static_cast<std::size_t>(max_states), stateCount)));
     const auto& states = path->getStates();
     int written = 0;
     for (const auto* st : states)
