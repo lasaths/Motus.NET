@@ -71,7 +71,11 @@ Requires the .NET 9 SDK or newer to read the `.slnx` solution; the libraries tar
 
 Push a version tag (`v0.3.1`) to run [`.github/workflows/release.yml`](.github/workflows/release.yml): build, test, pack, publish to [nuget.org](https://www.nuget.org/profiles/lasaths) via [trusted publishing](https://learn.microsoft.com/en-us/nuget/nuget-org/trusted-publishing), and create a GitHub Release with `.nupkg` assets.
 
-Configure the nuget.org trusted publisher policy: owner `lasaths`, repo `Motus.NET`, workflow `release.yml`.
+Configure the nuget.org trusted publisher policy (one-time):
+
+1. [nuget.org](https://www.nuget.org) → **Account** → **Trusted Publishing** → **Add**
+2. Provider: **GitHub**, owner `lasaths`, repository `Motus.NET`, workflow filename **`release.yml`** (exact match)
+3. Re-run the failed **Release** workflow on the tag after the policy is saved (or push the next tag)
 
 ## Safety
 

@@ -50,10 +50,14 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release create "${GITHUB_REF_NAME}" \
-            --title "Motus.NET ${{ steps.version.outputs.version }}" \
-            --notes-file release-notes.md \
-            artifacts/*.nupkg artifacts/*.snupkg
+          if gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
+            gh release upload "${GITHUB_REF_NAME}" artifacts/*.nupkg artifacts/*.snupkg --clobber
+          else
+            gh release create "${GITHUB_REF_NAME}" \
+              --title "Motus.NET ${{ steps.version.outputs.version }}" \
+              --notes-file release-notes.md \
+              artifacts/*.nupkg artifacts/*.snupkg
+          fi
 
       - name: NuGet login (trusted publishing)
         uses: NuGet/login@v1
