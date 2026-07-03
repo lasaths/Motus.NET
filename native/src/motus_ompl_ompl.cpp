@@ -6,6 +6,7 @@
 #include <ompl/base/spaces/RealVectorStateSpace.h>
 #include <ompl/geometric/planners/rrt/RRTConnect.h>
 #include <ompl/geometric/PathGeometric.h>
+#include <algorithm>
 #include <vector>
 
 namespace ob = ompl::base;
@@ -85,12 +86,14 @@ int motus_ompl_rrt_connect(
     if (!solved)
         return MOTUS_OMPL_ERR;
 
-    auto path = pdef->getSolutionPath();
-    if (!path)
+    auto pathBase = pdef->getSolutionPath();
+    if (!pathBase)
         return MOTUS_OMPL_ERR;
 
-    path->interpolate(std::min(max_states, static_cast<int>(path->getStateCount())));
-    const auto states = path->getStates();
+    auto path = std::static_pointer_cast<og::PathGeometric>(pathBase);
+    const auto stateCount = path->getStateCount();
+    path->interpolate(std::min(static_cast<unsigned int>(max_states), stateCount));
+    const auto& states = path->getStates();
     int written = 0;
     for (const auto* st : states)
     {
