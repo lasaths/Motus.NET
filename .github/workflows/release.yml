@@ -36,23 +36,6 @@ jobs:
       - name: Pack
         run: dotnet pack Motus.NET.slnx -c Release --no-build -p:Version=${{ steps.version.outputs.version }} -o artifacts
 
-      - name: NuGet login (trusted publishing)
-        uses: NuGet/login@v1
-        id: login
-        with:
-          user: lasaths
-
-      - name: Push to NuGet
-        run: |
-          dotnet nuget push artifacts/*.nupkg \
-            --api-key "${{ steps.login.outputs.NUGET_API_KEY }}" \
-            --source https://api.nuget.org/v3/index.json \
-            --skip-duplicate
-          dotnet nuget push artifacts/*.snupkg \
-            --api-key "${{ steps.login.outputs.NUGET_API_KEY }}" \
-            --source https://api.nuget.org/v3/index.json \
-            --skip-duplicate
-
       - name: Extract release notes
         id: notes
         run: |
@@ -71,3 +54,20 @@ jobs:
             --title "Motus.NET ${{ steps.version.outputs.version }}" \
             --notes-file release-notes.md \
             artifacts/*.nupkg artifacts/*.snupkg
+
+      - name: NuGet login (trusted publishing)
+        uses: NuGet/login@v1
+        id: login
+        with:
+          user: lasaths
+
+      - name: Push to NuGet
+        run: |
+          dotnet nuget push artifacts/*.nupkg \
+            --api-key "${{ steps.login.outputs.NUGET_API_KEY }}" \
+            --source https://api.nuget.org/v3/index.json \
+            --skip-duplicate
+          dotnet nuget push artifacts/*.snupkg \
+            --api-key "${{ steps.login.outputs.NUGET_API_KEY }}" \
+            --source https://api.nuget.org/v3/index.json \
+            --skip-duplicate
