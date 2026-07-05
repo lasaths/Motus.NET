@@ -47,7 +47,7 @@ public static class PresetLoader
         var collision = sourcePath is not null
             ? CollisionPresetLoader.LoadFromDto(dto.CollisionLinks, sourcePath)
             : null;
-        return new RobotModel(preset, collision);
+        return new RobotModel(preset, collision, BundledJointNames.TryGet(preset.ModelName));
     }
 
     public static RobotPreset LoadByModelName(string modelName, string? resourcesRoot = null) =>

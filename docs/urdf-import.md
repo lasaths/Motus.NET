@@ -46,3 +46,19 @@ Pair names can be robot link names or `CollisionBodies.RobotLink(index)` when ma
 - Serial chains only (no closed loops)
 - No mimic joints
 - xacro is not evaluated in-process — preprocess first
+
+## Visual verification
+
+Use the dev viewer ([urdf-loaders](https://github.com/gkjohnson/urdf-loaders)) to inspect Motus URDF fixtures and scrub joint angles:
+
+```bash
+cd tools/urdf-viewer
+npm install
+npm run dev
+```
+
+Open `http://localhost:5173`, pick a fixture, and adjust joint sliders. Each fixture loads a **home pose** and **bundled demo path** from [`tests/fixtures/viewer_presets.json`](../tests/fixtures/viewer_presets.json); the TCP trace is drawn in blue. Press **Play trajectory** to animate the demo, or **Home pose** to return to the default.
+
+Drop a Motus trajectory JSON export (`TrajectoryExport.ToJson`) onto the panel to replace the bundled path.
+
+Automated FK cross-check against urdf-loader runs in CI via `UrdfFkCrossCheckTests` (requires Node 22+ and `npm ci` in `tools/urdf-viewer`).

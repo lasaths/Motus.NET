@@ -28,14 +28,14 @@ public static class Transforms
     public static double[] Multiply(double[] a, double[] b)
     {
         var r = new double[16];
-        for (var col = 0; col < 4; col++)
+        for (var row = 0; row < 4; row++)
         {
-            for (var row = 0; row < 4; row++)
+            for (var col = 0; col < 4; col++)
             {
                 var sum = 0.0;
                 for (var k = 0; k < 4; k++)
-                    sum += a[row + k * 4] * b[k + col * 4];
-                r[row + col * 4] = sum;
+                    sum += a[row * 4 + k] * b[k * 4 + col];
+                r[row * 4 + col] = sum;
             }
         }
         return r;
@@ -45,9 +45,9 @@ public static class Transforms
     {
         return
         [
-            m[0] * x + m[4] * y + m[8] * z + m[3],
-            m[1] * x + m[5] * y + m[9] * z + m[7],
-            m[2] * x + m[6] * y + m[10] * z + m[11],
+            m[0] * x + m[1] * y + m[2] * z + m[3],
+            m[4] * x + m[5] * y + m[6] * z + m[7],
+            m[8] * x + m[9] * y + m[10] * z + m[11],
             1
         ];
     }

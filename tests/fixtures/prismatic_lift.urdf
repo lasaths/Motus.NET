@@ -1,8 +1,18 @@
 <?xml version="1.0"?>
 <robot name="prismatic_lift">
   <link name="base_link"/>
-  <link name="lift_link"/>
-  <link name="tip_link"/>
+  <link name="lift_link">
+    <visual>
+      <origin xyz="0 0 0.125" rpy="0 0 0"/>
+      <geometry><box size="0.12 0.12 0.25"/></geometry>
+    </visual>
+  </link>
+  <link name="tip_link">
+    <visual>
+      <origin xyz="0.075 0 0" rpy="0 0 0"/>
+      <geometry><box size="0.15 0.04 0.04"/></geometry>
+    </visual>
+  </link>
   <joint name="lift" type="prismatic">
     <parent link="base_link"/>
     <child link="lift_link"/>

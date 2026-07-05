@@ -1,0 +1,384 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Motus URDF Viewer</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Doto:wght@400;700&family=Space+Grotesk:wght@300;400;500&family=Space+Mono:wght@400;700&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      :root {
+        --black: #000000;
+        --surface: #111111;
+        --surface-raised: #1a1a1a;
+        --border: #222222;
+        --border-visible: #333333;
+        --text-disabled: #666666;
+        --text-secondary: #999999;
+        --text-primary: #e8e8e8;
+        --text-display: #ffffff;
+        --accent: #d71921;
+        --success: #4a9e5c;
+        --interactive: #5b9bf6;
+        --space-xs: 4px;
+        --space-sm: 8px;
+        --space-md: 16px;
+        --space-lg: 24px;
+        --space-xl: 32px;
+        --space-2xl: 48px;
+        --font-body: "Space Grotesk", "DM Sans", system-ui, sans-serif;
+        --font-data: "Space Mono", "JetBrains Mono", monospace;
+        --font-display: "Doto", "Space Mono", monospace;
+        --ease: cubic-bezier(0.25, 0.1, 0.25, 1);
+      }
+
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+
+      html, body {
+        height: 100%;
+        background: var(--black);
+        color: var(--text-primary);
+        font-family: var(--font-body);
+        font-weight: 400;
+        -webkit-font-smoothing: antialiased;
+      }
+
+      #app {
+        display: grid;
+        grid-template-columns: 1fr minmax(280px, 340px);
+        height: 100vh;
+        overflow: hidden;
+      }
+
+      #viewport-wrap {
+        position: relative;
+        min-width: 0;
+        background: var(--black);
+        border-right: 1px solid var(--border-visible);
+      }
+
+      #viewport { width: 100%; height: 100%; }
+
+      #viewport-overlay {
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+        padding: var(--space-lg);
+      }
+
+      .overlay-top {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        gap: var(--space-md);
+      }
+
+      .fixture-hero {
+        font-family: var(--font-display);
+        font-size: clamp(2rem, 4vw, 3.5rem);
+        font-weight: 700;
+        letter-spacing: -0.03em;
+        line-height: 1;
+        color: var(--text-display);
+        text-transform: lowercase;
+      }
+
+      .dof-badge {
+        font-family: var(--font-data);
+        font-size: 11px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--text-secondary);
+        border: 1px solid var(--border-visible);
+        padding: var(--space-xs) var(--space-sm);
+        align-self: flex-start;
+      }
+
+      .dof-badge span {
+        color: var(--text-display);
+        font-weight: 700;
+      }
+
+      #status-line {
+        font-family: var(--font-data);
+        font-size: 11px;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        color: var(--text-secondary);
+        align-self: flex-end;
+      }
+
+      #status-line[data-state="ok"] { color: var(--success); }
+      #status-line[data-state="err"] { color: var(--accent); }
+      #status-line[data-state="busy"] { color: var(--interactive); }
+
+      #panel {
+        display: flex;
+        flex-direction: column;
+        background: var(--surface);
+        overflow: hidden;
+      }
+
+      .panel-header {
+        padding: var(--space-lg) var(--space-lg) var(--space-md);
+        border-bottom: 1px solid var(--border);
+      }
+
+      .panel-label {
+        font-family: var(--font-data);
+        font-size: 11px;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        color: var(--text-secondary);
+        margin-bottom: var(--space-sm);
+      }
+
+      .panel-title {
+        font-size: 18px;
+        font-weight: 500;
+        color: var(--text-display);
+        letter-spacing: -0.01em;
+      }
+
+      .panel-body {
+        flex: 1;
+        overflow-y: auto;
+        padding: var(--space-lg);
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-xl);
+      }
+
+      .field-group { display: flex; flex-direction: column; gap: var(--space-sm); }
+
+      select {
+        appearance: none;
+        width: 100%;
+        padding: var(--space-sm) var(--space-md);
+        background: var(--black);
+        color: var(--text-primary);
+        border: 1px solid var(--border-visible);
+        border-radius: 4px;
+        font-family: var(--font-data);
+        font-size: 13px;
+        cursor: pointer;
+        transition: border-color 200ms var(--ease);
+      }
+
+      select:hover, select:focus {
+        border-color: var(--text-secondary);
+        outline: none;
+      }
+
+      #joints {
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-md);
+      }
+
+      .joint-row {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        grid-template-rows: auto auto;
+        gap: var(--space-xs) var(--space-sm);
+        align-items: center;
+      }
+
+      .joint-name {
+        font-family: var(--font-data);
+        font-size: 11px;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        color: var(--text-secondary);
+        grid-column: 1;
+      }
+
+      .joint-val {
+        font-family: var(--font-data);
+        font-size: 14px;
+        font-weight: 700;
+        color: var(--text-display);
+        font-variant-numeric: tabular-nums;
+        grid-column: 2;
+        text-align: right;
+      }
+
+      .joint-val::after {
+        content: " rad";
+        font-size: 10px;
+        font-weight: 400;
+        color: var(--text-disabled);
+      }
+
+      input[type="range"] {
+        grid-column: 1 / -1;
+        width: 100%;
+        height: 2px;
+        appearance: none;
+        background: var(--border-visible);
+        border-radius: 0;
+        cursor: pointer;
+      }
+
+      input[type="range"]::-webkit-slider-thumb {
+        appearance: none;
+        width: 12px;
+        height: 12px;
+        border-radius: 2px;
+        background: var(--text-display);
+        border: 1px solid var(--border-visible);
+        transition: background 150ms var(--ease);
+      }
+
+      input[type="range"]:hover::-webkit-slider-thumb {
+        background: var(--interactive);
+      }
+
+      input[type="range"]::-moz-range-thumb {
+        width: 12px;
+        height: 12px;
+        border-radius: 2px;
+        background: var(--text-display);
+        border: 1px solid var(--border-visible);
+      }
+
+      #drop-zone {
+        padding: var(--space-lg);
+        border: 1px dashed var(--border-visible);
+        text-align: left;
+        cursor: pointer;
+        transition: border-color 200ms var(--ease), color 200ms var(--ease);
+      }
+
+      #drop-zone:hover,
+      #drop-zone.drag {
+        border-color: var(--text-secondary);
+        color: var(--text-primary);
+      }
+
+      #drop-zone .dz-label {
+        font-family: var(--font-data);
+        font-size: 11px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--text-secondary);
+        margin-bottom: var(--space-xs);
+      }
+
+      #drop-zone .dz-hint {
+        font-size: 13px;
+        color: var(--text-disabled);
+        line-height: 1.4;
+      }
+
+      #drop-zone[data-state="ok"] .dz-hint { color: var(--success); }
+      #drop-zone[data-state="err"] .dz-hint { color: var(--accent); }
+
+      .panel-footer {
+        padding: var(--space-md) var(--space-lg) var(--space-lg);
+        border-top: 1px solid var(--border);
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-sm);
+      }
+
+      button {
+        width: 100%;
+        padding: var(--space-sm) var(--space-md);
+        background: transparent;
+        color: var(--text-primary);
+        border: 1px solid var(--border-visible);
+        border-radius: 4px;
+        font-family: var(--font-data);
+        font-size: 11px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        cursor: pointer;
+        transition: border-color 200ms var(--ease), color 200ms var(--ease);
+      }
+
+      button:hover:not(:disabled) {
+        border-color: var(--text-secondary);
+        color: var(--text-display);
+      }
+
+      button:disabled {
+        opacity: 0.35;
+        cursor: not-allowed;
+      }
+
+      button.primary {
+        border-color: var(--text-display);
+        color: var(--text-display);
+      }
+
+      button.primary:hover:not(:disabled) {
+        background: var(--text-display);
+        color: var(--black);
+      }
+
+      .btn-row {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: var(--space-sm);
+      }
+
+      @media (max-width: 720px) {
+        #app {
+          grid-template-columns: 1fr;
+          grid-template-rows: 55vh 1fr;
+        }
+        #viewport-wrap { border-right: none; border-bottom: 1px solid var(--border-visible); }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app">
+      <div id="viewport-wrap">
+        <div id="viewport"></div>
+        <div id="viewport-overlay">
+          <div class="overlay-top">
+            <div class="fixture-hero" id="fixture-hero">—</div>
+            <div class="dof-badge"><span id="dof-count">0</span> joints</div>
+          </div>
+          <div id="status-line" data-state="busy">[INITIALIZING]</div>
+        </div>
+      </div>
+      <aside id="panel">
+        <header class="panel-header">
+          <div class="panel-label">Motus.NET</div>
+          <div class="panel-title">URDF kinematics viewer</div>
+        </header>
+        <div class="panel-body">
+          <div class="field-group">
+            <label class="panel-label" for="fixture">Fixture</label>
+            <select id="fixture"></select>
+          </div>
+          <div class="field-group">
+            <label class="panel-label">Joint angles</label>
+            <div id="joints"></div>
+          </div>
+          <div id="drop-zone" data-state="">
+            <div class="dz-label">Trajectory import</div>
+            <div class="dz-hint" id="drop-hint">Drop Motus trajectory JSON export</div>
+          </div>
+        </div>
+        <footer class="panel-footer">
+          <div class="btn-row">
+            <button id="reset-btn" type="button">Home pose</button>
+            <button id="recenter-btn" type="button">Recenter</button>
+          </div>
+          <button id="play-btn" type="button" class="primary" disabled>Play trajectory</button>
+        </footer>
+      </aside>
+    </div>
+    <script type="module" src="/main.js"></script>
+  </body>
+</html>

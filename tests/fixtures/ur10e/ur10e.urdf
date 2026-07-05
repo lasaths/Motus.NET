@@ -1,0 +1,90 @@
+<?xml version="1.0"?>
+<!-- UR10e with visual meshes from Universal_Robots_ROS2_Description (BSD-3-Clause).
+     Kinematics: config/ur10e/default_kinematics.yaml
+     Visual offsets: config/ur10e/visual_parameters.yaml
+     Meshes: meshes/ur10e/visual/*.dae — run tools/urdf-viewer/scripts/fetch-ur10e-assets.mjs -->
+<robot name="ur10e">
+  <link name="base_link"/>
+  <link name="base_link_inertia">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 3.141592653589793"/>
+      <geometry><mesh filename="meshes/visual/base.dae"/></geometry>
+    </visual>
+  </link>
+  <link name="shoulder_link">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 3.141592653589793"/>
+      <geometry><mesh filename="meshes/visual/shoulder.dae"/></geometry>
+    </visual>
+  </link>
+  <link name="upper_arm_link">
+    <visual>
+      <origin xyz="0 0 0.1762" rpy="1.570796327 0 -1.570796327"/>
+      <geometry><mesh filename="meshes/visual/upperarm.dae"/></geometry>
+    </visual>
+  </link>
+  <link name="forearm_link">
+    <visual>
+      <origin xyz="0 0 0.0393" rpy="1.570796327 0 -1.570796327"/>
+      <geometry><mesh filename="meshes/visual/forearm.dae"/></geometry>
+    </visual>
+  </link>
+  <link name="wrist_1_link">
+    <visual>
+      <origin xyz="0 0 -0.135" rpy="1.570796327 0 0"/>
+      <geometry><mesh filename="meshes/visual/wrist1.dae"/></geometry>
+    </visual>
+  </link>
+  <link name="wrist_2_link">
+    <visual>
+      <origin xyz="0 0 -0.12" rpy="0 0 0"/>
+      <geometry><mesh filename="meshes/visual/wrist2.dae"/></geometry>
+    </visual>
+  </link>
+  <link name="wrist_3_link">
+    <visual>
+      <origin xyz="0 -0.0005 -0.1168" rpy="1.570796327 0 0"/>
+      <geometry><mesh filename="meshes/visual/wrist3.dae"/></geometry>
+    </visual>
+  </link>
+  <link name="tool0"/>
+
+  <joint name="base_link-base_link_inertia" type="fixed">
+    <parent link="base_link"/><child link="base_link_inertia"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+  </joint>
+  <joint name="shoulder_pan_joint" type="revolute">
+    <parent link="base_link_inertia"/><child link="shoulder_link"/>
+    <origin xyz="0 0 0.1807" rpy="0 0 0"/><axis xyz="0 0 1"/>
+    <limit lower="-6.283185307" upper="6.283185307" effort="330" velocity="2.094395102"/>
+  </joint>
+  <joint name="shoulder_lift_joint" type="revolute">
+    <parent link="shoulder_link"/><child link="upper_arm_link"/>
+    <origin xyz="0 0 0" rpy="1.570796327 0 0"/><axis xyz="0 0 1"/>
+    <limit lower="-6.283185307" upper="6.283185307" effort="330" velocity="2.094395102"/>
+  </joint>
+  <joint name="elbow_joint" type="revolute">
+    <parent link="upper_arm_link"/><child link="forearm_link"/>
+    <origin xyz="-0.6127 0 0" rpy="0 0 0"/><axis xyz="0 0 1"/>
+    <limit lower="-3.141592654" upper="3.141592654" effort="150" velocity="3.141592654"/>
+  </joint>
+  <joint name="wrist_1_joint" type="revolute">
+    <parent link="forearm_link"/><child link="wrist_1_link"/>
+    <origin xyz="-0.57155 0 0.17415" rpy="0 0 0"/><axis xyz="0 0 1"/>
+    <limit lower="-6.283185307" upper="6.283185307" effort="56" velocity="3.141592654"/>
+  </joint>
+  <joint name="wrist_2_joint" type="revolute">
+    <parent link="wrist_1_link"/><child link="wrist_2_link"/>
+    <origin xyz="0 -0.11985 0" rpy="1.570796327 0 0"/><axis xyz="0 0 1"/>
+    <limit lower="-6.283185307" upper="6.283185307" effort="56" velocity="3.141592654"/>
+  </joint>
+  <joint name="wrist_3_joint" type="revolute">
+    <parent link="wrist_2_link"/><child link="wrist_3_link"/>
+    <origin xyz="0 0.11655 0" rpy="1.570796327 3.141592654 3.141592654"/><axis xyz="0 0 1"/>
+    <limit lower="-6.283185307" upper="6.283185307" effort="56" velocity="3.141592654"/>
+  </joint>
+  <joint name="wrist_3_link-tool0_fixed_joint" type="fixed">
+    <parent link="wrist_3_link"/><child link="tool0"/>
+    <origin xyz="0 0 0" rpy="1.570796327 0 0"/>
+  </joint>
+</robot>

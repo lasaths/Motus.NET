@@ -23,6 +23,7 @@ public class RobotCollisionTests
     var model = PresetLoader.LoadRobotModelByName("UR5e", ResourcesRoot);
     var checker = new RobotMeshCollisionChecker(model);
     var start = new JointState(new double[6]);
+    Assert.True(checker.IsCollisionFree(start, new CollisionScene()), "home config should be self-collision-free");
     var table = CollisionObject.Box("table", new Frame(2, 2, 2), 0.5, 0.5, 0.05);
     Assert.True(checker.IsCollisionFree(start, new CollisionScene(new[] { table })));
   }

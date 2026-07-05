@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.3] - 2026-07-05
+
+### Added
+
+- `RobotModel.JointNames` metadata for URDF chain order and bundled UR presets (`BundledJointNames`)
+- `TrajectoryExport` emits `jointNames` and optional per-point named `joints` map for viewer round-trip
+- URDF FK cross-check tests (`UrdfFkCrossCheckTests`, `fk_cases.json`) and `viewer_presets.json` home/demo paths
+- Dev URDF viewer (`tools/urdf-viewer`) with TCP path, named joint export, and Z-up handling
+
+### Fixed
+
+- `Transforms.Multiply` / `TransformPoint` column-major composition bug affecting FK and collision poses
+- `CartesianLinearPathPlanner` LIN trajectories retimed via `TrajectoryRetimer` (seconds, not frame indices)
+- `RobotMeshCollisionChecker` accepts optional `SerialJointChain` for URDF kinematics
+
+### Changed
+
+- `PresetLoader` attaches joint names to bundled robot models
+- `UrdfRobotLoader.ToModel()` passes through `JointNames`
+- Version bumped to **0.3.3**
+
 ## [0.3.2] - 2026-07-03
 
 ### Fixed
@@ -82,7 +103,8 @@ Initial public release.
 - **Motus.Presets** — JSON preset loader with bundled UR and KUKA defaults
   (approximate public datasheet values for planning/visualization only).
 
-[Unreleased]: https://github.com/lasaths/Motus.NET/compare/v0.3.2...HEAD
+[Unreleased]: https://github.com/lasaths/Motus.NET/compare/v0.3.3...HEAD
+[0.3.3]: https://github.com/lasaths/Motus.NET/compare/v0.3.2...v0.3.3
 [0.3.2]: https://github.com/lasaths/Motus.NET/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/lasaths/Motus.NET/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/lasaths/Motus.NET/compare/v0.2.0...v0.3.0

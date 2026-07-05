@@ -1,0 +1,93 @@
+[
+  {
+    "id": "two_link_home",
+    "urdfFile": "two_link.urdf",
+    "baseLink": "base_link",
+    "tipLink": "tip_link",
+    "joints": { "joint1": 0.0, "joint2": 0.0 }
+  },
+  {
+    "id": "two_link_mid",
+    "urdfFile": "two_link.urdf",
+    "baseLink": "base_link",
+    "tipLink": "tip_link",
+    "joints": { "joint1": 0.3, "joint2": -0.5 }
+  },
+  {
+    "id": "prismatic_lift_home",
+    "urdfFile": "prismatic_lift.urdf",
+    "baseLink": "base_link",
+    "tipLink": "tip_link",
+    "joints": { "lift": 0.0, "joint1": 0.0 }
+  },
+  {
+    "id": "prismatic_lift_extended",
+    "urdfFile": "prismatic_lift.urdf",
+    "baseLink": "base_link",
+    "tipLink": "tip_link",
+    "joints": { "lift": 0.4, "joint1": 0.0 }
+  },
+  {
+    "id": "prismatic_lift_rotated",
+    "urdfFile": "prismatic_lift.urdf",
+    "baseLink": "base_link",
+    "tipLink": "tip_link",
+    "joints": { "lift": 0.2, "joint1": 1.0 }
+  },
+  {
+    "id": "ur5e_home",
+    "urdfFile": "ur5e_collision.urdf",
+    "baseLink": "base_link",
+    "tipLink": "tool0",
+    "joints": {
+      "shoulder_pan": 0.0,
+      "shoulder_lift": 0.0,
+      "elbow": 0.0,
+      "wrist_1": 0.0,
+      "wrist_2": 0.0,
+      "wrist_3": 0.0
+    }
+  },
+  {
+    "id": "ur5e_mid",
+    "urdfFile": "ur5e_collision.urdf",
+    "baseLink": "base_link",
+    "tipLink": "tool0",
+    "joints": {
+      "shoulder_pan": 0.1,
+      "shoulder_lift": -0.5,
+      "elbow": 0.8,
+      "wrist_1": -0.3,
+      "wrist_2": -0.4,
+      "wrist_3": 0.2
+    }
+  },
+  {
+    "id": "ur10e_home",
+    "urdfFile": "ur10e_collision.urdf",
+    "baseLink": "base_link",
+    "tipLink": "tool0",
+    "joints": {
+      "shoulder_pan": 0.0,
+      "shoulder_lift": 0.0,
+      "elbow": 0.0,
+      "wrist_1": 0.0,
+      "wrist_2": 0.0,
+      "wrist_3": 0.0
+    }
+  },
+  {
+    "id": "ur10e_mid",
+    "urdfFile": "ur10e_collision.urdf",
+    "baseLink": "base_link",
+    "tipLink": "tool0",
+    "joints": {
+      "shoulder_pan": -0.2,
+      "shoulder_lift": -1.0,
+      "elbow": 1.2,
+      "wrist_1": -0.5,
+      "wrist_2": -0.2,
+      "wrist_3": 0.1
+    }
+  }
+]

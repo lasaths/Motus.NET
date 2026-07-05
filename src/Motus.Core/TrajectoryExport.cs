@@ -59,16 +59,29 @@ public static class TrajectoryExport
     {
         options ??= new TrajectoryExportOptions();
         var traj = Prepare(trajectory, options);
+        var jointNames = traj.Robot.JointNames;
         var obj = new
         {
             robot = traj.Robot.DisplayName,
+            jointNames,
             durationSeconds = traj.DurationSeconds,
             pointCount = traj.Points.Count,
             retimed = options.Retime,
-            points = traj.Points.Select(p => new
+            points = traj.Points.Select(p =>
             {
-                timeSeconds = p.TimeSeconds,
-                jointsRadians = p.JointState.Positions
+                Dictionary<string, double>? joints = null;
+                if (jointNames is not null)
+                {
+                    joints = new Dictionary<string, double>();
+                    for (var i = 0; i < jointNames.Count; i++)
+                        joints[jointNames[i]] = p.JointState.Positions[i];
+                }
+                return new
+                {
+                    timeSeconds = p.TimeSeconds,
+                    jointsRadians = p.JointState.Positions,
+                    joints
+                };
             })
         };
         return JsonSerializer.Serialize(obj, new JsonSerializerOptions { WriteIndented = true });

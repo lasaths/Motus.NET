@@ -1,0 +1,98 @@
+{
+  "ur10e": {
+    "defaultPose": {
+      "shoulder_pan_joint": 0,
+      "shoulder_lift_joint": -1.5708,
+      "elbow_joint": 1.5708,
+      "wrist_1_joint": -1.5708,
+      "wrist_2_joint": 0,
+      "wrist_3_joint": 0
+    },
+    "demoPath": {
+      "points": [
+        { "joints": { "shoulder_pan_joint": 0, "shoulder_lift_joint": -1.5708, "elbow_joint": 1.5708, "wrist_1_joint": -1.5708, "wrist_2_joint": 0, "wrist_3_joint": 0 } },
+        { "joints": { "shoulder_pan_joint": 0.4, "shoulder_lift_joint": -1.5708, "elbow_joint": 1.5708, "wrist_1_joint": -1.5708, "wrist_2_joint": 0, "wrist_3_joint": 0 } },
+        { "joints": { "shoulder_pan_joint": 0.8, "shoulder_lift_joint": -1.35, "elbow_joint": 1.35, "wrist_1_joint": -1.35, "wrist_2_joint": 0.2, "wrist_3_joint": 0.3 } },
+        { "joints": { "shoulder_pan_joint": 0.8, "shoulder_lift_joint": -1.2, "elbow_joint": 1.1, "wrist_1_joint": -1.2, "wrist_2_joint": 0.4, "wrist_3_joint": 0.6 } },
+        { "joints": { "shoulder_pan_joint": 0, "shoulder_lift_joint": -1.2, "elbow_joint": 1.1, "wrist_1_joint": -1.2, "wrist_2_joint": 0.4, "wrist_3_joint": 0.8 } },
+        { "joints": { "shoulder_pan_joint": -0.8, "shoulder_lift_joint": -1.35, "elbow_joint": 1.35, "wrist_1_joint": -1.35, "wrist_2_joint": 0.2, "wrist_3_joint": 0.3 } },
+        { "joints": { "shoulder_pan_joint": -0.4, "shoulder_lift_joint": -1.5708, "elbow_joint": 1.5708, "wrist_1_joint": -1.5708, "wrist_2_joint": 0, "wrist_3_joint": 0 } },
+        { "joints": { "shoulder_pan_joint": 0, "shoulder_lift_joint": -1.5708, "elbow_joint": 1.5708, "wrist_1_joint": -1.5708, "wrist_2_joint": 0, "wrist_3_joint": 0 } }
+      ]
+    }
+  },
+  "ur10e_collision": {
+    "defaultPose": {
+      "shoulder_pan": 0,
+      "shoulder_lift": -1.5708,
+      "elbow": 1.5708,
+      "wrist_1": -1.5708,
+      "wrist_2": 0,
+      "wrist_3": 0
+    },
+    "demoPath": {
+      "points": [
+        { "joints": { "shoulder_pan": 0, "shoulder_lift": -1.5708, "elbow": 1.5708, "wrist_1": -1.5708, "wrist_2": 0, "wrist_3": 0 } },
+        { "joints": { "shoulder_pan": 0.4, "shoulder_lift": -1.5708, "elbow": 1.5708, "wrist_1": -1.5708, "wrist_2": 0, "wrist_3": 0 } },
+        { "joints": { "shoulder_pan": 0.8, "shoulder_lift": -1.35, "elbow": 1.35, "wrist_1": -1.35, "wrist_2": 0.2, "wrist_3": 0.3 } },
+        { "joints": { "shoulder_pan": 0.8, "shoulder_lift": -1.2, "elbow": 1.1, "wrist_1": -1.2, "wrist_2": 0.4, "wrist_3": 0.6 } },
+        { "joints": { "shoulder_pan": 0, "shoulder_lift": -1.2, "elbow": 1.1, "wrist_1": -1.2, "wrist_2": 0.4, "wrist_3": 0.8 } },
+        { "joints": { "shoulder_pan": -0.8, "shoulder_lift": -1.35, "elbow": 1.35, "wrist_1": -1.35, "wrist_2": 0.2, "wrist_3": 0.3 } },
+        { "joints": { "shoulder_pan": -0.4, "shoulder_lift": -1.5708, "elbow": 1.5708, "wrist_1": -1.5708, "wrist_2": 0, "wrist_3": 0 } },
+        { "joints": { "shoulder_pan": 0, "shoulder_lift": -1.5708, "elbow": 1.5708, "wrist_1": -1.5708, "wrist_2": 0, "wrist_3": 0 } }
+      ]
+    }
+  },
+  "ur5e_collision": {
+    "defaultPose": {
+      "shoulder_pan": 0,
+      "shoulder_lift": -1.5708,
+      "elbow": 1.5708,
+      "wrist_1": -1.5708,
+      "wrist_2": 0,
+      "wrist_3": 0
+    },
+    "demoPath": {
+      "points": [
+        { "joints": { "shoulder_pan": 0, "shoulder_lift": -1.5708, "elbow": 1.5708, "wrist_1": -1.5708, "wrist_2": 0, "wrist_3": 0 } },
+        { "joints": { "shoulder_pan": 0.5, "shoulder_lift": -1.45, "elbow": 1.45, "wrist_1": -1.45, "wrist_2": 0.15, "wrist_3": 0.25 } },
+        { "joints": { "shoulder_pan": 0.9, "shoulder_lift": -1.25, "elbow": 1.2, "wrist_1": -1.2, "wrist_2": 0.35, "wrist_3": 0.5 } },
+        { "joints": { "shoulder_pan": 0.9, "shoulder_lift": -1.1, "elbow": 1.0, "wrist_1": -1.0, "wrist_2": 0.5, "wrist_3": 0.7 } },
+        { "joints": { "shoulder_pan": 0, "shoulder_lift": -1.1, "elbow": 1.0, "wrist_1": -1.0, "wrist_2": 0.5, "wrist_3": 0.9 } },
+        { "joints": { "shoulder_pan": -0.9, "shoulder_lift": -1.25, "elbow": 1.2, "wrist_1": -1.2, "wrist_2": 0.35, "wrist_3": 0.5 } },
+        { "joints": { "shoulder_pan": -0.5, "shoulder_lift": -1.5708, "elbow": 1.5708, "wrist_1": -1.5708, "wrist_2": 0, "wrist_3": 0 } },
+        { "joints": { "shoulder_pan": 0, "shoulder_lift": -1.5708, "elbow": 1.5708, "wrist_1": -1.5708, "wrist_2": 0, "wrist_3": 0 } }
+      ]
+    }
+  },
+  "two_link": {
+    "defaultPose": { "joint1": 0.6, "joint2": 0.9 },
+    "demoPath": {
+      "points": [
+        { "joints": { "joint1": 0.6, "joint2": 0.9 } },
+        { "joints": { "joint1": 1.2, "joint2": 0.4 } },
+        { "joints": { "joint1": 1.57, "joint2": 0.0 } },
+        { "joints": { "joint1": 1.0, "joint2": -0.8 } },
+        { "joints": { "joint1": 0.0, "joint2": -1.2 } },
+        { "joints": { "joint1": -0.8, "joint2": -0.6 } },
+        { "joints": { "joint1": 0.0, "joint2": 0.5 } },
+        { "joints": { "joint1": 0.6, "joint2": 0.9 } }
+      ]
+    }
+  },
+  "prismatic_lift": {
+    "defaultPose": { "lift": 0.2, "joint1": 0 },
+    "demoPath": {
+      "points": [
+        { "joints": { "lift": 0.2, "joint1": 0 } },
+        { "joints": { "lift": 0.45, "joint1": 0 } },
+        { "joints": { "lift": 0.45, "joint1": 1.0 } },
+        { "joints": { "lift": 0.45, "joint1": -1.0 } },
+        { "joints": { "lift": 0.45, "joint1": 0.5 } },
+        { "joints": { "lift": 0.1, "joint1": -0.5 } },
+        { "joints": { "lift": 0.35, "joint1": 0.2 } },
+        { "joints": { "lift": 0.2, "joint1": 0 } }
+      ]
+    }
+  }
+}

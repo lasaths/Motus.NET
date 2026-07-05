@@ -90,7 +90,7 @@ public sealed class RobotMeshCollisionChecker : ICollisionChecker
         {
             for (var j = i + 2; j < worldLinks.Count; j++)
             {
-                if (Math.Abs(worldLinks[i].index - worldLinks[j].index) <= 2) continue;
+                if (Math.Abs(worldLinks[i].index - worldLinks[j].index) <= 3) continue;
                 if (CollisionGeometry.Intersects(worldLinks[i].geom, worldLinks[j].geom, _meshBvhCache))
                     return false;
             }

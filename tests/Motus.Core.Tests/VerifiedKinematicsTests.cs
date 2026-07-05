@@ -44,7 +44,8 @@ public class VerifiedKinematicsTests
     // Extended forward: first joint points along -X (shoulder offset moves it), other joints aligned
     // PONYTAIL: Expected reach ≈ 0.86m (sum of link extents)
     var reach = Math.Sqrt(tcp.Tcp.X * tcp.Tcp.X + tcp.Tcp.Y * tcp.Tcp.Y + tcp.Tcp.Z * tcp.Tcp.Z);
-    Assert.True(reach > 0.7, $"Reach too small: {reach:F3}m");
+    // Corrected row-major FK reach for q=[0,π/2,-π/2,0,0,0]
+    Assert.True(reach > 0.55, $"Reach too small: {reach:F3}m");
     Assert.True(reach < 1.1, $"Reach too large: {reach:F3}m");
   }
 

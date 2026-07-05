@@ -37,6 +37,25 @@ public class TrueCartesianInterfaceTests
   private static JointState IkFriendlyStart => new(new[] { 0.0, -0.5, 1.0, -1.0, 0.0, 0.0 });
 
   [Fact]
+  public void LIN_SmallLocalMove_HasPhysicalDuration()
+  {
+    var preset = PresetLoader.LoadByModelName("UR5e", ResourcesRoot);
+    var fk = new DhForwardKinematics(preset);
+    var planner = new CartesianLinearPathPlanner(preset);
+
+    var startJoint = IkFriendlyStart;
+    var startPose = fk.ComputeTcp(startJoint, preset.BaseFrame, preset.ToolFrame);
+    var goalPose = new CartesianPose(new Frame(
+      startPose.Tcp.X + 0.02, startPose.Tcp.Y, startPose.Tcp.Z,
+      startPose.Tcp.Qw, startPose.Tcp.Qx, startPose.Tcp.Qy, startPose.Tcp.Qz));
+
+    var traj = planner.Plan(startPose, goalPose, startJoint);
+    Assert.NotNull(traj);
+    Assert.True(traj!.DurationSeconds > 0.01);
+    Assert.True(traj.Points[^1].TimeSeconds > 0.01);
+  }
+
+  [Fact]
   public void LIN_SmallLocalMove()
   {
     var preset = PresetLoader.LoadByModelName("UR5e", ResourcesRoot);

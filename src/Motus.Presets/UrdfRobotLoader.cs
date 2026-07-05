@@ -16,16 +16,18 @@ public sealed class UrdfRobot
 {
     public RobotPreset Preset { get; }
     public SerialJointChain Chain { get; }
+    public IReadOnlyList<string> JointNames { get; }
     public RobotCollisionModel? CollisionModel { get; }
 
-    public UrdfRobot(RobotPreset preset, SerialJointChain chain, RobotCollisionModel? collisionModel = null)
+    public UrdfRobot(RobotPreset preset, SerialJointChain chain, IReadOnlyList<string> jointNames, RobotCollisionModel? collisionModel = null)
     {
         Preset = preset;
         Chain = chain;
+        JointNames = jointNames;
         CollisionModel = collisionModel;
     }
 
-    public RobotModel ToModel() => new(Preset, CollisionModel);
+    public RobotModel ToModel() => new(Preset, CollisionModel, JointNames);
 }
 
 /// <summary>Load revolute serial-chain URDF into Motus preset + joint chain.</summary>
@@ -67,10 +69,11 @@ public static class UrdfRobotLoader
             j.AxisX, j.AxisY, j.AxisZ,
             Motion: j.Type == "prismatic" ? JointMotionType.Prismatic : JointMotionType.Revolute)).ToArray();
 
+        var jointNames = chainJoints.Select(j => j.Name).ToList();
         var linkNames = chainJoints.Select(j => j.ChildLink).ToList();
         var collision = UrdfCollisionLoader.Load(robot, linkNames, urdfDirectory);
 
-        return new UrdfRobot(preset, new SerialJointChain(defs), collision);
+        return new UrdfRobot(preset, new SerialJointChain(defs), jointNames, collision);
     }
 
     private static List<ParsedJoint> BuildSerialChain(List<ParsedJoint> all, string baseLink, string tipLink)

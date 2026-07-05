@@ -30,27 +30,9 @@ public class RrtConnectTests
     var start = new JointState(new double[6]);
     var goal = new JointState(new[] { 0.6, -0.6, 0.6, -0.6, -0.6, 0.3 });
     var checker = new SphereCollisionChecker(preset);
-    var candidates = new[]
-    {
-      new Frame(0.18, -0.22, 0.28),
-      new Frame(0.22, -0.18, 0.32),
-      new Frame(0.12, -0.28, 0.24),
-      new Frame(0.25, -0.30, 0.35),
-    };
+    var scene = FindBlockingScene(checker, preset, start, goal, 0.08)
+      ?? throw new InvalidOperationException("Could not place a blocking obstacle for RRT test.");
 
-    CollisionScene? scene = null;
-    foreach (var pose in candidates)
-    {
-      var trial = new CollisionScene(new[] { CollisionObject.Sphere("block", pose, 0.05) });
-      if (checker.IsCollisionFree(start, trial) && checker.IsCollisionFree(goal, trial)
-          && !checker.SegmentCollisionFree(start, goal, trial, 0.08))
-      {
-        scene = trial;
-        break;
-      }
-    }
-
-    Assert.NotNull(scene);
     var opts = new PlanningOptions { CollisionScene = scene, MaxJointStepRadians = 0.08, CollisionChecker = checker };
     var planner = new RrtConnectPlanner(checker, new RrtConnectOptions { MaxIterations = 10000, RandomSeed = 11 });
     var result = planner.Plan(new PlanningRequest(robot, start, goal, opts));
@@ -72,31 +54,36 @@ public class RrtConnectTests
     var start = new JointState(new double[6]);
     var goal = new JointState(new[] { 0.6, -0.6, 0.6, -0.6, -0.6, 0.3 });
     var checker = new RobotMeshCollisionChecker(model);
-    var candidates = new[]
-    {
-      new Frame(0.18, -0.22, 0.28),
-      new Frame(0.22, -0.18, 0.32),
-      new Frame(0.12, -0.28, 0.24),
-      new Frame(0.25, -0.30, 0.35),
-    };
+    var scene = FindBlockingScene(checker, model.Preset, start, goal, 0.08)
+      ?? throw new InvalidOperationException("Could not place a blocking obstacle for mesh RRT test.");
 
-    CollisionScene? scene = null;
-    foreach (var pose in candidates)
-    {
-      var trial = new CollisionScene(new[] { CollisionObject.Sphere("block", pose, 0.05) });
-      if (checker.IsCollisionFree(start, trial) && checker.IsCollisionFree(goal, trial)
-          && !checker.SegmentCollisionFree(start, goal, trial, 0.08))
-      {
-        scene = trial;
-        break;
-      }
-    }
-
-    Assert.NotNull(scene);
     var opts = new PlanningOptions { CollisionScene = scene, MaxJointStepRadians = 0.08, CollisionChecker = checker };
     var planner = new RrtConnectPlanner(model.Preset, new RrtConnectOptions { MaxIterations = 10000, RandomSeed = 11 });
     var result = planner.Plan(new PlanningRequest(robot, start, goal, opts));
     Assert.True(result.Success, string.Join("; ", result.Errors));
+  }
+
+  private static CollisionScene? FindBlockingScene(
+    ICollisionChecker checker,
+    RobotPreset preset,
+    JointState start,
+    JointState goal,
+    double stepRadians)
+  {
+    var fk = new DhForwardKinematics(preset);
+    for (var s = 1; s <= 7; s++)
+    {
+      var alpha = s / 8.0;
+      var q = new double[start.AxisCount];
+      for (var i = 0; i < q.Length; i++)
+        q[i] = start.Positions[i] + alpha * (goal.Positions[i] - start.Positions[i]);
+      var mid = fk.ComputeTcp(new JointState(q), preset.BaseFrame, preset.ToolFrame);
+      var trial = new CollisionScene(new[] { CollisionObject.Sphere("block", mid.Tcp, 0.05) });
+      if (checker.IsCollisionFree(start, trial) && checker.IsCollisionFree(goal, trial)
+          && !checker.SegmentCollisionFree(start, goal, trial, stepRadians))
+        return trial;
+    }
+    return null;
   }
 
   [Fact]

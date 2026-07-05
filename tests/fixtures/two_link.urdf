@@ -1,8 +1,17 @@
 <?xml version="1.0"?>
 <robot name="two_link">
   <link name="base_link"/>
-  <link name="link1"/>
-  <link name="tip_link"/>
+  <link name="link1">
+    <visual>
+      <origin xyz="0.1 0 0" rpy="0 0 0"/>
+      <geometry><box size="0.2 0.04 0.04"/></geometry>
+    </visual>
+  </link>
+  <link name="tip_link">
+    <visual>
+      <geometry><sphere radius="0.035"/></geometry>
+    </visual>
+  </link>
   <joint name="joint1" type="revolute">
     <parent link="base_link"/>
     <child link="link1"/>

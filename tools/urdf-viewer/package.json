@@ -1,0 +1,19 @@
+{
+  "name": "motus-urdf-viewer",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "fetch-assets": "node scripts/fetch-ur10e-assets.mjs",
+    "postinstall": "node scripts/fetch-ur10e-assets.mjs"
+  },
+  "dependencies": {
+    "jsdom": "^26.0.0",
+    "three": "^0.175.0",
+    "urdf-loader": "^0.12.6"
+  },
+  "devDependencies": {
+    "vite": "^6.2.0"
+  }
+}

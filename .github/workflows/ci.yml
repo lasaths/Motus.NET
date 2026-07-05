@@ -23,6 +23,15 @@ jobs:
       - name: Build
         run: dotnet build Motus.NET.slnx -c Release --no-restore
 
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install urdf-loader tools
+        run: npm ci
+        working-directory: tools/urdf-viewer
+
       - name: Test
         run: dotnet test Motus.NET.slnx -c Release --no-build --verbosity normal
 

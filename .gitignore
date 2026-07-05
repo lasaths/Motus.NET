@@ -13,3 +13,5 @@ graphify-out/
 *.pfx
 *.key
 secrets.json
+node_modules/
+tests/fixtures/ur10e/meshes/

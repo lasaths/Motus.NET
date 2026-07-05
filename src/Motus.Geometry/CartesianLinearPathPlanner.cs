@@ -112,9 +112,10 @@ public sealed class CartesianLinearPathPlanner
         if (points.Count < 2)
             return null;
 
-        // PONYTAIL: Assign simple timing (1 frame per step, constant velocity)
+        // Assign physical timing from joint deltas (frame indices are not seconds).
         var robot = new RobotModel(_preset);
-        return new Trajectory(robot, points);
+        var geometric = new Trajectory(robot, points);
+        return TrajectoryRetimer.Retime(geometric);
     }
 
     /// <summary>Plan a toolpath through multiple Cartesian waypoints.</summary>
@@ -176,7 +177,7 @@ public sealed class CartesianLinearPathPlanner
             return null;
 
         var robot = new RobotModel(_preset);
-        return new Trajectory(robot, allPoints);
+        return TrajectoryRetimer.Retime(new Trajectory(robot, allPoints));
     }
 
     private static CartesianPose InterpolatePose(CartesianPose a, CartesianPose b, double alpha)
