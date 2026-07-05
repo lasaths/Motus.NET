@@ -1,6 +1,7 @@
 using System.Runtime.InteropServices;
 using Motus.Core;
 using Motus.Geometry;
+using Motus.Native;
 using Motus.OMPL.Native;
 
 namespace Motus.OMPL.NET;
@@ -44,37 +45,76 @@ public sealed class RrtConnectPlanner : IPlanner
         return PlanManaged(request);
     }
 
-    private static ICollisionChecker? ResolveChecker(PlanningRequest request, ICollisionChecker? defaultChecker) =>
-        request.Options.CollisionChecker ?? defaultChecker;
+    private static ICollisionChecker? ResolveChecker(PlanningRequest request, ICollisionChecker? defaultChecker)
+    {
+        if (request.Options.CollisionChecker is not null)
+            return request.Options.CollisionChecker;
+        if (request.Options.AttachedBodies is { Count: > 0 })
+            return CollisionCheckerFactory.Create(request.Robot, null, request.Options.AttachedBodies);
+        return defaultChecker;
+    }
+
+    private static PlanSpace BuildPlanSpace(PlanningRequest request)
+    {
+        var limits = request.Robot.Preset.JointLimits;
+        var map = request.Options.GroupMap;
+        if (map is null)
+        {
+            return new PlanSpace(
+                request.Start,
+                request.Start.Positions.ToArray(),
+                request.Goal.Positions.ToArray(),
+                limits,
+                q => new JointState(q));
+        }
+
+        var groupLimits = map.GroupToFull.Select(i => limits[i]).ToList();
+        return new PlanSpace(
+            request.Start,
+            map.ExtractGroupPositions(request.Start),
+            map.ExtractGroupPositions(request.Goal),
+            groupLimits,
+            q => map.EmbedGroupState(request.Start, q));
+    }
 
     private PlanningResult? TryNativePlan(PlanningRequest request)
     {
         var checker = ResolveChecker(request, _defaultChecker);
         var robot = request.Robot;
-        var limits = robot.Preset.JointLimits;
         var scene = request.Options.CollisionScene ?? new CollisionScene();
-        var n = limits.Count;
-        var low = limits.Select(l => l.MinRadians).ToArray();
-        var high = limits.Select(l => l.MaxRadians).ToArray();
-        var start = request.Start.Positions.ToArray();
-        var goal = request.Goal.Positions.ToArray();
+        var space = BuildPlanSpace(request);
+        var n = space.Dims;
+        var low = space.Limits.Select(l => l.MinRadians).ToArray();
+        var high = space.Limits.Select(l => l.MaxRadians).ToArray();
         var maxStates = Math.Max(16, _options.MaxPathStates);
         var buffer = new double[n * maxStates];
 
-        var ctx = new NativePlanContext(checker, scene);
+        var ctx = new NativePlanContext(checker, scene, _options.StepRadians, space.ToFull);
         var handle = GCHandle.Alloc(ctx);
         try
         {
-            NativeOmpl.ValidityCallback cb = (statePtr, dims, user) =>
+            NativeBindings.ValidityCallback stateCb = (statePtr, dims, user) =>
             {
                 var context = (NativePlanContext)GCHandle.FromIntPtr(user).Target!;
                 return context.ValidityCallback(statePtr, dims);
             };
+            NativeBindings.MotionValidityCallback motionCb = (fromPtr, toPtr, dims, user) =>
+            {
+                var context = (NativePlanContext)GCHandle.FromIntPtr(user).Target!;
+                return context.MotionValidityCallback(fromPtr, toPtr, dims);
+            };
+
+            var plannerId = _options.PlannerId switch
+            {
+                OmplPlannerId.RrtStar => NativeBindings.PlannerRrtStar,
+                _ => NativeBindings.PlannerRrtConnect
+            };
 
             var rc = NativeOmpl.motus_ompl_rrt_connect(
-                n, low, high, start, goal,
-                _options.MaxIterations, _options.StepRadians, _options.GoalBias,
-                cb, GCHandle.ToIntPtr(handle),
+                n, low, high, space.Start, space.Goal,
+                _options.MaxIterations, _options.MaxPlanTimeSeconds, _options.StepRadians, _options.GoalBias,
+                plannerId,
+                stateCb, motionCb, GCHandle.ToIntPtr(handle),
                 buffer, maxStates, out var count);
 
             if (rc != NativeOmpl.Ok || count < 2) return null;
@@ -84,16 +124,59 @@ public sealed class RrtConnectPlanner : IPlanner
             {
                 var q = new double[n];
                 Array.Copy(buffer, i * n, q, 0, n);
-                waypoints.Add(new JointState(q));
+                waypoints.Add(space.ToFull(q));
             }
 
-            var simplified = PathSimplifier.Simplify(waypoints, robot, checker, scene, _options.StepRadians * 0.5);
+            var simplified = SimplifyNativePath(
+                waypoints, n, space, request, robot, checker, scene,
+                stateCb, motionCb, handle, maxStates);
             return BuildTrajectory(robot, simplified, request.Options, checker, usedNative: true);
         }
         finally
         {
             handle.Free();
         }
+    }
+
+    private IReadOnlyList<JointState> SimplifyNativePath(
+        List<JointState> waypoints,
+        int dims,
+        PlanSpace space,
+        PlanningRequest request,
+        RobotModel robot,
+        ICollisionChecker? checker,
+        CollisionScene scene,
+        NativeBindings.ValidityCallback stateCb,
+        NativeBindings.MotionValidityCallback motionCb,
+        GCHandle handle,
+        int maxStates)
+    {
+        var pathCount = waypoints.Count;
+        var flatPath = new double[pathCount * dims];
+        for (var i = 0; i < pathCount; i++)
+        {
+            var groupQ = request.Options.GroupMap?.ExtractGroupPositions(waypoints[i])
+                ?? waypoints[i].Positions.ToArray();
+            Array.Copy(groupQ, 0, flatPath, i * dims, dims);
+        }
+
+        var simpBuf = new double[dims * maxStates];
+        var simpRc = NativeOmpl.motus_ompl_simplify_path(
+            dims, flatPath, pathCount, _options.StepRadians * 0.5,
+            stateCb, motionCb, GCHandle.ToIntPtr(handle),
+            simpBuf, maxStates, out var simpCount);
+
+        if (simpRc != NativeOmpl.Ok || simpCount < 2)
+            return PathSimplifier.Simplify(waypoints, robot, checker, scene, _options.StepRadians * 0.5);
+
+        var simplified = new List<JointState>(simpCount);
+        for (var i = 0; i < simpCount; i++)
+        {
+            var q = new double[dims];
+            Array.Copy(simpBuf, i * dims, q, 0, dims);
+            simplified.Add(space.ToFull(q));
+        }
+        return simplified;
     }
 
     private PlanningResult PlanManaged(PlanningRequest request)
@@ -103,6 +186,7 @@ public sealed class RrtConnectPlanner : IPlanner
         var limits = robot.Preset.JointLimits;
         var scene = request.Options.CollisionScene ?? new CollisionScene();
         var rng = new Random(_options.RandomSeed);
+        var space = BuildPlanSpace(request);
 
         var startVal = request.Start.Validate(limits);
         var goalVal = request.Goal.Validate(limits);
@@ -110,14 +194,14 @@ public sealed class RrtConnectPlanner : IPlanner
         if (!goalVal.IsValid) return PlanningResult.Failed(goalVal.Errors.Select(e => $"Goal: {e}"));
         if (checker is not null)
         {
-            if (!checker.IsCollisionFree(request.Start, scene))
+            if (!checker.IsCollisionFree(space.ToFull(space.Start), scene))
                 return PlanningResult.Failed(new[] { "Start configuration is in collision." });
-            if (!checker.IsCollisionFree(request.Goal, scene))
+            if (!checker.IsCollisionFree(space.ToFull(space.Goal), scene))
                 return PlanningResult.Failed(new[] { "Goal configuration is in collision." });
         }
 
-        var start = request.Start.Positions.ToArray();
-        var goal = request.Goal.Positions.ToArray();
+        var start = (double[])space.Start.Clone();
+        var goal = (double[])space.Goal.Clone();
         var treeA = new RrtTree { Nodes = [new RrtNode(start, -1)] };
         var treeB = new RrtTree { Nodes = [new RrtNode(goal, -1)] };
 
@@ -126,14 +210,14 @@ public sealed class RrtConnectPlanner : IPlanner
             if (_options.ShouldCancel?.Invoke() == true)
                 return PlanningResult.Failed(new[] { "Planning cancelled." });
 
-            var sample = Sample(rng, goal, limits);
-            var (extendedA, newIdxA) = Extend(treeA, sample, limits, scene, checker);
-            if (extendedA && Connect(treeB, treeA.Nodes[newIdxA].Q, limits, scene, checker, out var connectIdxB))
+            var sample = Sample(rng, goal, space.Limits);
+            var (extendedA, newIdxA) = Extend(treeA, sample, space.Limits, scene, checker, space.ToFull);
+            if (extendedA && Connect(treeB, treeA.Nodes[newIdxA].Q, space.Limits, scene, checker, space.ToFull, out var connectIdxB))
             {
                 var pathA = Reconstruct(treeA, newIdxA);
                 var pathB = Reconstruct(treeB, connectIdxB);
                 pathB.Reverse();
-                var raw = pathA.Concat(pathB.Skip(1)).Select(q => new JointState(q)).ToList();
+                var raw = pathA.Concat(pathB.Skip(1)).Select(q => space.ToFull(q)).ToList();
                 var simplified = PathSimplifier.Simplify(raw, robot, checker, scene, _options.StepRadians * 0.5);
                 return BuildTrajectory(robot, simplified, request.Options, checker, usedNative: false);
             }
@@ -154,36 +238,38 @@ public sealed class RrtConnectPlanner : IPlanner
     }
 
     private (bool extended, int newIndex) Extend(
-        RrtTree tree, double[] target, IReadOnlyList<JointLimit> limits, CollisionScene scene, ICollisionChecker? checker)
+        RrtTree tree, double[] target, IReadOnlyList<JointLimit> limits, CollisionScene scene,
+        ICollisionChecker? checker, Func<double[], JointState> toFull)
     {
         var nearest = Nearest(tree, target);
         var steered = Steer(tree.Nodes[nearest].Q, target, limits);
         if (ConfigurationDistance(tree.Nodes[nearest].Q, steered) < 1e-12) return (false, nearest);
-        if (!SegmentFree(tree.Nodes[nearest].Q, steered, scene, checker)) return (false, nearest);
+        if (!SegmentFree(tree.Nodes[nearest].Q, steered, scene, checker, toFull)) return (false, nearest);
         tree.Nodes.Add(new RrtNode(steered, nearest));
         return (true, tree.Nodes.Count - 1);
     }
 
     private bool Connect(
         RrtTree tree, double[] target, IReadOnlyList<JointLimit> limits, CollisionScene scene,
-        ICollisionChecker? checker, out int connectIndex)
+        ICollisionChecker? checker, Func<double[], JointState> toFull, out int connectIndex)
     {
         connectIndex = Nearest(tree, target);
         while (ConfigurationDistance(tree.Nodes[connectIndex].Q, target) > _options.ConnectThresholdRadians)
         {
             var steered = Steer(tree.Nodes[connectIndex].Q, target, limits);
             if (ConfigurationDistance(tree.Nodes[connectIndex].Q, steered) < 1e-12) break;
-            if (!SegmentFree(tree.Nodes[connectIndex].Q, steered, scene, checker)) return false;
+            if (!SegmentFree(tree.Nodes[connectIndex].Q, steered, scene, checker, toFull)) return false;
             tree.Nodes.Add(new RrtNode(steered, connectIndex));
             connectIndex = tree.Nodes.Count - 1;
         }
         return ConfigurationDistance(tree.Nodes[connectIndex].Q, target) <= _options.ConnectThresholdRadians;
     }
 
-    private bool SegmentFree(double[] from, double[] to, CollisionScene scene, ICollisionChecker? checker)
+    private bool SegmentFree(
+        double[] from, double[] to, CollisionScene scene, ICollisionChecker? checker, Func<double[], JointState> toFull)
     {
         if (checker is null) return true;
-        return checker.SegmentCollisionFree(new JointState(from), new JointState(to), scene, _options.StepRadians);
+        return checker.SegmentCollisionFree(toFull(from), toFull(to), scene, _options.StepRadians);
     }
 
     private static int Nearest(RrtTree tree, double[] target)
@@ -270,6 +356,7 @@ public sealed class RrtConnectPlanner : IPlanner
         }
 
         var warnings = new List<string> { "RrtConnectPlanner: joint-space RRT-Connect path." };
+        warnings.Add(MotusCapabilities.Describe());
         if (!usedNative)
             warnings.Add(NativeOmpl.StatusMessage);
         if (checker is null)
@@ -283,4 +370,14 @@ public sealed class RrtConnectPlanner : IPlanner
     }
 
     private readonly record struct RrtNode(double[] Q, int Parent);
+
+    private readonly record struct PlanSpace(
+        JointState Seed,
+        double[] Start,
+        double[] Goal,
+        IReadOnlyList<JointLimit> Limits,
+        Func<double[], JointState> ToFull)
+    {
+        public int Dims => Limits.Count;
+    }
 }

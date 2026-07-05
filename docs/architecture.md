@@ -5,23 +5,25 @@
 Motus.NET is a standalone planning core consumed by Motus.Grasshopper and future hosts. All vendor-specific and UI concerns stay outside Motus.Core.
 
 ```
-Motus.Grasshopper (Rhino / GH UI)
-    ↓ project references
-Motus.Rhino (Frame ↔ Plane, stick preview)
-Motus.Presets (JSON loader)
+Motus.Grasshopper (Rhino / GH UI — separate repo)
+    ↓ project references / NuGet
+Motus.Presets (JSON + URDF/SRDF loaders)
     ↓
-Motus.Core (data model, IPlanner, validation, export)
-Motus.Geometry (FK/IK, collision, CartesianLinearPlanner)
+Motus.Core (data model, PlanningContext, IPlanner, validation, export)
+Motus.Geometry (FK/IK, mesh collision, attach-aware checkers, Cartesian planners)
     ↓
-Motus.OMPL.NET (RRT-Connect, path simplification)
+Motus.OMPL.NET (RRT-Connect / RRT*; managed fallback)
+Motus.Native (P/Invoke → motus_native: OMPL + FCL)
 ```
+
+See [rhino-host.md](rhino-host.md) for Windows/macOS deployment (managed-first).
 
 ## Motus.Core principles
 
 - **No UI dependencies** — pure .NET 8 class library
-- **Planners behind `IPlanner`** — joint-linear, Cartesian-linear, and RRT-Connect implementations
+- **Planners behind `IPlanner`** — joint-linear, Cartesian-linear, LIN, and RRT-Connect
 - **Presets are data** — JSON files loaded by Motus.Presets, not hardcoded switches
-- **Deterministic first planner** — joint-space linear interpolation with explicit step and timing options
+- **PlanningContext** — robot + scene + attach/detach; optional `PlanningGroup` for reduced-DOF planning
 
 ## Key interfaces
 
@@ -29,13 +31,14 @@ Motus.OMPL.NET (RRT-Connect, path simplification)
 |-----------|------|
 | `IPlanner` | Produce `PlanningResult` from `PlanningRequest` |
 | `ITrajectoryValidator` | Check trajectory against limits and timing |
-| `IForwardKinematics` / `IInverseKinematics` | DH FK and numerical IK (`Motus.Geometry`) |
-| `ICollisionChecker` | Sphere-envelope checking (`SphereCollisionChecker`) |
+| `IFkSolver` / `IIkSolver` | FK and IK (`Motus.Geometry`) |
+| `ICollisionChecker` | `SphereCollisionChecker`, `RobotMeshCollisionChecker`, `AttachAwareCollisionChecker`, `FclCollisionChecker` |
+| `PlanningContext` | Attach geometry at TCP; hide scene obstacles on pick |
 
 ## Units
 
 Internal units: **radians**, **seconds**, **meters**. Conversion helpers live in `Units`.
 
-## OMPL
+## Native (`motus_native`)
 
-`Motus.OMPL.NET` is the managed adapter over `Motus.OMPL.Native` (C ABI → OMPL C++). A managed RRT-Connect fallback runs when the native library is not built. See [ompl-port-plan.md](ompl-port-plan.md).
+`Motus.Native` loads per-RID stubs from NuGet (`runtimes/{rid}/native/`). Stubs report OMPL/FCL unavailable → managed RRT and C# mesh collision run (default on Rhino Win/Mac). Full native OMPL+FCL optional on Linux CI. See [ompl-port-plan.md](ompl-port-plan.md).

@@ -18,14 +18,25 @@ public static class PresetLoader
 
     private static string ResolvePluginRoot()
     {
-        var assemblyPath = typeof(PresetLoader).Assembly.Location;
-        if (!string.IsNullOrEmpty(assemblyPath))
+        var asmPath = typeof(PresetLoader).Assembly.Location;
+        if (!string.IsNullOrEmpty(asmPath))
         {
-            var dir = Path.GetDirectoryName(assemblyPath);
-            if (!string.IsNullOrEmpty(dir))
+            var dir = Path.GetDirectoryName(asmPath);
+            if (!string.IsNullOrEmpty(dir) && Directory.Exists(Path.Combine(dir, "resources", "robots")))
                 return dir;
         }
-        return AppContext.BaseDirectory;
+
+        var baseDir = AppContext.BaseDirectory;
+        if (!string.IsNullOrEmpty(baseDir) && Directory.Exists(Path.Combine(baseDir, "resources", "robots")))
+            return baseDir;
+
+        if (!string.IsNullOrEmpty(asmPath))
+        {
+            var dir = Path.GetDirectoryName(asmPath);
+            if (!string.IsNullOrEmpty(dir)) return dir;
+        }
+
+        return string.IsNullOrEmpty(baseDir) ? Environment.CurrentDirectory : baseDir;
     }
 
     public static RobotPreset LoadFromFile(string path) => LoadRobotModelFromFile(path).Preset;
@@ -45,7 +56,7 @@ public static class PresetLoader
             ?? throw new InvalidOperationException("Empty preset JSON.");
         var preset = dto.ToPreset();
         var collision = sourcePath is not null
-            ? CollisionPresetLoader.LoadFromDto(dto.CollisionLinks, sourcePath)
+            ? CollisionPresetLoader.LoadFromDto(dto.CollisionLinks, dto.ToolCollision, sourcePath)
             : null;
         return new RobotModel(preset, collision, BundledJointNames.TryGet(preset.ModelName));
     }
@@ -91,6 +102,7 @@ public static class PresetLoader
         public string? SourceNote { get; set; }
         public string? Disclaimer { get; set; }
         public List<CollisionPresetLoader.CollisionLinkDto>? CollisionLinks { get; set; }
+        public CollisionPresetLoader.ToolCollisionDto? ToolCollision { get; set; }
 
         public RobotPreset ToPreset()
         {

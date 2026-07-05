@@ -56,11 +56,18 @@ public sealed class SphereCollisionChecker : ICollisionChecker
         {
             for (var j = i + 2; j < origins.Count; j++)
             {
+                if (CoincidentLinkOrigins(origins[i], origins[j])) continue;
                 if (SphereSphereOverlap(origins[i], radii[i], origins[j], radii[j]))
                     return false;
             }
         }
         return true;
+    }
+
+    private static bool CoincidentLinkOrigins(Frame a, Frame b)
+    {
+        const double eps = 1e-6;
+        return Math.Abs(a.X - b.X) < eps && Math.Abs(a.Y - b.Y) < eps && Math.Abs(a.Z - b.Z) < eps;
     }
 
     private static bool Intersects(Frame link, double linkRadius, CollisionObject obj) =>

@@ -6,4 +6,8 @@
     <PackageTags>robotics;motion-planning;ompl;native;dotnet</PackageTags>
   </PropertyGroup>
 
+  <ItemGroup>
+    <ProjectReference Include="..\Motus.Native\Motus.Native.csproj" />
+  </ItemGroup>
+
 </Project>

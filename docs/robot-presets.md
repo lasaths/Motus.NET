@@ -20,7 +20,8 @@ resources/robots/KUKA/   KR 6 R900, KR 10 R1100, … LBR iiwa 7/14
 | `payloadKg` | number? | Nominal payload |
 | `baseFrame` | object | x,y,z + quaternion (qw,qx,qy,qz) in meters |
 | `toolFrame` | object | Same + optional `name` |
-| `collisionLinks[]` | array? | Per-link capsule approximations for `RobotMeshCollisionChecker` |
+| `collisionLinks[]` | array? | Per-link capsule/box/sphere/mesh for `RobotMeshCollisionChecker` |
+| `toolCollision` | object? | Static gripper volume in TCP-local frame (`shape`, `halfX`/`radius`/etc.) |
 | `notes` | string? | Human notes |
 | `sourceNote` | string? | Verification reference |
 | `disclaimer` | string? | Defaults to planning-only disclaimer |
@@ -28,11 +29,11 @@ resources/robots/KUKA/   KR 6 R900, KR 10 R1100, … LBR iiwa 7/14
 ## Loading
 
 ```csharp
-var preset = PresetLoader.LoadByModelName("UR5e");
-var model = preset.ToModel();
+var robot = PresetLoader.LoadRobotModelByName("UR5e");
+var preset = robot.Preset;
 ```
 
-Custom paths: `PresetLoader.LoadFromFile(path)`.
+Custom paths: `PresetLoader.LoadRobotModelFromFile(path)`.
 
 ## Important
 

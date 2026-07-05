@@ -5,8 +5,9 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "fetch-assets": "node scripts/fetch-ur10e-assets.mjs",
-    "postinstall": "node scripts/fetch-ur10e-assets.mjs"
+    "fetch-assets": "node scripts/fetch-ur10e-assets.mjs && node scripts/fetch-kr210-assets.mjs",
+    "test:playwright": "node scripts/playwright-smoke.mjs",
+    "postinstall": "node scripts/fetch-ur10e-assets.mjs && node scripts/fetch-kr210-assets.mjs"
   },
   "dependencies": {
     "jsdom": "^26.0.0",

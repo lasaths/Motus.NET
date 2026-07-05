@@ -8,7 +8,11 @@ on:
 
 jobs:
   build-test:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
 
@@ -19,6 +23,10 @@ jobs:
 
       - name: Restore
         run: dotnet restore Motus.NET.slnx
+
+      - name: Build native stub
+        shell: bash
+        run: ./scripts/build-native-stub.sh
 
       - name: Build
         run: dotnet build Motus.NET.slnx -c Release --no-restore
@@ -35,22 +43,48 @@ jobs:
       - name: Test
         run: dotnet test Motus.NET.slnx -c Release --no-build --verbosity normal
 
-  native-ompl:
+  native-integration:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install OMPL
-        run: sudo apt-get update && sudo apt-get install -y libompl-dev libboost-serialization-dev cmake g++
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 9.0.x
 
-      - name: Build native OMPL library
+      - name: Install native deps
+        run: sudo apt-get update && sudo apt-get install -y libompl-dev libfcl-dev libboost-serialization-dev cmake g++
+
+      - name: Build motus_native
         working-directory: native
         run: |
-          cmake -B build -DMOTUS_USE_OMPL=ON
+          cmake -B build -DMOTUS_USE_OMPL=ON -DMOTUS_USE_FCL=ON
           cmake --build build --config Release
 
       - name: Verify native library
         working-directory: native/build
         run: |
-          test -f libmotus_ompl_native.so || test -f libmotus_ompl_native.so.*
-          nm -D libmotus_ompl_native.so 2>/dev/null | grep motus_ompl_is_available
+          test -f libmotus_native.so
+          nm -D libmotus_native.so | grep motus_ompl_is_available
+          nm -D libmotus_native.so | grep motus_fcl_is_available
+
+      - name: Install full native into package layout
+        run: |
+          mkdir -p src/Motus.Native/runtimes/linux-x64/native
+          cp native/build/libmotus_native.so src/Motus.Native/runtimes/linux-x64/native/
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install urdf-loader tools
+        run: npm ci
+        working-directory: tools/urdf-viewer
+
+      - name: Test with full native
+        env:
+          MOTUS_NATIVE_FULL: "1"
+        run: |
+          dotnet test Motus.NET.slnx -c Release --verbosity normal

@@ -12,6 +12,8 @@ const outDir = path.resolve(__dirname, '../../../tests/fixtures/ur10e');
 const meshDir = path.join(outDir, 'meshes', 'visual');
 const baseUrl =
   'https://raw.githubusercontent.com/UniversalRobots/Universal_Robots_ROS2_Description/rolling/meshes/ur10e/visual';
+const srdfUrl =
+  'https://raw.githubusercontent.com/UniversalRobots/Universal_Robots_ROS2_Driver/main/ur_moveit_config/srdf/ur_macro.srdf.xacro';
 
 const meshes = [
   'base.dae',
@@ -39,3 +41,17 @@ for (const name of meshes) {
 }
 
 console.log(`Meshes in ${meshDir}`);
+
+const srdfDest = path.join(outDir, 'ur10e.srdf');
+if (!fs.existsSync(srdfDest)) {
+  console.log('fetch ur10e.srdf (from UR MoveIt config macro)');
+  const res = await fetch(srdfUrl);
+  if (!res.ok) throw new Error(`Failed srdf: ${res.status}`);
+  const raw = await res.text();
+  const inner = raw
+    .replace(/^[\s\S]*?<xacro:macro[^>]*>/, '')
+    .replace(/<\/xacro:macro>[\s\S]*$/, '')
+    .trim();
+  const plain = `<?xml version="1.0" encoding="UTF-8"?>\n<!-- Auto-fetched from ${srdfUrl} (xacro stripped). -->\n<robot name="ur10e">\n${inner}\n</robot>\n`;
+  fs.writeFileSync(srdfDest, plain);
+}

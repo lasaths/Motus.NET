@@ -19,9 +19,12 @@ public sealed class LinkCollisionGeometry
 public sealed class RobotCollisionModel
 {
     public IReadOnlyList<LinkCollisionGeometry> Links { get; }
+    /// <summary>Optional tool collision in TCP-local frame (static gripper volume).</summary>
+    public CollisionObject? ToolGeometry { get; }
 
-    public RobotCollisionModel(IReadOnlyList<LinkCollisionGeometry> links)
+    public RobotCollisionModel(IReadOnlyList<LinkCollisionGeometry> links, CollisionObject? toolGeometry = null)
     {
         Links = links ?? Array.Empty<LinkCollisionGeometry>();
+        ToolGeometry = toolGeometry;
     }
 }

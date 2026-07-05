@@ -3,11 +3,8 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import URDFLoader from 'urdf-loader';
 
 const FIXTURES = [
-  { id: 'two_link', file: 'two_link.urdf', tip: 'tip_link', dir: '' },
-  { id: 'prismatic_lift', file: 'prismatic_lift.urdf', tip: 'tip_link', dir: '' },
-  { id: 'ur5e_collision', file: 'ur5e_collision.urdf', tip: 'tool0', dir: '' },
-  { id: 'ur10e', file: 'ur10e.urdf', tip: 'tool0', dir: 'ur10e' },
-  { id: 'ur10e_collision', file: 'ur10e_collision.urdf', tip: 'tool0', dir: '' },
+  { id: 'ur10e', label: 'UR10e', file: 'ur10e.urdf', tip: 'tool0', dir: 'ur10e' },
+  { id: 'kr210_r3100_ultra', label: 'KR 210 R3100 ultra', file: 'kr210_r3100_ultra.urdf', tip: 'tool0', dir: 'kr210_r3100_ultra' },
 ];
 
 const FIXTURE_BASE = '/tests/fixtures/';
@@ -23,9 +20,38 @@ const recenterBtn = document.getElementById('recenter-btn');
 const statusLine = document.getElementById('status-line');
 const fixtureHero = document.getElementById('fixture-hero');
 const dofCount = document.getElementById('dof-count');
+const testSummary = document.getElementById('test-summary');
+const testCaseSelect = document.getElementById('test-case');
+const themeBtn = document.getElementById('theme-btn');
+
+const THEME_KEY = 'motus-viewer-theme';
+const SCENE_THEMES = {
+  dark: {
+    bg: 0x000000,
+    gridCenter: 0x333333,
+    gridLine: 0x1a1a1a,
+    path: 0x5b9bf6,
+    robot: 0xffffff,
+    ambient: 0.45,
+    key: 0.85,
+    fill: 0.25,
+  },
+  light: {
+    bg: 0xf0f0f2,
+    gridCenter: 0xc4c4ca,
+    gridLine: 0xdedee4,
+    path: 0x1d5bb8,
+    robot: 0xc8c8ce,
+    ambient: 0.62,
+    key: 0.72,
+    fill: 0.38,
+  },
+};
+
+let currentTheme = 'dark';
 
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x000000);
+scene.background = new THREE.Color(SCENE_THEMES.dark.bg);
 
 const camera = new THREE.PerspectiveCamera(48, 1, 0.01, 50);
 camera.position.set(1.2, 0.9, 1.2);
@@ -39,21 +65,25 @@ controls.target.set(0, 0.25, 0);
 controls.enableDamping = true;
 controls.dampingFactor = 0.08;
 
-scene.add(new THREE.AmbientLight(0xffffff, 0.45));
-const key = new THREE.DirectionalLight(0xffffff, 0.85);
+const ambient = new THREE.AmbientLight(0xffffff, SCENE_THEMES.dark.ambient);
+scene.add(ambient);
+const key = new THREE.DirectionalLight(0xffffff, SCENE_THEMES.dark.key);
 key.position.set(2.5, 4, 2);
 scene.add(key);
-const fill = new THREE.DirectionalLight(0xe8e8e8, 0.25);
+const fill = new THREE.DirectionalLight(0xe8e8e8, SCENE_THEMES.dark.fill);
 fill.position.set(-2, 1, -1);
 scene.add(fill);
 
-const grid = new THREE.GridHelper(2.5, 25, 0x333333, 0x1a1a1a);
+let grid = new THREE.GridHelper(2.5, 25, SCENE_THEMES.dark.gridCenter, SCENE_THEMES.dark.gridLine);
 scene.add(grid);
 
 // URDF is Z-up; THREE.js is Y-up (same as urdf-viewer-element default up="+Z").
 const world = new THREE.Group();
 world.rotation.x = -Math.PI / 2;
 scene.add(world);
+
+const obstacleGroup = new THREE.Group();
+world.add(obstacleGroup);
 
 const loader = new URDFLoader();
 loader.parseCollision = true;
@@ -62,19 +92,66 @@ loader.workingPath = FIXTURE_BASE;
 
 let robot = null;
 let trajectory = null;
+let trajectoryTimes = null;
 let playTimer = null;
 let isPlaying = false;
 let actuatedJoints = [];
 let viewerPresets = null;
+let viewerReport = null;
+let viewerReportPromise = null;
+let loadFixtureSeq = 0;
 let defaultPose = {};
 let pathLine = null;
 let currentFixtureId = null;
+let currentScenarioId = null;
+let fkCaseTrajectory = null;
 
 const PRESETS_URL = `${FIXTURE_BASE}viewer_presets.json`;
+const REPORT_URL = `${FIXTURE_BASE}viewer_report.json`;
 
 function setStatus(text, state = '') {
   statusLine.textContent = text;
   statusLine.dataset.state = state;
+}
+
+function setGridTheme(centerHex, lineHex) {
+  scene.remove(grid);
+  grid.geometry.dispose();
+  grid.material.dispose();
+  grid = new THREE.GridHelper(2.5, 25, centerHex, lineHex);
+  scene.add(grid);
+}
+
+function applyTheme(theme) {
+  currentTheme = theme === 'light' ? 'light' : 'dark';
+  const t = SCENE_THEMES[currentTheme];
+  document.documentElement.dataset.theme = currentTheme === 'light' ? 'light' : '';
+  scene.background.setHex(t.bg);
+  setGridTheme(t.gridCenter, t.gridLine);
+  ambient.intensity = t.ambient;
+  key.intensity = t.key;
+  fill.intensity = t.fill;
+  if (pathLine) pathLine.material.color.setHex(t.path);
+  styleRobotMaterials();
+  themeBtn.textContent = currentTheme === 'light' ? 'Dark' : 'Light';
+  themeBtn.title = currentTheme === 'light' ? 'Switch to dark mode' : 'Switch to light mode';
+  try {
+    localStorage.setItem(THEME_KEY, currentTheme);
+  } catch {
+    /* private browsing */
+  }
+}
+
+function initTheme() {
+  let theme = 'dark';
+  try {
+    const stored = localStorage.getItem(THEME_KEY);
+    if (stored === 'light' || stored === 'dark') theme = stored;
+    else if (window.matchMedia('(prefers-color-scheme: light)').matches) theme = 'light';
+  } catch {
+    /* ignore */
+  }
+  applyTheme(theme);
 }
 
 function setDropState(hint, state = '') {
@@ -85,7 +162,7 @@ function setDropState(hint, state = '') {
 for (const f of FIXTURES) {
   const opt = document.createElement('option');
   opt.value = f.id;
-  opt.textContent = f.id.replace(/_/g, ' ');
+  opt.textContent = f.label ?? f.id.replace(/_/g, ' ');
   fixtureSelect.appendChild(opt);
 }
 
@@ -108,6 +185,7 @@ function disposePathLine() {
 function disposeRobot() {
   if (!robot) return;
   disposePathLine();
+  clearObstacles();
   world.remove(robot);
   robot.traverse((c) => {
     if (c.geometry) c.geometry.dispose();
@@ -121,14 +199,15 @@ function disposeRobot() {
 
 function styleRobotMaterials() {
   if (!robot) return;
+  const robotColor = SCENE_THEMES[currentTheme].robot;
   robot.traverse((c) => {
     if (!c.isMesh) return;
     const mats = Array.isArray(c.material) ? c.material : [c.material];
     mats.forEach((m) => {
-      if (!m || m.map) return;
-      m.color?.setHex(0xc8c8c8);
-      m.metalness = 0.15;
-      m.roughness = 0.65;
+      if (!m) return;
+      m.color?.setHex(robotColor);
+      m.metalness = currentTheme === 'light' ? 0.15 : 0.1;
+      m.roughness = currentTheme === 'light' ? 0.48 : 0.55;
     });
   });
 }
@@ -136,6 +215,12 @@ function styleRobotMaterials() {
 function fitCamera() {
   if (!robot) return;
   const box = new THREE.Box3().setFromObject(robot);
+  if (box.isEmpty()) {
+    controls.target.set(0, 1.2, 0);
+    camera.position.set(2.8, 2.2, 2.8);
+    controls.update();
+    return;
+  }
   const center = box.getCenter(new THREE.Vector3());
   const size = box.getSize(new THREE.Vector3()).length() || 1;
   controls.target.copy(center);
@@ -149,7 +234,7 @@ function stopPlayback() {
     clearTimeout(playTimer);
     playTimer = null;
   }
-  playBtn.textContent = 'Play trajectory';
+  playBtn.textContent = 'Play test cases';
 }
 
 function buildJointSliders() {
@@ -214,6 +299,202 @@ function mapTrajectoryPoint(p) {
   return raw;
 }
 
+async function ensureViewerReport() {
+  if (!viewerReportPromise) {
+    viewerReportPromise = (async () => {
+      try {
+        const res = await fetch(REPORT_URL);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        viewerReport = await res.json();
+        updateReportSummary();
+      } catch {
+        viewerReport = null;
+        testSummary.textContent = 'No report — run dotnet test (UrdfFkCrossCheckTests)';
+        testSummary.dataset.state = 'warn';
+      }
+      return viewerReport;
+    })();
+  }
+  return viewerReportPromise;
+}
+
+function updateReportSummary() {
+  if (!viewerReport?.summary) {
+    testSummary.textContent = 'No report — run dotnet test (UrdfFkCrossCheckTests)';
+    testSummary.dataset.state = 'warn';
+    return;
+  }
+  const { passed, failed, total, viewerCases, planningScenarios, planningPassed, planningFailed } = viewerReport.summary;
+  const stamp = viewerReport.generatedUtc?.slice(0, 19).replace('T', ' ') ?? '';
+  const planNote = planningScenarios
+    ? ` · ${planningPassed}/${planningScenarios} plans`
+    : '';
+  if (failed > 0 || planningFailed > 0) {
+    testSummary.textContent = `${passed}/${total} FK · ${viewerCases} poses${planNote} · ${stamp}`;
+    testSummary.dataset.state = 'err';
+  } else {
+    testSummary.textContent = `${passed}/${total} FK · ${viewerCases} poses${planNote} · ${stamp}`;
+    testSummary.dataset.state = 'ok';
+  }
+}
+
+function clearObstacles() {
+  while (obstacleGroup.children.length) {
+    const c = obstacleGroup.children[0];
+    obstacleGroup.remove(c);
+    c.geometry?.dispose();
+    if (c.material) {
+      if (Array.isArray(c.material)) c.material.forEach((m) => m.dispose());
+      else c.material.dispose();
+    }
+  }
+}
+
+function renderObstacles(obstacles) {
+  clearObstacles();
+  const mat = new THREE.MeshStandardMaterial({
+    color: 0xff4444,
+    transparent: true,
+    opacity: 0.38,
+    roughness: 0.6,
+  });
+  for (const o of obstacles ?? []) {
+    let mesh;
+    if (o.shape === 'sphere') {
+      mesh = new THREE.Mesh(new THREE.SphereGeometry(o.radius ?? 0.05, 20, 20), mat);
+      mesh.position.set(o.x, o.y, o.z);
+    } else if (o.shape === 'box') {
+      mesh = new THREE.Mesh(
+        new THREE.BoxGeometry((o.halfX ?? 0.05) * 2, (o.halfY ?? 0.05) * 2, (o.halfZ ?? 0.05) * 2),
+        mat,
+      );
+      mesh.position.set(o.x, o.y, o.z);
+    } else {
+      continue;
+    }
+    mesh.name = o.name ?? 'obstacle';
+    obstacleGroup.add(mesh);
+  }
+}
+
+function populateTestCases(fixtureId) {
+  testCaseSelect.innerHTML = '';
+  const fixture = viewerReport?.fixtures?.[fixtureId];
+  const cases = fixture?.cases ?? [];
+  const scenarios = fixture?.scenarios ?? [];
+
+  if (!cases.length && !scenarios.length) {
+    const opt = document.createElement('option');
+    opt.value = '';
+    opt.textContent = 'No cases in report';
+    testCaseSelect.appendChild(opt);
+    testCaseSelect.disabled = true;
+    return;
+  }
+
+  if (scenarios.length) {
+    const group = document.createElement('optgroup');
+    group.label = 'Planning scenarios';
+    for (const s of scenarios) {
+      const opt = document.createElement('option');
+      opt.value = `scenario:${s.id}`;
+      opt.textContent = `${s.passed ? '✓' : '✗'} ${s.label}`;
+      group.appendChild(opt);
+    }
+    testCaseSelect.appendChild(group);
+  }
+
+  if (cases.length) {
+    const group = document.createElement('optgroup');
+    group.label = 'FK cross-check';
+    for (const c of cases) {
+      const opt = document.createElement('option');
+      opt.value = c.id;
+      opt.textContent = `${c.passed ? '✓' : '✗'} ${c.id}`;
+      group.appendChild(opt);
+    }
+    testCaseSelect.appendChild(group);
+  }
+
+  testCaseSelect.disabled = false;
+}
+
+function applyTestCase(caseId) {
+  currentScenarioId = null;
+  const fixture = viewerReport?.fixtures?.[currentFixtureId];
+  const c = fixture?.cases?.find((x) => x.id === caseId);
+  if (!c) return;
+  clearObstacles();
+  applyJointState(c.joints);
+  trajectory = fkCaseTrajectory;
+  trajectoryTimes = null;
+  playBtn.disabled = !trajectory?.length;
+  rebuildTcpPath();
+  const err = c.positionErrorM?.toFixed?.(4) ?? '?';
+  const suiteNote = trajectory?.length ? ` · ${trajectory.length} FK poses` : '';
+  setDropState(`${c.id} · Δ${err}m${suiteNote}`, c.passed ? 'ok' : 'err');
+  setStatus(`[${c.passed ? 'PASS' : 'FAIL'} · ${c.id} · Δ${err}m]`, c.passed ? 'ok' : 'err');
+}
+
+function applyScenario(scenarioId) {
+  currentScenarioId = scenarioId;
+  const fixture = viewerReport?.fixtures?.[currentFixtureId];
+  const s = fixture?.scenarios?.find((x) => x.id === scenarioId);
+  if (!s) return;
+  renderObstacles(s.obstacles);
+  trajectory = (s.points ?? []).map((p) => p.joints);
+  trajectoryTimes = (s.points ?? []).map((p) => p.timeSeconds ?? null);
+  playBtn.disabled = !trajectory.length;
+  if (trajectory.length) {
+    applyJointState(trajectory[0]);
+    rebuildTcpPath();
+    setDropState(`${trajectory.length} planned waypoints · ${s.planner}`, s.passed ? 'ok' : 'err');
+  }
+  setStatus(`[${s.passed ? 'PASS' : 'FAIL'} · ${s.label}]`, s.passed ? 'ok' : 'err');
+}
+
+function onTestCaseChange() {
+  const value = testCaseSelect.value;
+  if (!value) return;
+  stopPlayback();
+  if (value.startsWith('scenario:')) applyScenario(value.slice('scenario:'.length));
+  else applyTestCase(value);
+}
+
+function loadReportTrajectory(fixtureId) {
+  const fixture = viewerReport?.fixtures?.[fixtureId];
+  const scenarios = fixture?.scenarios ?? [];
+  const cases = fixture?.cases ?? [];
+
+  populateTestCases(fixtureId);
+  fkCaseTrajectory = cases.length ? cases.map((c) => c.joints) : null;
+
+  const defaultScenario = scenarios[0];
+  if (defaultScenario) {
+    testCaseSelect.value = `scenario:${defaultScenario.id}`;
+    applyScenario(defaultScenario.id);
+    return;
+  }
+
+  if (!cases.length) {
+    fkCaseTrajectory = null;
+    loadBundledPath({ id: fixtureId });
+    return;
+  }
+
+  trajectory = fkCaseTrajectory;
+  trajectoryTimes = null;
+  playBtn.disabled = false;
+  setDropState(`${cases.length} FK cross-check poses · Motus report`, viewerReport.summary?.failed ? 'err' : 'ok');
+
+  const home = cases.find((c) => c.id.endsWith('_home')) ?? cases[0];
+  defaultPose = home.joints;
+  applyDefaultPose();
+  clearObstacles();
+  if (testCaseSelect.options.length) testCaseSelect.value = home.id;
+  rebuildTcpPath();
+}
+
 async function ensureViewerPresets() {
   if (viewerPresets) return viewerPresets;
   const res = await fetch(PRESETS_URL);
@@ -245,6 +526,19 @@ function syncSliders() {
   });
 }
 
+function resolveJointName(name) {
+  if (!robot?.joints[name]) {
+    const withSuffix = `${name}_joint`;
+    if (robot.joints[withSuffix]) return withSuffix;
+    if (name.endsWith('_joint')) {
+      const short = name.slice(0, -'_joint'.length);
+      if (robot.joints[short]) return short;
+    }
+    return null;
+  }
+  return name;
+}
+
 function applyJointState(state) {
   if (!robot || state == null) return;
   if (Array.isArray(state)) {
@@ -253,7 +547,8 @@ function applyJointState(state) {
     });
   } else {
     for (const [name, q] of Object.entries(state)) {
-      if (robot.joints[name]) robot.setJointValue(name, q);
+      const resolved = resolveJointName(name);
+      if (resolved) robot.setJointValue(resolved, q);
     }
   }
   robot.updateMatrixWorld(true);
@@ -289,7 +584,11 @@ function rebuildTcpPath() {
   geom.setAttribute('position', new THREE.Float32BufferAttribute(coords, 3));
   pathLine = new THREE.Line(
     geom,
-    new THREE.LineBasicMaterial({ color: 0x5b9bf6, transparent: true, opacity: 0.85 }),
+    new THREE.LineBasicMaterial({
+      color: SCENE_THEMES[currentTheme].path,
+      transparent: true,
+      opacity: 0.85,
+    }),
   );
   // Tip positions are scene-world coords; line must not be under the Z-up correction group.
   scene.add(pathLine);
@@ -300,48 +599,65 @@ function loadBundledPath(spec) {
   const points = preset?.demoPath?.points ?? [];
   if (!points.length) {
     trajectory = null;
+    trajectoryTimes = null;
     playBtn.disabled = true;
     setDropState('Drop Motus trajectory JSON export');
     dropZone.dataset.state = '';
     return;
   }
   trajectory = points.map((p) => mapTrajectoryPoint(p));
+  trajectoryTimes = points.map((p) => p.timeSeconds ?? null);
   playBtn.disabled = false;
   setDropState(`${points.length} points · bundled demo`, 'ok');
   rebuildTcpPath();
 }
 
 async function loadFixture(id) {
+  const seq = ++loadFixtureSeq;
   const spec = FIXTURES.find((f) => f.id === id) ?? FIXTURES[0];
   currentFixtureId = spec.id;
   stopPlayback();
   trajectory = null;
+  trajectoryTimes = null;
+  fkCaseTrajectory = null;
   exportJointNames = null;
   playBtn.disabled = true;
   setDropState('Drop Motus trajectory JSON export');
   dropZone.dataset.state = '';
 
-  fixtureHero.textContent = spec.id.replace(/_/g, ' ');
+  fixtureHero.textContent = spec.label ?? spec.id.replace(/_/g, ' ');
   setStatus('[LOADING]', 'busy');
 
   try {
     await ensureViewerPresets();
+    if (seq !== loadFixtureSeq) return;
+    await ensureViewerReport();
+    if (seq !== loadFixtureSeq) return;
     disposeRobot();
     const base = spec.dir ? `${FIXTURE_BASE}${spec.dir}/` : FIXTURE_BASE;
     const url = `${base}${spec.file}`;
     loader.workingPath = base;
     robot = await loader.loadAsync(url);
+    if (seq !== loadFixtureSeq) return;
     world.add(robot);
     styleRobotMaterials();
     buildJointSliders();
 
     const preset = viewerPresets[spec.id];
-    defaultPose = preset?.defaultPose ?? {};
-    applyDefaultPose();
-    loadBundledPath(spec);
+    const fixtureReport = viewerReport?.fixtures?.[spec.id];
+    if (!fixtureReport) {
+      defaultPose = preset?.defaultPose ?? {};
+      applyDefaultPose();
+      loadBundledPath(spec);
+      populateTestCases(spec.id);
+    } else {
+      loadReportTrajectory(spec.id);
+    }
     fitCamera();
-    setStatus(`[READY · ${spec.file}]`, 'ok');
+    const reportNote = fixtureReport ? ' · test report' : '';
+    setStatus(`[READY · ${spec.file}${reportNote}]`, 'ok');
   } catch (err) {
+    if (seq !== loadFixtureSeq) return;
     setStatus(`[ERROR · ${err.message}]`, 'err');
     console.error(err);
   }
@@ -364,9 +680,18 @@ function loadTrajectoryJson(text) {
   const points = data.points ?? [];
   if (!points.length) throw new Error('Trajectory has no points');
   trajectory = points.map((p) => mapTrajectoryPoint(p));
+  trajectoryTimes = points.map((p) => p.timeSeconds ?? null);
   playBtn.disabled = false;
   setDropState(`${points.length} points loaded`, 'ok');
   rebuildTcpPath();
+}
+
+function playbackDelayMs(index) {
+  if (!trajectoryTimes || index <= 0) return 900;
+  const prev = trajectoryTimes[index - 1];
+  const cur = trajectoryTimes[index];
+  if (prev == null || cur == null) return 900;
+  return Math.max(40, (cur - prev) * 1000);
 }
 
 function playTrajectory() {
@@ -381,10 +706,26 @@ function playTrajectory() {
   let i = 0;
   const tick = () => {
     if (!isPlaying) return;
-    applyJointVector(trajectory[i]);
-    setStatus(`[PLAYING · ${i + 1}/${trajectory.length}]`, 'busy');
-    i = (i + 1) % trajectory.length;
-    playTimer = setTimeout(tick, 80);
+    const fixture = viewerReport?.fixtures?.[currentFixtureId];
+    if (currentScenarioId) {
+      applyJointState(trajectory[i]);
+      setStatus(`[PLAYING · ${i + 1}/${trajectory.length} · plan]`, 'busy');
+    } else {
+      const caseEntry = fixture?.cases?.[i];
+      if (caseEntry) {
+        testCaseSelect.value = caseEntry.id;
+        applyJointState(caseEntry.joints);
+        const err = caseEntry.positionErrorM?.toFixed?.(4) ?? '?';
+        setStatus(`[PLAYING · ${i + 1}/${trajectory.length} · ${caseEntry.id} · Δ${err}m]`, 'busy');
+      } else {
+        applyJointVector(trajectory[i]);
+        setStatus(`[PLAYING · ${i + 1}/${trajectory.length}]`, 'busy');
+      }
+    }
+    const next = (i + 1) % trajectory.length;
+    const delay = playbackDelayMs(next === 0 ? 1 : next);
+    i = next;
+    playTimer = setTimeout(tick, delay);
   };
   tick();
 }
@@ -400,12 +741,16 @@ function handleTrajectoryFile(file) {
 }
 
 fixtureSelect.addEventListener('change', () => loadFixture(fixtureSelect.value));
+testCaseSelect.addEventListener('change', onTestCaseChange);
 resetBtn.addEventListener('click', resetJoints);
 recenterBtn.addEventListener('click', () => {
   fitCamera();
   setStatus('[RECENTERED]', 'ok');
 });
 playBtn.addEventListener('click', playTrajectory);
+themeBtn.addEventListener('click', () => {
+  applyTheme(currentTheme === 'light' ? 'dark' : 'light');
+});
 
 dropZone.addEventListener('dragover', (e) => {
   e.preventDefault();
@@ -429,6 +774,7 @@ dropZone.addEventListener('click', () => {
 });
 
 window.addEventListener('resize', resize);
+initTheme();
 resize();
 
 function animate() {
@@ -439,4 +785,4 @@ function animate() {
 animate();
 
 fixtureSelect.value = 'ur10e';
-loadFixture('ur10e');
+ensureViewerReport().then(() => loadFixture('ur10e'));

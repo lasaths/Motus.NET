@@ -35,4 +35,11 @@ Expose only what Motus needs first:
 
 ## Current status
 
-`Motus.OMPL.NET` is the C# adapter layer. `Motus.OMPL.Native` exposes a C ABI (`native/include/motus_ompl.h`); the default build is a stub until OMPL C++ is linked with `MOTUS_USE_OMPL=ON`. A managed RRT-Connect fallback remains available for development and CI without native OMPL.
+`Motus.Native` is the unified C# adapter. `motus_native` (CMake) exposes `motus_ompl_*` and `motus_fcl_*` via a single shared library (`libmotus_native.so` / `motus_native.dll`). Build with:
+
+```bash
+cmake -S native -B native/build -DMOTUS_USE_OMPL=ON -DMOTUS_USE_FCL=ON
+cmake --build native/build
+```
+
+A managed RRT-Connect fallback and C# attach-aware collision remain available when native libs are not on the loader path.

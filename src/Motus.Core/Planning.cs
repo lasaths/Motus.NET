@@ -7,6 +7,9 @@ public sealed class PlanningOptions
     public double MaxJointVelocityRadiansPerSecond { get; init; } = 1.5;
     public CollisionScene? CollisionScene { get; init; }
     public ICollisionChecker? CollisionChecker { get; init; }
+    public IReadOnlyList<AttachedBody>? AttachedBodies { get; init; }
+    /// <summary>When set, planners vary only mapped joints; others stay at <see cref="PlanningRequest.Start"/>.</summary>
+    public JointIndexMap? GroupMap { get; init; }
     public bool RetimeTrajectory { get; init; }
 }
 

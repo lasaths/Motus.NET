@@ -44,7 +44,8 @@ Host-agnostic library (Grasshopper, CLI, services). MoveIt-shaped seams without 
 - [x] Capsule sampling between link origins; SRDF-lite allowed pairs
 - [x] Per-link robot meshes (JSON `collisionLinks` + URDF `<collision>`)
 - [x] Continuous swept collision (adaptive segment sampling)
-- [ ] Attached objects
+- [x] Attached objects (`PlanningContext`, `AttachedBody`, C# attach at TCP)
+- [x] Tool collision via `RobotCollisionModel.ToolGeometry` (URDF tip link)
 
 ## Milestone 7 — Arbitrary robot import · L
 
@@ -52,6 +53,7 @@ Host-agnostic library (Grasshopper, CLI, services). MoveIt-shaped seams without 
 - [x] URDF collision geometry + `ur5e_collision.urdf` fixture; `docs/urdf-import.md`
 - [ ] xacro preprocessing, tool links, public `ur_description` fixture
 - [x] SRDF-lite `disable_collisions` import
+- [x] SRDF `group` / `end_effector` metadata (`SrdfLoader.LoadGroups`)
 
 ## Milestone 8 — Trajectory parameterization · M
 

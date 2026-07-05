@@ -89,5 +89,201 @@
       "wrist_2": -0.2,
       "wrist_3": 0.1
     }
+  },
+  {
+    "id": "ur10e_std_home",
+    "urdfFile": "ur10e_collision.urdf",
+    "baseLink": "base_link",
+    "tipLink": "tool0",
+    "joints": {
+      "shoulder_pan": 0.0,
+      "shoulder_lift": -1.5708,
+      "elbow": 1.5708,
+      "wrist_1": -1.5708,
+      "wrist_2": 0.0,
+      "wrist_3": 0.0
+    }
+  },
+  {
+    "id": "ur10e_pan_plus",
+    "urdfFile": "ur10e_collision.urdf",
+    "baseLink": "base_link",
+    "tipLink": "tool0",
+    "joints": {
+      "shoulder_pan": 0.8,
+      "shoulder_lift": -1.35,
+      "elbow": 1.35,
+      "wrist_1": -1.35,
+      "wrist_2": 0.2,
+      "wrist_3": 0.3
+    }
+  },
+  {
+    "id": "ur10e_reach",
+    "urdfFile": "ur10e_collision.urdf",
+    "baseLink": "base_link",
+    "tipLink": "tool0",
+    "joints": {
+      "shoulder_pan": 0.8,
+      "shoulder_lift": -1.2,
+      "elbow": 1.1,
+      "wrist_1": -1.2,
+      "wrist_2": 0.4,
+      "wrist_3": 0.6
+    }
+  },
+  {
+    "id": "ur10e_wrist_heavy",
+    "urdfFile": "ur10e_collision.urdf",
+    "baseLink": "base_link",
+    "tipLink": "tool0",
+    "joints": {
+      "shoulder_pan": 0.0,
+      "shoulder_lift": -1.2,
+      "elbow": 1.1,
+      "wrist_1": -1.2,
+      "wrist_2": 0.4,
+      "wrist_3": 0.8
+    }
+  },
+  {
+    "id": "ur10e_pan_minus",
+    "urdfFile": "ur10e_collision.urdf",
+    "baseLink": "base_link",
+    "tipLink": "tool0",
+    "joints": {
+      "shoulder_pan": -0.8,
+      "shoulder_lift": -1.35,
+      "elbow": 1.35,
+      "wrist_1": -1.35,
+      "wrist_2": 0.2,
+      "wrist_3": 0.3
+    }
+  },
+  {
+    "id": "ur10e_folded",
+    "urdfFile": "ur10e_collision.urdf",
+    "baseLink": "base_link",
+    "tipLink": "tool0",
+    "joints": {
+      "shoulder_pan": 0.5,
+      "shoulder_lift": -2.0,
+      "elbow": 2.4,
+      "wrist_1": -0.8,
+      "wrist_2": -0.6,
+      "wrist_3": -0.4
+    }
+  },
+  {
+    "id": "kr210_home",
+    "urdfFile": "kr210_r3100_ultra/kr210_r3100_ultra_minimal.urdf",
+    "baseLink": "base_link",
+    "tipLink": "tool0",
+    "joints": {
+      "joint_1": 0.0,
+      "joint_2": -1.2,
+      "joint_3": 1.5,
+      "joint_4": 0.0,
+      "joint_5": 0.5,
+      "joint_6": 0.0
+    }
+  },
+  {
+    "id": "kr210_mid",
+    "urdfFile": "kr210_r3100_ultra/kr210_r3100_ultra_minimal.urdf",
+    "baseLink": "base_link",
+    "tipLink": "tool0",
+    "joints": {
+      "joint_1": 0.4,
+      "joint_2": -0.8,
+      "joint_3": 2.0,
+      "joint_4": -0.5,
+      "joint_5": -0.3,
+      "joint_6": 0.6
+    }
+  },
+  {
+    "id": "kr210_pan_03",
+    "urdfFile": "kr210_r3100_ultra/kr210_r3100_ultra_minimal.urdf",
+    "baseLink": "base_link",
+    "tipLink": "tool0",
+    "joints": {
+      "joint_1": 0.3,
+      "joint_2": -1.0,
+      "joint_3": 1.8,
+      "joint_4": 0.2,
+      "joint_5": 0.3,
+      "joint_6": 0.2
+    }
+  },
+  {
+    "id": "kr210_reach",
+    "urdfFile": "kr210_r3100_ultra/kr210_r3100_ultra_minimal.urdf",
+    "baseLink": "base_link",
+    "tipLink": "tool0",
+    "joints": {
+      "joint_1": 0.6,
+      "joint_2": -0.9,
+      "joint_3": 2.0,
+      "joint_4": -0.3,
+      "joint_5": 0.0,
+      "joint_6": 0.4
+    }
+  },
+  {
+    "id": "kr210_fold",
+    "urdfFile": "kr210_r3100_ultra/kr210_r3100_ultra_minimal.urdf",
+    "baseLink": "base_link",
+    "tipLink": "tool0",
+    "joints": {
+      "joint_1": 0.6,
+      "joint_2": -1.1,
+      "joint_3": 1.6,
+      "joint_4": -0.5,
+      "joint_5": -0.2,
+      "joint_6": 0.6
+    }
+  },
+  {
+    "id": "kr210_wrist",
+    "urdfFile": "kr210_r3100_ultra/kr210_r3100_ultra_minimal.urdf",
+    "baseLink": "base_link",
+    "tipLink": "tool0",
+    "joints": {
+      "joint_1": 0.0,
+      "joint_2": -1.3,
+      "joint_3": 1.4,
+      "joint_4": 0.4,
+      "joint_5": 0.6,
+      "joint_6": 0.3
+    }
+  },
+  {
+    "id": "kr210_neg_pan",
+    "urdfFile": "kr210_r3100_ultra/kr210_r3100_ultra_minimal.urdf",
+    "baseLink": "base_link",
+    "tipLink": "tool0",
+    "joints": {
+      "joint_1": -0.5,
+      "joint_2": -1.0,
+      "joint_3": 1.7,
+      "joint_4": 0.1,
+      "joint_5": 0.4,
+      "joint_6": -0.2
+    }
+  },
+  {
+    "id": "kr210_extended",
+    "urdfFile": "kr210_r3100_ultra/kr210_r3100_ultra_minimal.urdf",
+    "baseLink": "base_link",
+    "tipLink": "tool0",
+    "joints": {
+      "joint_1": -0.3,
+      "joint_2": -0.7,
+      "joint_3": 2.3,
+      "joint_4": -0.8,
+      "joint_5": -0.5,
+      "joint_6": 0.9
+    }
   }
 ]

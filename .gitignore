@@ -14,4 +14,11 @@ graphify-out/
 *.key
 secrets.json
 node_modules/
+native/build*/
+native/build-stub*/
+.playwright-cli/
+document.title
+Thumbs.db
+.DS_Store
 tests/fixtures/ur10e/meshes/
+tests/fixtures/kr210_r3100_ultra/meshes/

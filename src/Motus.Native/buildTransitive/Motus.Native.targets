@@ -1,0 +1,19 @@
+<Project>
+  <!-- Copy motus_native stub next to host output (Grasshopper .gha folder, dotnet test bin). -->
+  <Target Name="CopyMotusNativeRuntime" AfterTargets="Build">
+    <PropertyGroup>
+      <_MotusNativeRid Condition="$([MSBuild]::IsOSPlatform('Windows'))">win-x64</_MotusNativeRid>
+      <_MotusNativeRid Condition="$([MSBuild]::IsOSPlatform('OSX')) and '$(RuntimeIdentifier)' == 'osx-x64'">osx-x64</_MotusNativeRid>
+      <_MotusNativeRid Condition="$([MSBuild]::IsOSPlatform('OSX')) and '$(RuntimeIdentifier)' != 'osx-x64'">osx-arm64</_MotusNativeRid>
+      <_MotusNativeRid Condition="$([MSBuild]::IsOSPlatform('Linux'))">linux-x64</_MotusNativeRid>
+      <_MotusNativeLib Condition="$([MSBuild]::IsOSPlatform('Windows'))">motus_native.dll</_MotusNativeLib>
+      <_MotusNativeLib Condition="$([MSBuild]::IsOSPlatform('OSX'))">libmotus_native.dylib</_MotusNativeLib>
+      <_MotusNativeLib Condition="$([MSBuild]::IsOSPlatform('Linux'))">libmotus_native.so</_MotusNativeLib>
+    </PropertyGroup>
+    <ItemGroup Condition="'$(_MotusNativeRid)' != ''">
+      <_MotusNativeRuntimeFile Include="$(MSBuildThisFileDirectory)..\runtimes\$(_MotusNativeRid)\native\$(_MotusNativeLib)" />
+    </ItemGroup>
+    <MakeDir Directories="$(OutputPath)runtimes\$(_MotusNativeRid)\native\" Condition="'@(_MotusNativeRuntimeFile)' != ''" />
+    <Copy SourceFiles="@(_MotusNativeRuntimeFile)" DestinationFolder="$(OutputPath)runtimes\$(_MotusNativeRid)\native\" SkipUnchangedFiles="true" Condition="'@(_MotusNativeRuntimeFile)' != ''" />
+  </Target>
+</Project>

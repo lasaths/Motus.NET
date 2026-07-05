@@ -27,4 +27,6 @@
     <ProjectReference Include="..\..\src\Motus.Presets\Motus.Presets.csproj" />
   </ItemGroup>
 
+  <Import Project="..\..\src\Motus.Native\buildTransitive\Motus.Native.targets" />
+
 </Project>

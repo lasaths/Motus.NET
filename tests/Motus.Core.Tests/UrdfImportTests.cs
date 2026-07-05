@@ -87,4 +87,47 @@ public class UrdfImportTests
     var high = fk.ComputeTcp(new JointState(new[] { 0.4, 0.0 }), robot.Preset.BaseFrame, robot.Preset.ToolFrame);
     Assert.True(high.Tcp.Z > low.Tcp.Z + 0.35);
   }
+
+  [Fact]
+  public void UrdfLoad_Ur10eOfficial_HasSixAxes()
+  {
+    var robot = UrdfRobotLoader.Load(FixturePath("ur10e/ur10e.urdf"), new UrdfLoadOptions
+    {
+      BaseLink = "base_link",
+      TipLink = "tool0",
+      ModelName = "UR10e"
+    });
+
+    Assert.Equal(6, robot.Preset.AxisCount);
+    Assert.Equal(6, robot.JointNames.Count);
+    Assert.Null(robot.CollisionModel);
+  }
+
+  [Fact]
+  public void UrdfLoad_TipLinkCollision_BecomesToolGeometry()
+  {
+    var robot = UrdfRobotLoader.Load(FixturePath("ur5e_collision.urdf"), new UrdfLoadOptions
+    {
+      BaseLink = "base_link",
+      TipLink = "tool0"
+    });
+
+    Assert.NotNull(robot.CollisionModel?.ToolGeometry);
+    Assert.Equal(CollisionShape.Box, robot.CollisionModel.ToolGeometry.Shape);
+  }
+
+  [Fact]
+  public void UrdfLoad_Kr210R3100Ultra_HasSixAxes()
+  {
+    var robot = UrdfRobotLoader.Load(FixturePath("kr210_r3100_ultra/kr210_r3100_ultra_minimal.urdf"), new UrdfLoadOptions
+    {
+      BaseLink = "base_link",
+      TipLink = "tool0",
+      ModelName = "KR 210 R3100 ultra"
+    });
+
+    Assert.Equal(6, robot.Preset.AxisCount);
+    Assert.Equal(6, robot.JointNames.Count);
+    Assert.Contains("joint_1", robot.JointNames);
+  }
 }

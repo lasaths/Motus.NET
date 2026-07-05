@@ -36,6 +36,21 @@
         --ease: cubic-bezier(0.25, 0.1, 0.25, 1);
       }
 
+      :root[data-theme="light"] {
+        --black: #f0f0f2;
+        --surface: #ffffff;
+        --surface-raised: #f8f8fa;
+        --border: #e4e4e8;
+        --border-visible: #d0d0d6;
+        --text-disabled: #9a9aa4;
+        --text-secondary: #6b6b76;
+        --text-primary: #2a2a30;
+        --text-display: #111114;
+        --accent: #c4121a;
+        --success: #2d7a42;
+        --interactive: #1d5bb8;
+      }
+
       * { box-sizing: border-box; margin: 0; padding: 0; }
 
       html, body {
@@ -78,6 +93,27 @@
         justify-content: space-between;
         align-items: flex-start;
         gap: var(--space-md);
+      }
+
+      .overlay-actions {
+        display: flex;
+        align-items: flex-start;
+        gap: var(--space-sm);
+        pointer-events: auto;
+      }
+
+      .theme-toggle {
+        width: auto;
+        padding: var(--space-xs) var(--space-sm);
+        font-size: 10px;
+        background: var(--surface);
+        border-color: var(--border-visible);
+        color: var(--text-secondary);
+      }
+
+      .theme-toggle:hover:not(:disabled) {
+        color: var(--text-display);
+        border-color: var(--text-secondary);
       }
 
       .fixture-hero {
@@ -124,6 +160,8 @@
         flex-direction: column;
         background: var(--surface);
         overflow: hidden;
+        min-width: 0;
+        min-height: 0;
       }
 
       .panel-header {
@@ -330,6 +368,18 @@
         gap: var(--space-sm);
       }
 
+      #test-summary {
+        font-family: var(--font-data);
+        font-size: 11px;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        color: var(--text-secondary);
+        margin-bottom: var(--space-xs);
+      }
+      #test-summary[data-state="ok"] { color: var(--success); }
+      #test-summary[data-state="err"] { color: var(--accent); }
+      #test-summary[data-state="warn"] { color: var(--interactive); }
+
       @media (max-width: 720px) {
         #app {
           grid-template-columns: 1fr;
@@ -346,7 +396,10 @@
         <div id="viewport-overlay">
           <div class="overlay-top">
             <div class="fixture-hero" id="fixture-hero">—</div>
-            <div class="dof-badge"><span id="dof-count">0</span> joints</div>
+            <div class="overlay-actions">
+              <button id="theme-btn" type="button" class="theme-toggle" title="Toggle light/dark mode">Light</button>
+              <div class="dof-badge"><span id="dof-count">0</span> joints</div>
+            </div>
           </div>
           <div id="status-line" data-state="busy">[INITIALIZING]</div>
         </div>
@@ -357,6 +410,13 @@
           <div class="panel-title">URDF kinematics viewer</div>
         </header>
         <div class="panel-body">
+          <div class="field-group">
+            <label class="panel-label" for="test-case">FK test case</label>
+            <div id="test-summary" data-state="">Loading report…</div>
+            <select id="test-case" disabled>
+              <option value="">—</option>
+            </select>
+          </div>
           <div class="field-group">
             <label class="panel-label" for="fixture">Fixture</label>
             <select id="fixture"></select>
@@ -375,7 +435,7 @@
             <button id="reset-btn" type="button">Home pose</button>
             <button id="recenter-btn" type="button">Recenter</button>
           </div>
-          <button id="play-btn" type="button" class="primary" disabled>Play trajectory</button>
+          <button id="play-btn" type="button" class="primary" disabled>Play test cases</button>
         </footer>
       </aside>
     </div>

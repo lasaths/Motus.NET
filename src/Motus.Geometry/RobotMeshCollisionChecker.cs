@@ -8,15 +8,19 @@ public sealed class RobotMeshCollisionChecker : ICollisionChecker
 {
     private readonly IFkSolver _fk;
     private readonly BaseFrame _base;
+    private readonly ToolFrame _tool;
     private readonly RobotCollisionModel? _robotCollision;
     private readonly SphereCollisionChecker _fallback;
+    private readonly IReadOnlyList<AttachedBody> _attached;
     private readonly Dictionary<string, BvhNode> _meshBvhCache = new();
 
-    public RobotMeshCollisionChecker(RobotModel robot, SerialJointChain? chain = null)
+    public RobotMeshCollisionChecker(RobotModel robot, SerialJointChain? chain = null, IReadOnlyList<AttachedBody>? attached = null)
     {
         _fk = KinematicsResolver.CreateFkSolver(robot.Preset, chain);
         _base = robot.Preset.BaseFrame;
+        _tool = robot.Preset.ToolFrame;
         _robotCollision = robot.CollisionModel;
+        _attached = attached ?? Array.Empty<AttachedBody>();
         _fallback = new SphereCollisionChecker(_fk, _base);
     }
 
@@ -27,6 +31,7 @@ public sealed class RobotMeshCollisionChecker : ICollisionChecker
 
         BuildBvhCache(scene);
         if (!SelfCollisionFree(state)) return false;
+        if (_attached.Count > 0 && !AttachedCollisionFree(state, scene)) return false;
 
         var linkMats = _fk.ComputeLinkTransforms(state.Positions);
         var baseM = Transforms.FromFrame(_base.Frame);
@@ -65,6 +70,46 @@ public sealed class RobotMeshCollisionChecker : ICollisionChecker
         return true;
     }
 
+    private bool AttachedCollisionFree(JointState state, CollisionScene scene)
+    {
+        if (_attached.Count == 0 && _robotCollision?.ToolGeometry is null) return true;
+
+        var tcpM = _fk.ComputeTcpTransform(state.Positions, _base.Frame, _tool.Frame);
+        var attachedWorld = new List<CollisionObject>();
+
+        if (_robotCollision?.ToolGeometry is { } toolGeom)
+            attachedWorld.Add(CollisionGeometry.Transform(toolGeom, tcpM));
+
+        foreach (var body in _attached)
+        {
+            var localM = Transforms.Multiply(tcpM, Transforms.FromFrame(body.TcpLocalPose));
+            attachedWorld.Add(CollisionGeometry.Transform(body.Geometry, localM));
+        }
+
+        foreach (var att in attachedWorld)
+        {
+            foreach (var obj in scene.Objects)
+            {
+                if (scene.IsPairAllowed(att.Name, obj.Name)) continue;
+                if (CollisionGeometry.Intersects(att, obj, _meshBvhCache)) return false;
+            }
+            if (_robotCollision is not null)
+            {
+                var linkMats = _fk.ComputeLinkTransforms(state.Positions);
+                var baseM = Transforms.FromFrame(_base.Frame);
+                foreach (var link in _robotCollision.Links)
+                {
+                    if (link.LinkIndex < 0 || link.LinkIndex >= linkMats.Count) continue;
+                    if (scene.IsPairAllowed(att.Name, CollisionBodies.RobotLink(link.LinkIndex))) continue;
+                    var worldM = Transforms.Multiply(baseM, linkMats[link.LinkIndex]);
+                    var linkGeom = CollisionGeometry.Transform(link.LocalGeometry, worldM);
+                    if (CollisionGeometry.Intersects(att, linkGeom, _meshBvhCache)) return false;
+                }
+            }
+        }
+        return true;
+    }
+
     private void BuildBvhCache(CollisionScene scene)
     {
         foreach (var meshObj in scene.Objects.Where(o => o.Shape == CollisionShape.Mesh))
@@ -85,6 +130,11 @@ public sealed class RobotMeshCollisionChecker : ICollisionChecker
             if (link.LinkIndex < 0 || link.LinkIndex >= linkMats.Count) continue;
             var worldM = Transforms.Multiply(baseM, linkMats[link.LinkIndex]);
             worldLinks.Add((link.LinkIndex, CollisionGeometry.Transform(link.LocalGeometry, worldM)));
+        }
+        if (_robotCollision.ToolGeometry is { } tool)
+        {
+            var tcpM = _fk.ComputeTcpTransform(state.Positions, _base.Frame, _tool.Frame);
+            worldLinks.Add((linkMats.Count - 1, CollisionGeometry.Transform(tool, tcpM)));
         }
         for (var i = 0; i < worldLinks.Count; i++)
         {

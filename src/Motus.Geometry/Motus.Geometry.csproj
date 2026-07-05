@@ -8,6 +8,9 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Motus.Core\Motus.Core.csproj" />
+    <ProjectReference Include="..\Motus.Native\Motus.Native.csproj" />
   </ItemGroup>
+
+  <Import Project="..\Motus.Native\buildTransitive\Motus.Native.targets" />
 
 </Project>

@@ -1,0 +1,48 @@
+<?xml version="1.0"?>
+<!-- Minimal KR 210 R3100 ultra serial chain (kinematics only, no meshes).
+     Joint origins from kuka_quantec_support/kr210_r3100_ultra_macro.xacro.
+     Source: https://github.com/kroshu/kuka_robot_descriptions (Apache-2.0). -->
+<robot name="kr210_r3100_ultra_minimal">
+  <link name="base_link"/>
+  <link name="link_1"/>
+  <link name="link_2"/>
+  <link name="link_3"/>
+  <link name="link_4"/>
+  <link name="link_5"/>
+  <link name="link_6"/>
+  <link name="tool0"/>
+  <joint name="joint_1" type="revolute">
+    <parent link="base_link"/><child link="link_1"/>
+    <origin xyz="0 0 0.675" rpy="0 0 0"/><axis xyz="0 0 1"/>
+    <limit lower="-3.2288591125" upper="3.2288591125" velocity="1.84"/>
+  </joint>
+  <joint name="joint_2" type="revolute">
+    <parent link="link_1"/><child link="link_2"/>
+    <origin xyz="0.35 0 0" rpy="-1.5707963267948966 0 0"/><axis xyz="0 0 1"/>
+    <limit lower="-2.44346095" upper="-0.0872664625" velocity="1.77"/>
+  </joint>
+  <joint name="joint_3" type="revolute">
+    <parent link="link_2"/><child link="link_3"/>
+    <origin xyz="1.35 0 0" rpy="0 0 -1.5707963267948966"/><axis xyz="0 0 1"/>
+    <limit lower="-2.0943951" upper="2.7052603375" velocity="1.87"/>
+  </joint>
+  <joint name="joint_4" type="revolute">
+    <parent link="link_3"/><child link="link_4"/>
+    <origin xyz="-0.041 1.4 0" rpy="1.5707963267948966 0 0"/><axis xyz="0 0 1"/>
+    <limit lower="-6.108652375" upper="6.108652375" velocity="2.37"/>
+  </joint>
+  <joint name="joint_5" type="revolute">
+    <parent link="link_4"/><child link="link_5"/>
+    <origin xyz="0 0 0" rpy="-1.5707963267948966 0 0"/><axis xyz="0 0 1"/>
+    <limit lower="-2.13802833125" upper="2.13802833125" velocity="2.26"/>
+  </joint>
+  <joint name="joint_6" type="revolute">
+    <parent link="link_5"/><child link="link_6"/>
+    <origin xyz="0 0 0" rpy="1.5707963267948966 0 0"/><axis xyz="0 0 1"/>
+    <limit lower="-6.108652375" upper="6.108652375" velocity="3.6"/>
+  </joint>
+  <joint name="link6-tool0" type="fixed">
+    <parent link="link_6"/><child link="tool0"/>
+    <origin xyz="0 0 -0.24" rpy="0 3.141592653589793 0"/>
+  </joint>
+</robot>

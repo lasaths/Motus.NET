@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <IsPackable>true</IsPackable>
+    <Description>Unified P/Invoke bindings for motus_native (OMPL + FCL). Ships per-RID stub libraries for Rhino 8 Windows/macOS; managed fallbacks when stubs report unavailable.</Description>
+    <PackageTags>robotics;motion-planning;ompl;fcl;native;rhino;grasshopper;dotnet</PackageTags>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="runtimes\**\*" Pack="true" PackagePath="runtimes\%(RecursiveDir)%(Filename)%(Extension)" />
+    <None Include="buildTransitive\**\*" Pack="true" PackagePath="buildTransitive\" />
+  </ItemGroup>
+
+  <Import Project="buildTransitive\Motus.Native.targets" />
+
+</Project>
+

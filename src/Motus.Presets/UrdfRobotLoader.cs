@@ -44,7 +44,7 @@ public static class UrdfRobotLoader
         urdfDirectory ??= ".";
         var robot = doc.Root ?? throw new InvalidOperationException("URDF has no root element.");
         var joints = robot.Elements("joint").Select(ParseJoint).ToList();
-        var chainJoints = BuildSerialChain(joints, options.BaseLink, options.TipLink);
+        var (chainJoints, tipOffset) = BuildSerialChain(joints, options.BaseLink, options.TipLink);
 
         var limits = chainJoints.Select(j => new JointLimit(
             j.Lower, j.Upper,
@@ -59,7 +59,7 @@ public static class UrdfRobotLoader
             AxisCount = chainJoints.Count,
             JointLimits = limits,
             BaseFrame = BaseFrame.Identity,
-            ToolFrame = ToolFrame.Identity,
+            ToolFrame = tipOffset is { } tip ? new ToolFrame(tip, options.TipLink) : ToolFrame.Identity,
             SourceNote = "Imported from URDF",
         };
 
@@ -71,12 +71,14 @@ public static class UrdfRobotLoader
 
         var jointNames = chainJoints.Select(j => j.Name).ToList();
         var linkNames = chainJoints.Select(j => j.ChildLink).ToList();
-        var collision = UrdfCollisionLoader.Load(robot, linkNames, urdfDirectory);
+        var linkCollision = UrdfCollisionLoader.Load(robot, linkNames, urdfDirectory);
+        var toolGeom = UrdfCollisionLoader.LoadTipLinkGeometry(robot, options.TipLink, urdfDirectory);
+        var collision = UrdfCollisionLoader.WithToolGeometry(linkCollision, toolGeom);
 
         return new UrdfRobot(preset, new SerialJointChain(defs), jointNames, collision);
     }
 
-    private static List<ParsedJoint> BuildSerialChain(List<ParsedJoint> all, string baseLink, string tipLink)
+    private static (List<ParsedJoint> Joints, Frame? TipOffset) BuildSerialChain(List<ParsedJoint> all, string baseLink, string tipLink)
     {
         var byChild = all.ToDictionary(j => j.ChildLink, StringComparer.OrdinalIgnoreCase);
         var path = new List<ParsedJoint>();
@@ -123,7 +125,16 @@ public static class UrdfRobotLoader
         if (merged.Count == 0)
             throw new InvalidOperationException($"No actuated joints between '{baseLink}' and '{tipLink}'.");
 
-        return merged;
+        Frame? tipOffset = null;
+        if (pendingFixed is not null)
+        {
+            var t = Transforms.FromRpy(
+                pendingFixed.OriginX, pendingFixed.OriginY, pendingFixed.OriginZ,
+                pendingFixed.Roll, pendingFixed.Pitch, pendingFixed.Yaw);
+            tipOffset = Transforms.ToFrame(t);
+        }
+
+        return (merged, tipOffset);
     }
 
     private static ParsedJoint MergeFixed(ParsedJoint a, ParsedJoint b)

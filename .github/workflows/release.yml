@@ -6,14 +6,61 @@ on:
       - "v*"
 
 jobs:
+  build-stubs:
+    strategy:
+      matrix:
+        include:
+          - os: windows-latest
+            rid: win-x64
+          - os: macos-latest
+            rid: osx-arm64
+          - os: ubuntu-latest
+            rid: linux-x64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install cmake (macOS)
+        if: matrix.os == 'macos-latest'
+        run: brew install cmake
+
+      - name: Build native stub
+        shell: bash
+        run: ./scripts/build-native-stub.sh ${{ matrix.rid }}
+
+      - name: Upload stub
+        uses: actions/upload-artifact@v4
+        with:
+          name: motus-native-${{ matrix.rid }}
+          path: src/Motus.Native/runtimes/${{ matrix.rid }}/native/
+
   release:
+    needs: build-stubs
     runs-on: ubuntu-latest
     permissions:
       contents: write
-      id-token: write # NuGet trusted publishing (OIDC)
+      id-token: write
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: Download native stubs
+        uses: actions/download-artifact@v4
+        with:
+          pattern: motus-native-*
+          path: stubs
+          merge-multiple: true
+
+      - name: Merge stubs into package
+        run: |
+          mkdir -p src/Motus.Native/runtimes
+          cp -r stubs/* src/Motus.Native/runtimes/ 2>/dev/null || true
+          find stubs -type f | while read f; do
+            rel=$(echo "$f" | sed 's|.*/runtimes/|runtimes/|')
+            mkdir -p "src/Motus.Native/$(dirname "$rel")"
+            cp "$f" "src/Motus.Native/$rel"
+          done
+          ls -R src/Motus.Native/runtimes || true
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v4

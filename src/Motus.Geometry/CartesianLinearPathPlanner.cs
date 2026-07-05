@@ -282,9 +282,7 @@ public sealed class CartesianLinearPathPlanner
 
         var checker = request.Options.CollisionChecker;
         if (PlanningCollision.SceneHasObstacles(scene) && checker is null)
-            checker = robot.CollisionModel is not null
-                ? new RobotMeshCollisionChecker(robot)
-                : new SphereCollisionChecker(robot.Preset);
+            checker = CollisionCheckerFactory.Create(robot, attached: request.Options.AttachedBodies);
 
         if (PlanningCollision.SceneHasObstacles(scene))
         {

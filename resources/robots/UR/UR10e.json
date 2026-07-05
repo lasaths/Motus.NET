@@ -58,6 +58,7 @@
     { "link": 4, "shape": "capsule", "radius": 0.075, "length": 0.12 },
     { "link": 5, "shape": "capsule", "radius": 0.06, "length": 0.09 }
   ],
+  "toolCollision": { "shape": "box", "halfX": 0.025, "halfY": 0.025, "halfZ": 0.035 },
   "notes": "UR10e planning default",
   "sourceNote": "Kinematics from Universal Robots ROS2 description; collision capsules approximate",
   "disclaimer": "Preset values are planning/visualization defaults only, not physical compatibility guarantees."

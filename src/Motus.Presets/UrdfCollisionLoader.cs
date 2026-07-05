@@ -38,6 +38,32 @@ internal static class UrdfCollisionLoader
         return geometries.Count == 0 ? null : new RobotCollisionModel(geometries);
     }
 
+    /// <summary>Load collision from tip link (e.g. tool0) into TCP-local tool geometry.</summary>
+    public static CollisionObject? LoadTipLinkGeometry(
+        XElement robotRoot,
+        string tipLinkName,
+        string urdfDirectory)
+    {
+        var linkEl = robotRoot.Elements("link")
+            .FirstOrDefault(l => string.Equals(l.Attribute("name")?.Value, tipLinkName, StringComparison.OrdinalIgnoreCase));
+        if (linkEl is null) return null;
+        var collision = linkEl.Elements("collision").FirstOrDefault();
+        if (collision is null) return null;
+        var origin = collision.Element("origin");
+        var xyz = ParseTriple(origin?.Attribute("xyz")?.Value);
+        var rpy = ParseTriple(origin?.Attribute("rpy")?.Value);
+        var pose = FrameFromRpy(xyz.x, xyz.y, xyz.z, rpy.x, rpy.y, rpy.z);
+        var geom = collision.Element("geometry") ?? throw new InvalidOperationException($"collision on {tipLinkName} missing geometry");
+        return ParseGeometry($"{tipLinkName}_tool_col", pose, geom, urdfDirectory);
+    }
+
+    public static RobotCollisionModel? WithToolGeometry(RobotCollisionModel? model, CollisionObject? toolGeometry)
+    {
+        if (model is null && toolGeometry is null) return null;
+        if (model is null) return new RobotCollisionModel(Array.Empty<LinkCollisionGeometry>(), toolGeometry);
+        return new RobotCollisionModel(model.Links, toolGeometry ?? model.ToolGeometry);
+    }
+
     private static CollisionObject? ParseGeometry(string name, Frame pose, XElement geom, string urdfDirectory)
     {
         if (geom.Element("box") is { } box)
@@ -70,12 +96,28 @@ internal static class UrdfCollisionLoader
     private static string ResolveMeshPath(string filename, string urdfDirectory)
     {
         var cleaned = filename.Replace("package://", "").Replace("file://", "");
-        var path = Path.IsPathRooted(cleaned) ? cleaned : Path.GetFullPath(Path.Combine(urdfDirectory, cleaned));
+        var baseFull = Path.GetFullPath(urdfDirectory);
+        var path = Path.IsPathRooted(cleaned)
+            ? Path.GetFullPath(cleaned)
+            : Path.GetFullPath(Path.Combine(urdfDirectory, cleaned));
         if (!File.Exists(path))
             path = Path.GetFullPath(Path.Combine(urdfDirectory, Path.GetFileName(cleaned)));
         if (!File.Exists(path))
             throw new FileNotFoundException($"URDF mesh not found: {filename}");
+        if (!IsUnderDirectory(path, baseFull))
+            throw new InvalidOperationException($"URDF mesh path escapes asset directory: {filename}");
         return path;
+    }
+
+    private static bool IsUnderDirectory(string path, string directory)
+    {
+        var fullPath = Path.GetFullPath(path);
+        var fullDir = Path.GetFullPath(directory);
+        if (string.Equals(fullPath, fullDir, StringComparison.OrdinalIgnoreCase))
+            return true;
+        var prefix = fullDir.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+            + Path.DirectorySeparatorChar;
+        return fullPath.StartsWith(prefix, StringComparison.OrdinalIgnoreCase);
     }
 
     private static Frame FrameFromRpy(double x, double y, double z, double roll, double pitch, double yaw)

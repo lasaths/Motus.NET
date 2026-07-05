@@ -1,0 +1,54 @@
+<?xml version="1.0"?>
+<!-- Minimal UR10e serial chain for Motus demos.
+     Joint origins from Universal Robots default_kinematics.yaml (ur10e).
+     Source: https://github.com/UniversalRobots/Universal_Robots_ROS2_Description
+     License: BSD-3-Clause (see LICENSE in this folder). -->
+<robot name="ur10e_minimal">
+  <link name="base_link"/>
+  <link name="shoulder_link">
+    <collision>
+      <origin xyz="0 0 0.09" rpy="0 0 0"/>
+      <geometry><cylinder length="0.14" radius="0.10"/></geometry>
+    </collision>
+  </link>
+  <link name="upper_arm_link">
+    <collision>
+      <origin xyz="0 0 0.28" rpy="0 0 0"/>
+      <geometry><box size="0.14 0.14 0.56"/></geometry>
+    </collision>
+  </link>
+  <link name="forearm_link"/>
+  <link name="wrist_1_link"/>
+  <link name="wrist_2_link"/>
+  <link name="tool0"/>
+  <joint name="shoulder_pan" type="revolute">
+    <parent link="base_link"/><child link="shoulder_link"/>
+    <origin xyz="0 0 0.1807" rpy="0 0 0"/><axis xyz="0 0 1"/>
+    <limit lower="-6.28" upper="6.28" velocity="3.14"/>
+  </joint>
+  <joint name="shoulder_lift" type="revolute">
+    <parent link="shoulder_link"/><child link="upper_arm_link"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/><axis xyz="0 1 0"/>
+    <limit lower="-6.28" upper="6.28" velocity="3.14"/>
+  </joint>
+  <joint name="elbow" type="revolute">
+    <parent link="upper_arm_link"/><child link="forearm_link"/>
+    <origin xyz="0 -0.6127 0" rpy="0 0 0"/><axis xyz="0 1 0"/>
+    <limit lower="-6.28" upper="6.28" velocity="3.14"/>
+  </joint>
+  <joint name="wrist_1" type="revolute">
+    <parent link="forearm_link"/><child link="wrist_1_link"/>
+    <origin xyz="0 -0.57155 0.17415" rpy="0 0 0"/><axis xyz="0 1 0"/>
+    <limit lower="-6.28" upper="6.28" velocity="3.14"/>
+  </joint>
+  <joint name="wrist_2" type="revolute">
+    <parent link="wrist_1_link"/><child link="wrist_2_link"/>
+    <origin xyz="0 0 -0.11985" rpy="0 0 0"/><axis xyz="0 0 1"/>
+    <limit lower="-6.28" upper="6.28" velocity="3.14"/>
+  </joint>
+  <joint name="wrist_3" type="revolute">
+    <parent link="wrist_2_link"/><child link="tool0"/>
+    <origin xyz="0 0 0.11655" rpy="0 0 0"/><axis xyz="0 1 0"/>
+    <limit lower="-6.28" upper="6.28" velocity="3.14"/>
+  </joint>
+</robot>

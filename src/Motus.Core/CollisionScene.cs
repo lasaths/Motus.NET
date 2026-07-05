@@ -4,6 +4,7 @@ namespace Motus.Core;
 public static class CollisionBodies
 {
     public static string RobotLink(int index) => $"link:{index}";
+    public static string Attached(string name) => $"attached:{name}";
 }
 
 public sealed class CollisionScene

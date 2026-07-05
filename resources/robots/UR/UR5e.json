@@ -23,6 +23,7 @@
     { "link": 4, "shape": "capsule", "radius": 0.06, "length": 0.10 },
     { "link": 5, "shape": "capsule", "radius": 0.05, "length": 0.08 }
   ],
+  "toolCollision": { "shape": "box", "halfX": 0.02, "halfY": 0.02, "halfZ": 0.03 },
   "notes": "UR5e planning default",
   "sourceNote": "Approximate public datasheet values for visualization",
   "disclaimer": "Preset values are planning/visualization defaults only, not physical compatibility guarantees."

@@ -37,12 +37,11 @@ public class RobotCollisionTests
   }
 
   [Fact]
-  public void UrdfCollision_LoadsUr10eFixture()
+  public void UrdfCollision_OfficialUr10e_HasNoEmbeddedCollision()
   {
-    var path = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "fixtures", "ur10e_collision.urdf"));
+    var path = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "fixtures", "ur10e", "ur10e.urdf"));
     var urdf = UrdfRobotLoader.Load(path, new UrdfLoadOptions { BaseLink = "base_link", TipLink = "tool0" });
-    Assert.NotNull(urdf.CollisionModel);
-    Assert.True(urdf.CollisionModel!.Links.Count >= 2);
+    Assert.Null(urdf.CollisionModel);
   }
 
   [Fact]
@@ -88,24 +87,36 @@ public class DenseSegmentCollisionTests
     Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "resources", "robots"));
 
   [Fact]
-  public void FastSegment_RequiresMoreSamples()
+  public void CoarseStep_NeverClearsSegmentRejectedByFineSampling()
   {
     var preset = PresetLoader.LoadByModelName("UR5e", ResourcesRoot);
     var checker = new SphereCollisionChecker(preset);
-    var start = new JointState(new double[6]);
-    var mid = new JointState(new[] { 1.5, -1.0, 1.5, -1.0, -1.0, 0.5 });
     var scene = new CollisionScene(new[] { CollisionObject.Sphere("block", new Frame(0.5, -0.3, 0.4), 0.06) });
-    var coarse = checker.SegmentCollisionFree(start, mid, scene, 0.5);
-    var fine = checker.SegmentCollisionFree(start, mid, scene, 0.05);
-    if (!coarse && fine)
-      Assert.True(true);
-    else
-      Assert.True(!coarse || fine);
+    var rng = new Random(42);
+    for (var trial = 0; trial < 200; trial++)
+    {
+      var start = RandomJoint(rng, 6);
+      var mid = RandomJoint(rng, 6);
+      var coarse = checker.SegmentCollisionFree(start, mid, scene, 0.5);
+      var fine = checker.SegmentCollisionFree(start, mid, scene, 0.05);
+      Assert.False(coarse && !fine, $"coarse cleared segment that fine rejected (trial {trial})");
+    }
+  }
+
+  private static JointState RandomJoint(Random rng, int n)
+  {
+    var q = new double[n];
+    for (var i = 0; i < n; i++)
+      q[i] = rng.NextDouble() * 2.4 - 1.2;
+    return new JointState(q);
   }
 }
 
 public class SrdfLoaderTests
 {
+  private static string Ur10eSrdfPath =>
+    Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "fixtures", "ur10e", "ur10e.srdf"));
+
   [Fact]
   public void MergeAllowedPairs_AddsToScene()
   {
@@ -113,5 +124,42 @@ public class SrdfLoaderTests
     var pairs = new[] { ("base_link", "table") };
     var merged = SrdfLoader.MergeAllowedPairs(scene, pairs);
     Assert.Contains(merged.AllowedPairs, p => p.A == "base_link" && p.B == "table");
+  }
+
+  [Fact]
+  public void LoadGroups_OfficialUr10eSrdf_ReturnsManipulatorChain()
+  {
+    var groups = SrdfLoader.LoadGroups(Ur10eSrdfPath);
+    var manipulator = Assert.Single(groups, g => g.Name == "ur_manipulator");
+    Assert.Equal("base_link", manipulator.BaseLink);
+    Assert.Equal("tool0", manipulator.TipLink);
+    Assert.Single(manipulator.JointNames);
+    Assert.Contains("..", manipulator.JointNames[0]);
+  }
+
+  [Fact]
+  public void LoadAllowedPairs_OfficialUr10eSrdf_MergeWithLinkIndices()
+  {
+    var pairs = SrdfLoader.LoadAllowedPairs(Ur10eSrdfPath);
+    var scene = new CollisionScene();
+    var linkMap = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase)
+    {
+      ["base_link"] = 0,
+      ["base_link_inertia"] = 1
+    };
+    var merged = SrdfLoader.MergeAllowedPairs(scene, pairs, linkMap);
+    Assert.Contains(merged.AllowedPairs, p => p.A == CollisionBodies.RobotLink(0) && p.B == CollisionBodies.RobotLink(1));
+  }
+
+  [Fact]
+  public void LoadEndEffectors_ParsesParentLink()
+  {
+    var doc = System.Xml.Linq.XDocument.Parse("""
+      <robot name="ur10e">
+        <end_effector name="ee" parent_link="tool0" group="ur_manipulator"/>
+      </robot>
+      """);
+    var map = SrdfLoader.LoadEndEffectors(doc);
+    Assert.Equal("tool0", map["ee"]);
   }
 }

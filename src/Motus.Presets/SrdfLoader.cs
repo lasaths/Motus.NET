@@ -36,4 +36,39 @@ public static class SrdfLoader
         }
         return new CollisionScene(scene.Objects.ToList(), pairs);
     }
+
+    public static IReadOnlyList<PlanningGroup> LoadGroups(string srdfPath) =>
+        LoadGroups(XDocument.Load(srdfPath));
+
+    public static IReadOnlyList<PlanningGroup> LoadGroups(XDocument doc)
+    {
+        var root = doc.Root ?? throw new InvalidOperationException("SRDF has no root.");
+        var groups = new List<PlanningGroup>();
+        foreach (var groupEl in root.Elements("group"))
+        {
+            var name = groupEl.Attribute("name")?.Value ?? "";
+            if (string.IsNullOrEmpty(name)) continue;
+            var chain = groupEl.Elements("chain").FirstOrDefault();
+            if (chain is null) continue;
+            var baseLink = chain.Attribute("base_link")?.Value ?? "";
+            var tipLink = chain.Attribute("tip_link")?.Value ?? "";
+            var joints = groupEl.Elements("joint").Select(j => j.Attribute("name")?.Value ?? "")
+                .Where(j => !string.IsNullOrEmpty(j)).ToList();
+            if (joints.Count == 0 && !string.IsNullOrEmpty(baseLink) && !string.IsNullOrEmpty(tipLink))
+                joints = new List<string> { $"{baseLink}..{tipLink}" };
+            groups.Add(new PlanningGroup(name, baseLink, tipLink, joints));
+        }
+        return groups;
+    }
+
+    public static IReadOnlyDictionary<string, string> LoadEndEffectors(XDocument doc)
+    {
+        var root = doc.Root ?? throw new InvalidOperationException("SRDF has no root.");
+        return root.Elements("end_effector")
+            .Where(el => el.Attribute("name")?.Value is not null)
+            .ToDictionary(
+                el => el.Attribute("name")!.Value,
+                el => el.Attribute("parent_link")?.Value ?? "",
+                StringComparer.OrdinalIgnoreCase);
+    }
 }

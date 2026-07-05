@@ -1,0 +1,94 @@
+<?xml version="1.0"?>
+<!-- KR 210 R3100 ultra with visual meshes from kuka_robot_descriptions (Apache-2.0).
+     Kinematics and mesh offsets: kuka_quantec_support/urdf/kr210_r3100_ultra_macro.xacro
+     Meshes: meshes/visual/*.dae (KUKA orange → white) — run tools/urdf-viewer/scripts/fetch-kr210-assets.mjs -->
+<robot name="kr210_r3100_ultra">
+  <material name="white">
+    <color rgba="1 1 1 1"/>
+  </material>
+  <link name="base_link">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry><mesh filename="meshes/visual/base_link.dae"/></geometry>
+      <material name="white"/>
+    </visual>
+  </link>
+  <link name="link_1">
+    <visual>
+      <origin xyz="0 0 -0.675" rpy="0 0 0"/>
+      <geometry><mesh filename="meshes/visual/link_1.dae"/></geometry>
+      <material name="white"/>
+    </visual>
+  </link>
+  <link name="link_2">
+    <visual>
+      <origin xyz="-0.675 -0.35 0" rpy="1.5707963267948966 0 1.5707963267948966"/>
+      <geometry><mesh filename="meshes/visual/link_2.dae"/></geometry>
+      <material name="white"/>
+    </visual>
+  </link>
+  <link name="link_3">
+    <visual>
+      <origin xyz="-2.025 -0.35 0" rpy="1.5707963267948966 0 1.5707963267948966"/>
+      <geometry><mesh filename="meshes/visual/link_3.dae"/></geometry>
+      <material name="white"/>
+    </visual>
+  </link>
+  <link name="link_4">
+    <visual>
+      <origin xyz="1.984 0 1.75" rpy="3.141592653589793 1.5707963267948966 0"/>
+      <geometry><mesh filename="meshes/visual/link_4.dae"/></geometry>
+      <material name="white"/>
+    </visual>
+  </link>
+  <link name="link_5">
+    <visual>
+      <origin xyz="-1.984 -1.75 0" rpy="1.5707963267948966 0 1.5707963267948966"/>
+      <geometry><mesh filename="meshes/visual/link_5.dae"/></geometry>
+      <material name="white"/>
+    </visual>
+  </link>
+  <link name="link_6">
+    <visual>
+      <origin xyz="1.984 0 1.75" rpy="3.141592653589793 1.5707963267948966 0"/>
+      <geometry><mesh filename="meshes/visual/link_6.dae"/></geometry>
+      <material name="white"/>
+    </visual>
+  </link>
+  <link name="tool0"/>
+
+  <joint name="joint_1" type="revolute">
+    <parent link="base_link"/><child link="link_1"/>
+    <origin xyz="0 0 0.675" rpy="0 0 0"/><axis xyz="0 0 1"/>
+    <limit lower="-3.2288591125" upper="3.2288591125" velocity="1.84"/>
+  </joint>
+  <joint name="joint_2" type="revolute">
+    <parent link="link_1"/><child link="link_2"/>
+    <origin xyz="0.35 0 0" rpy="-1.5707963267948966 0 0"/><axis xyz="0 0 1"/>
+    <limit lower="-2.44346095" upper="-0.0872664625" velocity="1.77"/>
+  </joint>
+  <joint name="joint_3" type="revolute">
+    <parent link="link_2"/><child link="link_3"/>
+    <origin xyz="1.35 0 0" rpy="0 0 -1.5707963267948966"/><axis xyz="0 0 1"/>
+    <limit lower="-2.0943951" upper="2.7052603375" velocity="1.87"/>
+  </joint>
+  <joint name="joint_4" type="revolute">
+    <parent link="link_3"/><child link="link_4"/>
+    <origin xyz="-0.041 1.4 0" rpy="1.5707963267948966 0 0"/><axis xyz="0 0 1"/>
+    <limit lower="-6.108652375" upper="6.108652375" velocity="2.37"/>
+  </joint>
+  <joint name="joint_5" type="revolute">
+    <parent link="link_4"/><child link="link_5"/>
+    <origin xyz="0 0 0" rpy="-1.5707963267948966 0 0"/><axis xyz="0 0 1"/>
+    <limit lower="-2.13802833125" upper="2.13802833125" velocity="2.26"/>
+  </joint>
+  <joint name="joint_6" type="revolute">
+    <parent link="link_5"/><child link="link_6"/>
+    <origin xyz="0 0 0" rpy="1.5707963267948966 0 0"/><axis xyz="0 0 1"/>
+    <limit lower="-6.108652375" upper="6.108652375" velocity="3.6"/>
+  </joint>
+  <joint name="link6-tool0" type="fixed">
+    <parent link="link_6"/><child link="tool0"/>
+    <origin xyz="0 0 -0.24" rpy="0 3.141592653589793 0"/>
+  </joint>
+</robot>

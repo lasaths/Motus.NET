@@ -7,6 +7,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-07-05
+
+### Added
+
+- `PlanningContext`, `AttachedBody`, `PlanningGroup`, `JointIndexMap` — attach at TCP hides scene obstacle; SRDF-style groups
+- `Motus.Native` — unified P/Invoke to `motus_native` (OMPL + FCL C ABI); per-RID stubs for Win/Mac/Linux NuGet (managed fallback on desktop)
+- `CollisionCheckerFactory`, `AttachAwareCollisionChecker`, `FclCollisionChecker` (FCL when native built; C# mesh fallback)
+- `MotusCapabilities.Describe()` — runtime probe for hosts (Grasshopper, CLI)
+- Group-aware RRT-Connect — locked joints via `PlanningOptions.GroupMap`; SRDF `LoadGroups` → `PlanningContext.ForGroup`
+- Native OMPL: motion validator, `max_plan_time_sec`, `OmplPlannerId` (RRT-Connect, RRT*), native path simplification via `motus_ompl_simplify_path`
+- Native FCL: box/sphere/capsule upsert, attach, allowed pairs (`motus_fcl_*`) — Linux CI build; desktop stubs
+- JSON preset `toolCollision` field; UR5e/UR10e bundled tool volumes
+- URDF tip-link collision → `RobotCollisionModel.ToolGeometry`
+- `SrdfLoader.LoadGroups`, `LoadEndEffectors`
+- Official `tests/fixtures/ur10e/ur10e.srdf` (MoveIt config, pairs with unmodified `ur10e.urdf`)
+- `docs/rhino-host.md` — Rhino 8 Win/Mac deployment guide
+- CI matrix: Windows, macOS, Ubuntu; `native-integration` job (Linux OMPL+FCL with `MOTUS_NATIVE_FULL` tests)
+- Tests: attach/detach RRT, group lock, SRDF→ForGroup→RRT, native smoke (Linux), URDF tip collision, FK cross-checks, kr210 fixtures
+- URDF viewer improvements; `scripts/build-native-stub.sh` / `.ps1`
+
+### Changed
+
+- `RrtConnectPlanner` — group planning space; native validity embeds locked joints
+- `CartesianLinearPathPlanner` — uses `CollisionCheckerFactory` with `AttachedBodies`
+- `PresetLoader` — resolves bundled robots from plugin/`AppContext.BaseDirectory`
+- `RobotMeshCollisionChecker` — tool geometry + attached bodies on mesh path
+
+### Fixed
+
+- `CollisionCheckerFactory` — no double-wrap of `AttachAwareCollisionChecker` on mesh checker
+- Native OMPL iteration vs time budget; `setRange` always applied
+- URDF mesh loader rejects paths outside the asset directory
+- Native runtime tests match stub vs full-native CI profiles (`MOTUS_NATIVE_FULL`)
+
 ## [0.3.3] - 2026-07-05
 
 ### Added
@@ -103,7 +137,8 @@ Initial public release.
 - **Motus.Presets** — JSON preset loader with bundled UR and KUKA defaults
   (approximate public datasheet values for planning/visualization only).
 
-[Unreleased]: https://github.com/lasaths/Motus.NET/compare/v0.3.3...HEAD
+[Unreleased]: https://github.com/lasaths/Motus.NET/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/lasaths/Motus.NET/compare/v0.3.3...v0.4.0
 [0.3.3]: https://github.com/lasaths/Motus.NET/compare/v0.3.2...v0.3.3
 [0.3.2]: https://github.com/lasaths/Motus.NET/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/lasaths/Motus.NET/compare/v0.3.0...v0.3.1
