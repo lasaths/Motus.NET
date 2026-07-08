@@ -49,7 +49,6 @@ jobs:
         with:
           pattern: motus-native-*
           path: stubs
-          merge-multiple: true
 
       - name: Merge stubs into package
         run: |
