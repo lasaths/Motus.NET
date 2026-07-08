@@ -54,11 +54,11 @@ jobs:
       - name: Merge stubs into package
         run: |
           mkdir -p src/Motus.Native/runtimes
-          cp -r stubs/* src/Motus.Native/runtimes/ 2>/dev/null || true
-          find stubs -type f | while read f; do
-            rel=$(echo "$f" | sed 's|.*/runtimes/|runtimes/|')
-            mkdir -p "src/Motus.Native/$(dirname "$rel")"
-            cp "$f" "src/Motus.Native/$rel"
+          for d in stubs/motus-native-*; do
+            [ -d "$d" ] || continue
+            rid="${d##*motus-native-}"
+            mkdir -p "src/Motus.Native/runtimes/$rid/native"
+            cp -r "$d/"* "src/Motus.Native/runtimes/$rid/native/"
           done
           ls -R src/Motus.Native/runtimes || true
 
