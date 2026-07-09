@@ -31,11 +31,11 @@ public sealed class RrtConnectPlanner : IPlanner
         _options = options ?? new RrtConnectOptions();
     }
 
-    public RrtConnectPlanner(SphereCollisionChecker collision, RrtConnectOptions? options = null)
-        : this((ICollisionChecker)collision, options) { }
-
     public PlanningResult Plan(PlanningRequest request)
     {
+        if (_options.StepRadians <= 0)
+            return PlanningResult.Failed(new[] { "RrtConnectOptions.StepRadians must be positive." });
+
         if (NativeOmpl.IsAvailable)
         {
             var native = TryNativePlan(request);
@@ -46,13 +46,10 @@ public sealed class RrtConnectPlanner : IPlanner
     }
 
     private static ICollisionChecker? ResolveChecker(PlanningRequest request, ICollisionChecker? defaultChecker)
-    {
-        if (request.Options.CollisionChecker is not null)
-            return request.Options.CollisionChecker;
-        if (request.Options.AttachedBodies is { Count: > 0 })
-            return CollisionCheckerFactory.Create(request.Robot, null, request.Options.AttachedBodies);
-        return defaultChecker;
-    }
+        => request.Options.CollisionChecker
+            ?? (request.Options.AttachedBodies is { Count: > 0 }
+                ? CollisionCheckerFactory.Create(request.Robot, null, request.Options.AttachedBodies)
+                : defaultChecker);
 
     private static PlanSpace BuildPlanSpace(PlanningRequest request)
     {

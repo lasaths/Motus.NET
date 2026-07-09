@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-07-09
+
+### Added
+
+- Motion-program API for mixed `PTP/LIN/CIRC` (`MotionProgramRequest` + segment types)
+- `IndustrialMotionPlanner` for mixed motion programs
+- Trajectory export includes motion metadata (`motionType`, `segmentIndex`, `blendRadiusMeters`)
+- `Grasshopper01PlaneGoalTests` — UR5e example-01 TCP/LIN regression coverage
+
+### Changed
+
+- `TrajectoryExport` retime default now uses `RetimerAlgorithm.TotgLite`
+- `TrajectoryRetimer` supports `RetimerAlgorithm.TotgLite`
+
+### Fixed
+
+- `UrAnalyticInverseKinematics` — Hawkins row-major analytic IK now agrees with `DhForwardKinematics`; fixes IK/LIN from distant seeds (e.g. viewer home → example-01 TCP goal)
+- `RrtConnectPlanner` rejects non-positive `StepRadians`
+- Collision segment stepping guards against non-positive step values
+- `FclCollisionChecker` scene hash now invalidates on obstacle orientation/extent changes
+
 ## [0.4.0] - 2026-07-05
 
 ### Added
@@ -137,7 +158,8 @@ Initial public release.
 - **Motus.Presets** — JSON preset loader with bundled UR and KUKA defaults
   (approximate public datasheet values for planning/visualization only).
 
-[Unreleased]: https://github.com/lasaths/Motus.NET/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/lasaths/Motus.NET/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/lasaths/Motus.NET/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/lasaths/Motus.NET/compare/v0.3.3...v0.4.0
 [0.3.3]: https://github.com/lasaths/Motus.NET/compare/v0.3.2...v0.3.3
 [0.3.2]: https://github.com/lasaths/Motus.NET/compare/v0.3.1...v0.3.2

@@ -81,4 +81,31 @@ public class TrajectoryRetimerTests
         var val = new TrajectoryValidator().Validate(retimed);
         Assert.True(val.IsValid, string.Join("; ", val.Errors));
     }
+
+    [Fact]
+    public void TotgLite_Algorithm_IsSupportedAndMonotonic()
+    {
+        var robot = new RobotModel(new RobotPreset
+        {
+            Manufacturer = RobotManufacturer.UniversalRobots,
+            ModelName = "UR5e",
+            AxisCount = 6,
+            JointLimits = Enumerable.Range(0, 6).Select(_ => new JointLimit(-6.28, 6.28, maxVelocityRadiansPerSecond: 0.8)).ToList()
+        });
+        var geo = new Trajectory(robot, new[]
+        {
+            new TrajectoryPoint(0, new JointState(new double[6])),
+            new TrajectoryPoint(0, new JointState(new[] { 0.2, -0.2, 0.2, -0.2, 0.1, -0.1 })),
+            new TrajectoryPoint(0, new JointState(new[] { 0.3, -0.25, 0.25, -0.25, 0.15, -0.1 }))
+        });
+
+        var retimed = TrajectoryRetimer.Retime(geo, new TrajectoryRetimerOptions
+        {
+            Algorithm = RetimerAlgorithm.TotgLite
+        });
+
+        Assert.True(retimed.DurationSeconds > 0);
+        for (var i = 1; i < retimed.Points.Count; i++)
+            Assert.True(retimed.Points[i].TimeSeconds >= retimed.Points[i - 1].TimeSeconds);
+    }
 }

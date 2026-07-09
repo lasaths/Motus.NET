@@ -109,4 +109,18 @@ public class RrtConnectTests
   {
     Assert.False(Motus.OMPL.Native.NativeOmpl.IsAvailable);
   }
+
+  [Fact]
+  public void RejectsNonPositiveStepRadians()
+  {
+    var preset = PresetLoader.LoadByModelName("UR5e", ResourcesRoot);
+    var robot = new RobotModel(preset);
+    var planner = new RrtConnectPlanner(preset, new RrtConnectOptions { StepRadians = 0 });
+    var result = planner.Plan(new PlanningRequest(
+      robot,
+      new JointState(new double[6]),
+      new JointState(new[] { 0.3, -0.2, 0.2, -0.1, 0.1, 0.1 })));
+    Assert.False(result.Success);
+    Assert.Contains(result.Errors, e => e.Contains("StepRadians", StringComparison.OrdinalIgnoreCase));
+  }
 }

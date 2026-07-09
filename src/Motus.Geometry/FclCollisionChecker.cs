@@ -78,6 +78,7 @@ public sealed class FclCollisionChecker : ICollisionChecker, IDisposable
         if (!_useFcl || HasMeshObstacle(scene))
             return _fallback.SegmentCollisionFree(from, to, scene, stepRadians);
 
+        if (stepRadians <= 0) stepRadians = 1e-3;
         var n = from.AxisCount;
         var maxDelta = 0.0;
         for (var i = 0; i < n; i++)
@@ -224,6 +225,13 @@ public sealed class FclCollisionChecker : ICollisionChecker, IDisposable
             hash.Add(o.Pose.X);
             hash.Add(o.Pose.Y);
             hash.Add(o.Pose.Z);
+            hash.Add(o.Pose.Qw);
+            hash.Add(o.Pose.Qx);
+            hash.Add(o.Pose.Qy);
+            hash.Add(o.Pose.Qz);
+            hash.Add(o.ExtentX);
+            hash.Add(o.ExtentY);
+            hash.Add(o.ExtentZ);
         }
         foreach (var p in scene.AllowedPairs)
         {

@@ -27,6 +27,7 @@ public interface ICollisionChecker
     /// <summary>Discrete segment check; default samples intermediate configurations.</summary>
     bool SegmentCollisionFree(JointState from, JointState to, CollisionScene scene, double stepRadians)
     {
+        if (stepRadians <= 0) stepRadians = 1e-3;
         var n = from.AxisCount;
         var maxDelta = 0.0;
         for (var i = 0; i < n; i++)

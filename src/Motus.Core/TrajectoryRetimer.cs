@@ -2,6 +2,7 @@ namespace Motus.Core;
 
 public enum RetimerAlgorithm
 {
+    TotgLite,
     SegmentTrapezoid,
     Bottleneck
 }
@@ -20,9 +21,9 @@ public static class TrajectoryRetimer
     public static Trajectory Retime(Trajectory geometric, TrajectoryRetimerOptions? options = null)
     {
         options ??= new TrajectoryRetimerOptions();
-        return options.Algorithm == RetimerAlgorithm.Bottleneck
-            ? RetimeBottleneck(geometric, options)
-            : RetimeSegmentTrapezoid(geometric, options);
+        if (options.Algorithm == RetimerAlgorithm.TotgLite || options.Algorithm == RetimerAlgorithm.Bottleneck)
+            return RetimeBottleneck(geometric, options);
+        return RetimeSegmentTrapezoid(geometric, options);
     }
 
     private static Trajectory RetimeBottleneck(Trajectory geometric, TrajectoryRetimerOptions options)

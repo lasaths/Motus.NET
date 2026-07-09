@@ -34,6 +34,7 @@ public sealed class AttachAwareCollisionChecker : ICollisionChecker
 
     public bool SegmentCollisionFree(JointState from, JointState to, CollisionScene scene, double stepRadians)
     {
+        if (stepRadians <= 0) stepRadians = 1e-3;
         if (!_inner.SegmentCollisionFree(from, to, scene, stepRadians)) return false;
         var n = from.AxisCount;
         var maxDelta = 0.0;

@@ -4,17 +4,9 @@
 
 Motus.NET is a standalone planning core consumed by Motus.Grasshopper and future hosts. All vendor-specific and UI concerns stay outside Motus.Core.
 
-```
-Motus.Grasshopper (Rhino / GH UI — separate repo)
-    ↓ project references / NuGet
-Motus.Presets (JSON + URDF/SRDF loaders)
-    ↓
-Motus.Core (data model, PlanningContext, IPlanner, validation, export)
-Motus.Geometry (FK/IK, mesh collision, attach-aware checkers, Cartesian planners)
-    ↓
-Motus.OMPL.NET (RRT-Connect / RRT*; managed fallback)
-Motus.Native (P/Invoke → motus_native: OMPL + FCL)
-```
+- `Motus.Presets` loads JSON/URDF/SRDF data into `RobotModel`.
+- `Motus.Core` defines planning contracts, motion segments, validation, and export.
+- `Motus.Geometry` and `Motus.OMPL.NET` implement planners/collision (managed + optional native through `Motus.Native`).
 
 See [rhino-host.md](rhino-host.md) for Windows/macOS deployment (managed-first).
 
@@ -22,8 +14,13 @@ See [rhino-host.md](rhino-host.md) for Windows/macOS deployment (managed-first).
 
 - **No UI dependencies** — pure .NET 8 class library
 - **Planners behind `IPlanner`** — joint-linear, Cartesian-linear, LIN, and RRT-Connect
+- **Motion-program contracts** — `MotionProgramRequest` with `PTP/LIN/CIRC` segments
 - **Presets are data** — JSON files loaded by Motus.Presets, not hardcoded switches
 - **PlanningContext** — robot + scene + attach/detach; optional `PlanningGroup` for reduced-DOF planning
+
+## Motion Program Layer (0.5.0)
+
+`IndustrialMotionPlanner` executes mixed `PTP/LIN/CIRC` segments; see `README.md` for usage details.
 
 ## Key interfaces
 
@@ -34,6 +31,7 @@ See [rhino-host.md](rhino-host.md) for Windows/macOS deployment (managed-first).
 | `IFkSolver` / `IIkSolver` | FK and IK (`Motus.Geometry`) |
 | `ICollisionChecker` | `SphereCollisionChecker`, `RobotMeshCollisionChecker`, `AttachAwareCollisionChecker`, `FclCollisionChecker` |
 | `PlanningContext` | Attach geometry at TCP; hide scene obstacles on pick |
+| `MotionSegment` | Program segment contracts (`PtpSegment`, `LinSegment`, `CircSegment`) |
 
 ## Units
 

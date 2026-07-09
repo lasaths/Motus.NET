@@ -5,6 +5,8 @@ namespace Motus.Geometry;
 /// <summary>Closed-form 6-DOF IK for Universal Robots DH chains (matches KinematicsProfiles UR template).</summary>
 internal static class UrAnalyticInverseKinematics
 {
+    private const double ZeroThresh = 1e-8;
+
     public static bool TrySolve(
         KinematicsChain chain,
         double[] targetTcp,
@@ -15,18 +17,9 @@ internal static class UrAnalyticInverseKinematics
         solution = seed;
         if (chain.Links.Length != 6) return false;
 
-        var d1 = chain.Links[0].D;
-        var a2 = -chain.Links[1].A;
-        var a3 = -chain.Links[2].A;
-        var d4 = chain.Links[3].D;
-        var d5 = chain.Links[4].D;
-        var d6 = chain.Links[5].D;
-
-        var candidates = ComputeSolutions(targetTcp, d1, a2, a3, d4, d5, d6);
         JointState? best = null;
         var bestDist = double.MaxValue;
-
-        foreach (var q in candidates)
+        foreach (var q in ComputeSolutions(chain, targetTcp))
         {
             if (!WithinLimits(q, limits)) continue;
             var dist = JointDistance(q, seed.Positions);
@@ -49,115 +42,113 @@ internal static class UrAnalyticInverseKinematics
     {
         if (chain.Links.Length != 6) yield break;
 
-        var d1 = chain.Links[0].D;
-        var a2 = -chain.Links[1].A;
-        var a3 = -chain.Links[2].A;
-        var d4 = chain.Links[3].D;
-        var d5 = chain.Links[4].D;
-        var d6 = chain.Links[5].D;
-
-        foreach (var q in ComputeSolutions(targetTcp, d1, a2, a3, d4, d5, d6))
+        foreach (var q in ComputeSolutions(chain, targetTcp))
         {
             if (WithinLimits(q, limits))
                 yield return new JointState(q);
         }
     }
 
-    private static List<double[]> ComputeSolutions(double[] t, double d1, double a2, double a3, double d4, double d5, double d6)
+    // Hawkins row-major IK (ros-industrial/universal_robot#300), matches DhForwardKinematics layout.
+    private static IEnumerable<double[]> ComputeSolutions(KinematicsChain chain, double[] t)
     {
-        var results = new List<double[]>();
-        var ox = t[3]; var oy = t[7]; var oz = t[11];
-        var ax = t[2]; var ay = t[6]; var az = t[10];
+        var d1 = chain.Links[0].D;
+        var a2 = chain.Links[1].A;
+        var a3 = chain.Links[2].A;
+        var d4 = chain.Links[3].D;
+        var d5 = chain.Links[4].D;
+        var d6 = chain.Links[5].D;
 
-        var wx = ox - d6 * ax;
-        var wy = oy - d6 * ay;
-        var wz = oz - d6 * az;
-
-        var r = Math.Sqrt(wx * wx + wy * wy);
-        if (r < 1e-9 || Math.Abs(d4) > r + 1e-9) return results;
-
-        var phi = Math.Acos(Math.Clamp(d4 / r, -1, 1));
-        var psi = Math.Atan2(wy, wx);
-        var q1Candidates = new[] { psi + phi + Math.PI / 2, psi - phi - Math.PI / 2 };
-
-        foreach (var q1 in q1Candidates)
+        var q1 = new double[2];
         {
-            var c1 = Math.Cos(q1); var s1 = Math.Sin(q1);
-            var c5Candidates = ComputeQ5(c1, s1, wx, wy, wz, d1, d4, d5);
-            foreach (var (q5, c5, s5) in c5Candidates)
+            var a = t[3] - d6 * t[2];
+            var b = t[7] - d6 * t[6];
+            var r = a * a + b * b;
+            if (r < 1e-12) yield break;
+            if (d4 * d4 > r + 1e-9) yield break;
+
+            var arccos = Math.Acos(Math.Clamp(d4 / Math.Sqrt(r), -1, 1));
+            var arctan = Math.Atan2(b, a);
+            q1[0] = NormalizeAngle(arctan + arccos + Math.PI / 2);
+            q1[1] = NormalizeAngle(arctan - arccos + Math.PI / 2);
+        }
+
+        var q5 = new double[2, 2];
+        for (var i = 0; i < 2; i++)
+        {
+            var numer = t[3] * Math.Sin(q1[i]) - t[7] * Math.Cos(q1[i]) - d4;
+            var arccos = Math.Acos(Math.Clamp(numer / d6, -1, 1));
+            q5[i, 0] = arccos;
+            q5[i, 1] = -arccos;
+        }
+
+        for (var i = 0; i < 2; i++)
+        {
+            var c1 = Math.Cos(q1[i]);
+            var s1 = Math.Sin(q1[i]);
+            for (var j = 0; j < 2; j++)
             {
-                var q6 = Math.Atan2(-t[1] * s1 + t[5] * c1, t[0] * s1 - t[4] * c1);
-                if (Math.Abs(s5) < 1e-8)
-                    q6 = seedQ6FromSeed(q1, q5, t);
+                var c5 = Math.Cos(q5[i, j]);
+                var s5 = Math.Sin(q5[i, j]);
 
-                var wrist = WristCenterTransform(c1, s1, wx, wy, wz, d1);
-                var (q2, q3, q4) = SolveArm(wrist, a2, a3, d4, q5, c5, s5, c1, s1);
-                if (double.IsNaN(q2)) continue;
+                double q6;
+                if (Math.Abs(s5) < ZeroThresh)
+                    q6 = 0;
+                else
+                {
+                    q6 = Math.Atan2(
+                        Math.Sign(s5) * -(t[1] * s1 - t[5] * c1),
+                        Math.Sign(s5) * (t[0] * s1 - t[4] * c1));
+                    q6 = NormalizeAngle(q6);
+                }
 
-                results.Add(NormalizeJoints([q1, q2, q3, q4, q5, q6]));
-                results.Add(NormalizeJoints([q1, q2, q3, q4 + Math.PI, q5, q6 + Math.PI]));
+                var c6 = Math.Cos(q6);
+                var s6 = Math.Sin(q6);
+
+                var x04x = -s5 * (t[2] * c1 + t[6] * s1)
+                    - c5 * (s6 * (t[1] * c1 + t[5] * s1) - c6 * (t[0] * c1 + t[4] * s1));
+                var x04y = c5 * (t[8] * c6 - t[9] * s6) - t[10] * s5;
+                var p13x = d5 * (s6 * (t[0] * c1 + t[4] * s1) + c6 * (t[1] * c1 + t[5] * s1))
+                    - d6 * (t[2] * c1 + t[6] * s1) + t[3] * c1 + t[7] * s1;
+                var p13y = t[11] - d1 - d6 * t[10] + d5 * (t[9] * c6 + t[8] * s6);
+
+                var c3 = (p13x * p13x + p13y * p13y - a2 * a2 - a3 * a3) / (2 * a2 * a3);
+                if (Math.Abs(c3) > 1.0001) continue;
+                c3 = Math.Clamp(c3, -1, 1);
+
+                var q3 = new[] { Math.Acos(c3), -Math.Acos(c3) };
+                var s3 = Math.Sin(q3[0]);
+                var denom = a2 * a2 + a3 * a3 + 2 * a2 * a3 * c3;
+                var bigA = a2 + a3 * c3;
+                var bigB = a3 * s3;
+                var q2 = new[]
+                {
+                    Math.Atan2((bigA * p13y - bigB * p13x) / denom, (bigA * p13x + bigB * p13y) / denom),
+                    Math.Atan2((bigA * p13y + bigB * p13x) / denom, (bigA * p13x - bigB * p13y) / denom),
+                };
+
+                for (var k = 0; k < 2; k++)
+                {
+                    var c23 = Math.Cos(q2[k] + q3[k]);
+                    var s23 = Math.Sin(q2[k] + q3[k]);
+                    var q4 = Math.Atan2(c23 * x04y - s23 * x04x, x04x * c23 + x04y * s23);
+                    yield return NormalizeJoints([q1[i], q2[k], q3[k], q4, q5[i, j], q6]);
+                }
             }
         }
-
-        return results;
     }
 
-    private static double seedQ6FromSeed(double q1, double q5, double[] t) =>
-        Math.Atan2(t[6], t[10]);
-
-    private static List<(double q5, double c5, double s5)> ComputeQ5(
-        double c1, double s1, double wx, double wy, double wz, double d1, double d4, double d5)
+    private static double NormalizeAngle(double angle)
     {
-        var num = wx * s1 - wy * c1 - d4;
-        var den = d5;
-        if (Math.Abs(den) < 1e-12) return new List<(double, double, double)>();
-
-        var val = Math.Clamp(num / den, -1, 1);
-        var q5a = Math.Acos(val);
-        var q5b = -q5a;
-        return new List<(double, double, double)>
-        {
-            (q5a, Math.Cos(q5a), Math.Sin(q5a)),
-            (q5b, Math.Cos(q5b), Math.Sin(q5b))
-        };
-    }
-
-    private static double[] WristCenterTransform(double c1, double s1, double wx, double wy, double wz, double d1)
-    {
-        var x = c1 * wx + s1 * wy;
-        var y = -s1 * wx + c1 * wy;
-        var z = wz - d1;
-        return [x, y, z];
-    }
-
-    private static (double q2, double q3, double q4) SolveArm(
-        double[] p, double a2, double a3, double d4, double q5, double c5, double s5, double c1, double s1)
-    {
-        var x = p[0]; var z = p[2];
-        var distSq = x * x + z * z;
-        var cos3 = (distSq - a2 * a2 - a3 * a3) / (2 * a2 * a3);
-        if (cos3 < -1.0001 || cos3 > 1.0001) return (double.NaN, double.NaN, double.NaN);
-
-        var q3Options = new[] { Math.Acos(Math.Clamp(cos3, -1, 1)), -Math.Acos(Math.Clamp(cos3, -1, 1)) };
-        foreach (var q3 in q3Options)
-        {
-            var k1 = a2 + a3 * Math.Cos(q3);
-            var k2 = a3 * Math.Sin(q3);
-            var q2 = Math.Atan2(z, x) - Math.Atan2(k2, k1);
-            var q4 = Math.Atan2(-Math.Sin(q3), Math.Cos(q3) - 1) - q2 - q3;
-            return (q2, q3, q4);
-        }
-
-        return (double.NaN, double.NaN, double.NaN);
+        while (angle > Math.PI) angle -= 2 * Math.PI;
+        while (angle < -Math.PI) angle += 2 * Math.PI;
+        return angle;
     }
 
     private static double[] NormalizeJoints(double[] q)
     {
         for (var i = 0; i < q.Length; i++)
-        {
-            while (q[i] > Math.PI) q[i] -= 2 * Math.PI;
-            while (q[i] < -Math.PI) q[i] += 2 * Math.PI;
-        }
+            q[i] = NormalizeAngle(q[i]);
         return q;
     }
 

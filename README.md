@@ -53,6 +53,28 @@ var fk = KinematicsResolver.CreateFkSolver(robot.Preset, robot.Chain);
 | `CartesianLinearPlanner` | Cartesian TCP goal; joint-linear path after IK | `Motus.Geometry` |
 | `CartesianLinearPathPlanner` | True TCP-linear (LIN) motion | `Motus.Geometry` |
 | `RrtConnectPlanner` | Obstacles in `PlanningOptions.CollisionScene` | `Motus.OMPL.NET` |
+| `IndustrialMotionPlanner` | Mixed `PTP/LIN/CIRC` motion programs | `Motus.Geometry` |
+
+## Motion Programs (0.5.0)
+
+```csharp
+var planner = new IndustrialMotionPlanner(robot.Preset);
+var request = new MotionProgramRequest(
+    robot,
+    start,
+    new MotionSegment[]
+    {
+        new PtpSegment(ptpGoal, blendRadiusMeters: 0.004),
+        new LinSegment(linGoal, stepMeters: 0.005, blendRadiusMeters: 0.003),
+        new CircSegment(circVia, circGoal, arcSamples: 12)
+    });
+
+var result = planner.Plan(request);
+```
+
+- Segment model: `PtpSegment`, `LinSegment`, `CircSegment`
+- Current blend behavior: deterministic fallback to exact-stop when a requested blend is not feasible/supported
+- Export includes motion metadata (`motionType`, `segmentIndex`, `blendRadiusMeters`) for replay/debugging
 
 ## Attach (pick-style)
 
@@ -89,6 +111,10 @@ Non-group joints stay locked at the start configuration during planning.
 
 Internal units are **radians**, **seconds**, and **meters**. Use `Motus.Core.Units` for degree/radian conversion.
 
+## 0.5.0 Migration Notes
+
+See `CHANGELOG.md` (`Unreleased`) for upgrade details.
+
 ## Build & test
 
 ```bash
@@ -108,7 +134,7 @@ Requires the .NET 9 SDK or newer to read the `.slnx` solution; the libraries tar
 
 ## Releases
 
-Push a version tag (`v0.4.0`) to run [`.github/workflows/release.yml`](.github/workflows/release.yml): build, test, pack, publish to [nuget.org](https://www.nuget.org/profiles/lasaths) via [trusted publishing](https://learn.microsoft.com/en-us/nuget/nuget-org/trusted-publishing), and create a GitHub Release with `.nupkg` assets.
+Push a version tag (`v0.5.0`) to run [`.github/workflows/release.yml`](.github/workflows/release.yml): build, test, pack, publish to [nuget.org](https://www.nuget.org/profiles/lasaths) via [trusted publishing](https://learn.microsoft.com/en-us/nuget/nuget-org/trusted-publishing), and create a GitHub Release with `.nupkg` assets.
 
 Configure the nuget.org trusted publisher policy (one-time):
 

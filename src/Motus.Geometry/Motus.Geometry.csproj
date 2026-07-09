@@ -11,6 +11,10 @@
     <ProjectReference Include="..\Motus.Native\Motus.Native.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="Motus.Core.Tests" />
+  </ItemGroup>
+
   <Import Project="..\Motus.Native\buildTransitive\Motus.Native.targets" />
 
 </Project>

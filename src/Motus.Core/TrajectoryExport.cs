@@ -33,7 +33,7 @@ public static class TrajectoryExport
     {
         options ??= new TrajectoryExportOptions();
         if (!options.Retime) return trajectory;
-        var retimer = options.Retimer ?? new TrajectoryRetimerOptions { Algorithm = RetimerAlgorithm.Bottleneck };
+        var retimer = options.Retimer ?? new TrajectoryRetimerOptions { Algorithm = RetimerAlgorithm.TotgLite };
         return TrajectoryRetimer.Retime(trajectory, retimer);
     }
 
@@ -80,7 +80,10 @@ public static class TrajectoryExport
                 {
                     timeSeconds = p.TimeSeconds,
                     jointsRadians = p.JointState.Positions,
-                    joints
+                    joints,
+                    motionType = p.MotionType?.ToString().ToLowerInvariant(),
+                    segmentIndex = p.SegmentIndex,
+                    blendRadiusMeters = p.BlendRadiusMeters
                 };
             })
         };
@@ -95,15 +98,23 @@ public static class TrajectoryExport
         options ??= new TrajectoryExportOptions();
         var traj = Prepare(trajectory, options);
         var n = traj.Robot.Preset.AxisCount;
+        var hasMotionMetadata = traj.Points.Any(p => p.MotionType is not null || p.SegmentIndex is not null || p.BlendRadiusMeters is not null);
         var sb = new StringBuilder();
         sb.Append("time_seconds");
         for (var i = 1; i <= n; i++) sb.Append($",joint_{i}_rad");
+        if (hasMotionMetadata) sb.Append(",motion_type,segment_index,blend_radius_m");
         sb.AppendLine();
         foreach (var p in traj.Points)
         {
             sb.Append(p.TimeSeconds.ToString("F6"));
             foreach (var j in p.JointState.Positions)
                 sb.Append(',').Append(j.ToString("F6"));
+            if (hasMotionMetadata)
+            {
+                sb.Append(',').Append(p.MotionType?.ToString().ToLowerInvariant() ?? string.Empty);
+                sb.Append(',').Append(p.SegmentIndex?.ToString() ?? string.Empty);
+                sb.Append(',').Append(p.BlendRadiusMeters?.ToString("F6") ?? string.Empty);
+            }
             sb.AppendLine();
         }
         return sb.ToString();
