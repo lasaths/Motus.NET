@@ -43,7 +43,7 @@ public class PlanningCollisionTests
         var scene = new CollisionScene(new[] { CollisionObject.Sphere("far", new Frame(2, 2, 2), 0.05) });
         var result = new JointLinearPlanner().Plan(new PlanningRequest(
             robot, start, goal, new PlanningOptions { CollisionScene = scene, CollisionChecker = checker }));
-        Assert.True(result.Success);
+        Assert.True(result.Success, string.Join("; ", result.Errors));
     }
 
     private static string FindResources()

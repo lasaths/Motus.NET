@@ -12,17 +12,35 @@ public static class Transforms
 
     public static double[] FromDh(double theta, double d, double a, double alpha)
     {
+        var m = new double[16];
+        FromDhInto(m, theta, d, a, alpha);
+        return m;
+    }
+
+    public static void FromDhInto(double[] m, double theta, double d, double a, double alpha)
+    {
         var ct = Math.Cos(theta);
         var st = Math.Sin(theta);
         var ca = Math.Cos(alpha);
         var sa = Math.Sin(alpha);
-        return
-        [
-            ct, -st * ca, st * sa, a * ct,
-            st, ct * ca, -ct * sa, a * st,
-            0, sa, ca, d,
-            0, 0, 0, 1
-        ];
+        m[0] = ct; m[1] = -st * ca; m[2] = st * sa; m[3] = a * ct;
+        m[4] = st; m[5] = ct * ca; m[6] = -ct * sa; m[7] = a * st;
+        m[8] = 0; m[9] = sa; m[10] = ca; m[11] = d;
+        m[12] = 0; m[13] = 0; m[14] = 0; m[15] = 1;
+    }
+
+    public static void MultiplyInto(double[] dest, double[] a, double[] b)
+    {
+        for (var row = 0; row < 4; row++)
+        {
+            for (var col = 0; col < 4; col++)
+            {
+                var sum = 0.0;
+                for (var k = 0; k < 4; k++)
+                    sum += a[row * 4 + k] * b[k * 4 + col];
+                dest[row * 4 + col] = sum;
+            }
+        }
     }
 
     public static double[] Multiply(double[] a, double[] b)

@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-07-10
+
+### Added
+
+- `FastDhFk` — allocation-free DH FK for collision hot paths (link xyz only)
+- `PlansMultiGoalSequenceAroundObstacle` — multi-goal RRT regression with timing output
+
+### Changed
+
+- `SphereCollisionChecker` — fast DH/xyz collision path for bundled presets (reused buffers, zero alloc per check)
+- `LinkEnvelopeCollision` — xyz-based sphere/box obstacle checks without `Frame` allocations
+- `Transforms` — `FromDhInto` / `MultiplyInto` for in-place matrix ops
+
+### Fixed
+
+- Multi-goal obstacle planning perf gate now measures plan time only (`planMs < 500`) for CI stability under parallel load
+
 ## [0.5.0] - 2026-07-09
 
 ### Added
