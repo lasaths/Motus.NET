@@ -159,8 +159,12 @@ public sealed class FclCollisionChecker : ICollisionChecker, IDisposable
         }
         if (_robot.CollisionModel.ToolGeometry is not null && links.Count > 0)
         {
-            var last = LinkIdBase | (uint)links[^1].LinkIndex;
-            NativeBindings.motus_fcl_set_allowed_pair(_world, last, ToolId);
+            var lastIndex = links[^1].LinkIndex;
+            foreach (var link in links)
+            {
+                if (Math.Abs(link.LinkIndex - lastIndex) <= 3)
+                    NativeBindings.motus_fcl_set_allowed_pair(_world, LinkIdBase | (uint)link.LinkIndex, ToolId);
+            }
         }
     }
 
