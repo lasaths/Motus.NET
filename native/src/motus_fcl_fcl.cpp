@@ -12,6 +12,45 @@ struct motus_fcl_world {
     std::vector<std::pair<uint32_t, uint32_t>> allowed_pairs;
 };
 
+struct FclCollideData {
+    bool hit = false;
+    uint32_t a = 0;
+    uint32_t b = 0;
+    const motus_fcl_world* world = nullptr;
+};
+
+static bool PairAllowed(const motus_fcl_world* world, uint32_t a, uint32_t b)
+{
+    for (const auto& p : world->allowed_pairs)
+        if ((p.first == a && p.second == b) || (p.first == b && p.second == a))
+            return true;
+    return false;
+}
+
+static bool FclCollideCallback(fcl::CollisionObjectd* o1, fcl::CollisionObjectd* o2, void* cdata)
+{
+    auto* data = static_cast<FclCollideData*>(cdata);
+    const auto* world = data->world;
+    uint32_t id1 = 0, id2 = 0;
+    for (const auto& kv : world->objects)
+    {
+        if (kv.second.get() == o1) id1 = kv.first;
+        if (kv.second.get() == o2) id2 = kv.first;
+    }
+    if (PairAllowed(world, id1, id2)) return false;
+    fcl::CollisionRequestd req;
+    fcl::CollisionResultd res;
+    fcl::collide(o1, o2, req, res);
+    if (res.isCollision())
+    {
+        data->hit = true;
+        data->a = id1;
+        data->b = id2;
+        return true;
+    }
+    return false;
+}
+
 static fcl::Transform3d TransformFromMotus(const motus_transform* t)
 {
     fcl::Transform3d tf = fcl::Transform3d::Identity();
@@ -31,21 +70,13 @@ int motus_fcl_is_available(void) { return 1; }
 motus_fcl_world* motus_fcl_world_create(void)
 {
     auto* w = new motus_fcl_world();
-    w->manager = std::make_shared<fcl::BroadPhaseCollisionManagerd>();
+    w->manager = std::make_shared<fcl::DynamicAABBTreeCollisionManagerd>();
     return w;
 }
 
 void motus_fcl_world_destroy(motus_fcl_world* world)
 {
     delete world;
-}
-
-static bool PairAllowed(const motus_fcl_world* world, uint32_t a, uint32_t b)
-{
-    for (const auto& p : world->allowed_pairs)
-        if ((p.first == a && p.second == b) || (p.first == b && p.second == a))
-            return true;
-    return false;
 }
 
 static void UnregisterId(motus_fcl_world* world, uint32_t id)
@@ -149,32 +180,10 @@ int motus_fcl_set_allowed_pair(motus_fcl_world* world, uint32_t a, uint32_t b)
 int motus_fcl_check(motus_fcl_world* world, int* out_a, int* out_b)
 {
     if (!world) return MOTUS_FCL_ERR;
-    struct CbData {
-        bool hit = false;
-        uint32_t a = 0, b = 0;
-        const motus_fcl_world* w;
-    } data{ false, 0, 0, world };
+    FclCollideData data;
+    data.world = world;
 
-    world->manager->collide([&](fcl::CollisionObjectd* o1, fcl::CollisionObjectd* o2) {
-        uint32_t id1 = 0, id2 = 0;
-        for (const auto& kv : world->objects)
-        {
-            if (kv.second.get() == o1) id1 = kv.first;
-            if (kv.second.get() == o2) id2 = kv.first;
-        }
-        if (PairAllowed(world, id1, id2)) return false;
-        fcl::CollisionRequestd req;
-        fcl::CollisionResultd res;
-        fcl::collide(o1, o2, req, res);
-        if (res.isCollision())
-        {
-            data.hit = true;
-            data.a = id1;
-            data.b = id2;
-            return true;
-        }
-        return false;
-    });
+    world->manager->collide(&data, FclCollideCallback);
 
     if (data.hit)
     {
