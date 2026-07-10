@@ -163,7 +163,12 @@ internal static class UrAnalyticInverseKinematics
     {
         var max = 0.0;
         for (var i = 0; i < a.Length; i++)
-            max = Math.Max(max, Math.Abs(a[i] - b[i]));
+        {
+            var d = a[i] - b[i];
+            while (d > Math.PI) d -= 2 * Math.PI;
+            while (d < -Math.PI) d += 2 * Math.PI;
+            max = Math.Max(max, Math.Abs(d));
+        }
         return max;
     }
 }

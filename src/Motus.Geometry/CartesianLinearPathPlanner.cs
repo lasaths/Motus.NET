@@ -95,6 +95,21 @@ public sealed class CartesianLinearPathPlanner
             }
 
             consecutiveFailures = 0;  // Reset on success
+            solvedJoint = UnwrapNear(currentJoint, solvedJoint);
+            if (!PoseMatches(interpPose, solvedJoint))
+            {
+                if (!continueOnIKFailure)
+                    return null;
+                consecutiveFailures++;
+                if (consecutiveFailures >= maxConsecutiveFailures)
+                {
+                    if (points.Count >= steps / 2)
+                        break;
+                    return null;
+                }
+                continue;
+            }
+
             // PONYTAIL: Prefer solutions close to previous waypoint (continuity)
             if (MaxJointDelta(currentJoint, solvedJoint) < 1.0)  // ~57° tolerance for continuity preference
             {
@@ -106,6 +121,18 @@ public sealed class CartesianLinearPathPlanner
             }
             currentJoint = solvedJoint;
             points.Add(new TrajectoryPoint(elapsedFrames++, currentJoint));
+        }
+
+        // Snap final configuration from the penultimate seed so the last segment
+        // stays on the same IK branch (avoids wrist/TCP flip at alpha=1).
+        if (points.Count >= 2 && _ik.TrySolve(goalPose, points[^2].JointState, out var finalJoint))
+        {
+            finalJoint = UnwrapNear(points[^2].JointState, finalJoint);
+            if (PoseMatches(goalPose, finalJoint))
+            {
+                var last = points[^1];
+                points[^1] = new TrajectoryPoint(last.TimeSeconds, finalJoint);
+            }
         }
 
         // PONYTAIL: Check we have enough points for a valid trajectory
@@ -210,10 +237,11 @@ public sealed class CartesianLinearPathPlanner
         if (dot > 0.9995)
         {
             // PONYTAIL: Quaternions nearly parallel, linear interp
-            return (aw + t * (bw - aw),
-                    ax + t * (bx - ax),
-                    ay + t * (by - ay),
-                    az + t * (bz - az));
+            return NormalizeQuat((
+                aw + t * (bw - aw),
+                ax + t * (bx - ax),
+                ay + t * (by - ay),
+                az + t * (bz - az)));
         }
 
         var theta_0 = Math.Acos(Math.Clamp(dot, -1, 1));
@@ -224,17 +252,60 @@ public sealed class CartesianLinearPathPlanner
         var s0 = Math.Cos(theta) - dot * sinTheta / sinTheta_0;
         var s1 = sinTheta / sinTheta_0;
 
-        return (s0 * aw + s1 * bw,
-                s0 * ax + s1 * bx,
-                s0 * ay + s1 * by,
-                s0 * az + s1 * bz);
+        return NormalizeQuat((
+            s0 * aw + s1 * bw,
+            s0 * ax + s1 * bx,
+            s0 * ay + s1 * by,
+            s0 * az + s1 * bz));
+    }
+
+    private static (double w, double x, double y, double z) NormalizeQuat((double w, double x, double y, double z) q)
+    {
+        var n = Math.Sqrt(q.w * q.w + q.x * q.x + q.y * q.y + q.z * q.z);
+        if (n < 1e-12) return (1, 0, 0, 0);
+        return (q.w / n, q.x / n, q.y / n, q.z / n);
+    }
+
+    private bool PoseMatches(CartesianPose target, JointState joints, double posTolMeters = 5e-3, double oriTolRad = 0.05)
+    {
+        var actual = _fk.ComputeTcp(joints, _base, _tool);
+        var dx = actual.Tcp.X - target.Tcp.X;
+        var dy = actual.Tcp.Y - target.Tcp.Y;
+        var dz = actual.Tcp.Z - target.Tcp.Z;
+        if (Math.Sqrt(dx * dx + dy * dy + dz * dz) > posTolMeters) return false;
+
+        var dot = Math.Abs(
+            actual.Tcp.Qw * target.Tcp.Qw +
+            actual.Tcp.Qx * target.Tcp.Qx +
+            actual.Tcp.Qy * target.Tcp.Qy +
+            actual.Tcp.Qz * target.Tcp.Qz);
+        var oriErr = 2 * Math.Acos(Math.Clamp(dot, -1, 1));
+        return oriErr <= oriTolRad;
+    }
+
+    private static JointState UnwrapNear(JointState reference, JointState raw)
+    {
+        var q = new double[raw.AxisCount];
+        for (var i = 0; i < q.Length; i++)
+        {
+            var v = raw.Positions[i];
+            while (v - reference.Positions[i] > Math.PI) v -= 2 * Math.PI;
+            while (v - reference.Positions[i] < -Math.PI) v += 2 * Math.PI;
+            q[i] = v;
+        }
+        return new JointState(q);
     }
 
     private static double MaxJointDelta(JointState a, JointState b)
     {
         var max = 0.0;
         for (var i = 0; i < a.AxisCount; i++)
-            max = Math.Max(max, Math.Abs(b.Positions[i] - a.Positions[i]));
+        {
+            var d = b.Positions[i] - a.Positions[i];
+            while (d > Math.PI) d -= 2 * Math.PI;
+            while (d < -Math.PI) d += 2 * Math.PI;
+            max = Math.Max(max, Math.Abs(d));
+        }
         return max;
     }
 

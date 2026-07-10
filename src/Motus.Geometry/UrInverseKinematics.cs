@@ -44,7 +44,7 @@ public sealed class UrInverseKinematics : IInverseKinematics
             }
             if (best is not null)
             {
-                solution = best;
+                solution = UnwrapNear(seed, best);
                 return true;
             }
 
@@ -86,8 +86,26 @@ public sealed class UrInverseKinematics : IInverseKinematics
     {
         var max = 0.0;
         for (var i = 0; i < a.AxisCount; i++)
-            max = Math.Max(max, Math.Abs(b.Positions[i] - a.Positions[i]));
+        {
+            var d = b.Positions[i] - a.Positions[i];
+            while (d > Math.PI) d -= 2 * Math.PI;
+            while (d < -Math.PI) d += 2 * Math.PI;
+            max = Math.Max(max, Math.Abs(d));
+        }
         return max;
+    }
+
+    private static JointState UnwrapNear(JointState reference, JointState raw)
+    {
+        var q = new double[raw.AxisCount];
+        for (var i = 0; i < q.Length; i++)
+        {
+            var v = raw.Positions[i];
+            while (v - reference.Positions[i] > Math.PI) v -= 2 * Math.PI;
+            while (v - reference.Positions[i] < -Math.PI) v += 2 * Math.PI;
+            q[i] = v;
+        }
+        return new JointState(q);
     }
 
     private bool Verify(CartesianPose target, JointState candidate)
@@ -96,7 +114,15 @@ public sealed class UrInverseKinematics : IInverseKinematics
         var dx = actual.Tcp.X - target.Tcp.X;
         var dy = actual.Tcp.Y - target.Tcp.Y;
         var dz = actual.Tcp.Z - target.Tcp.Z;
-        return Math.Sqrt(dx * dx + dy * dy + dz * dz) < 5e-3;
+        if (Math.Sqrt(dx * dx + dy * dy + dz * dz) >= 5e-3) return false;
+
+        var dot = Math.Abs(
+            actual.Tcp.Qw * target.Tcp.Qw +
+            actual.Tcp.Qx * target.Tcp.Qx +
+            actual.Tcp.Qy * target.Tcp.Qy +
+            actual.Tcp.Qz * target.Tcp.Qz);
+        var oriErr = 2 * Math.Acos(Math.Clamp(dot, -1, 1));
+        return oriErr < 0.05;
     }
 
     private static bool IsFlangeTool(ToolFrame tool) =>
