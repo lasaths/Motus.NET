@@ -202,8 +202,8 @@ internal static class ViewerReportGenerator
       MaxJointStepRadians = 0.08,
     };
     var planner = chain is null
-      ? new RrtConnectPlanner(preset, new RrtConnectOptions { MaxIterations = 10000, RandomSeed = seed })
-      : new RrtConnectPlanner(checker, new RrtConnectOptions { MaxIterations = 10000, RandomSeed = seed });
+      ? new RrtConnectPlanner(preset, new RrtConnectOptions { MaxIterations = 10000, RandomSeed = seed, PreferManaged = true })
+      : new RrtConnectPlanner(checker, new RrtConnectOptions { MaxIterations = 10000, RandomSeed = seed, PreferManaged = true });
     var result = planner.Plan(new PlanningRequest(model, start, goal, opts));
     var passed = result.Success;
     if (result.Trajectory is not null)

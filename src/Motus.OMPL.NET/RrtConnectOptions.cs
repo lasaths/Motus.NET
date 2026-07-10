@@ -17,6 +17,8 @@ public class OmplPlannerOptions
     public int RandomSeed { get; init; } = 42;
     public int MaxPathStates { get; init; } = 256;
     public OmplPlannerId PlannerId { get; init; } = OmplPlannerId.RrtConnect;
+    /// <summary>When true, skip native OMPL even if motus_native is available.</summary>
+    public bool PreferManaged { get; init; }
     public Func<bool>? ShouldCancel { get; init; }
 }
 

@@ -36,7 +36,7 @@ public sealed class RrtConnectPlanner : IPlanner
         if (_options.StepRadians <= 0)
             return PlanningResult.Failed(new[] { "RrtConnectOptions.StepRadians must be positive." });
 
-        if (NativeOmpl.IsAvailable)
+        if (NativeOmpl.IsAvailable && !_options.PreferManaged)
         {
             var native = TryNativePlan(request);
             if (native is not null) return native;
