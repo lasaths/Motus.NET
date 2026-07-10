@@ -75,6 +75,18 @@ public:
         return MotionValid(s1, s2, dims_, step_size_, validity_, motion_validity_, userdata_);
     }
 
+    bool checkMotion(const ob::State* s1, const ob::State* s2, std::pair<ob::State*, double>& lastValid) const override
+    {
+        if (checkMotion(s1, s2))
+            return true;
+        if (lastValid.first != nullptr)
+        {
+            si_->copyState(lastValid.first, s1);
+            lastValid.second = 0.0;
+        }
+        return false;
+    }
+
 private:
     int dims_;
     double step_size_;
