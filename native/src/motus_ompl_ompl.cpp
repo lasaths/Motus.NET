@@ -2,6 +2,7 @@
 
 #ifdef MOTUS_HAS_OMPL
 
+#include <ompl/base/MotionValidator.h>
 #include <ompl/base/SpaceInformation.h>
 #include <ompl/base/spaces/RealVectorStateSpace.h>
 #include <ompl/base/terminationconditions/IterationTerminationCondition.h>
@@ -51,13 +52,44 @@ static bool MotionValid(
     return true;
 }
 
+class MotusMotionValidator : public ob::MotionValidator
+{
+public:
+    MotusMotionValidator(
+        const ob::SpaceInformationPtr& si,
+        int dims,
+        double step_size,
+        motus_ompl_validity_fn validity,
+        motus_ompl_motion_validity_fn motion_validity,
+        void* userdata)
+        : ob::MotionValidator(si)
+        , dims_(dims)
+        , step_size_(step_size)
+        , validity_(validity)
+        , motion_validity_(motion_validity)
+        , userdata_(userdata)
+    {}
+
+    bool checkMotion(const ob::State* s1, const ob::State* s2) const override
+    {
+        return MotionValid(s1, s2, dims_, step_size_, validity_, motion_validity_, userdata_);
+    }
+
+private:
+    int dims_;
+    double step_size_;
+    motus_ompl_validity_fn validity_;
+    motus_ompl_motion_validity_fn motion_validity_;
+    void* userdata_;
+};
+
 static int WritePath(const og::PathGeometric& path, int dims, int max_states, double* out_path, int* out_count)
 {
-    const auto& states = path.getStates();
     int written = 0;
-    for (const auto* st : states)
+    for (unsigned int i = 0; i < path.getStateCount(); ++i)
     {
         if (written >= max_states) break;
+        const auto* st = path.getState(i);
         const auto* rv = st->as<ob::RealVectorStateSpace::StateType>();
         for (int i = 0; i < dims; ++i)
             out_path[written * dims + i] = rv->values[i];
@@ -111,9 +143,8 @@ int motus_ompl_rrt_connect(
     si->setStateValidityChecker([&](const ob::State* s) {
         return IsValid(s, dims, validity, validity_userdata);
     });
-    si->setMotionValidator([&](const ob::State* a, const ob::State* b) {
-        return MotionValid(a, b, dims, step_size, validity, motion_validity, validity_userdata);
-    });
+    si->setMotionValidator(std::make_shared<MotusMotionValidator>(
+        si, dims, step_size, validity, motion_validity, validity_userdata));
     si->setStateValidityCheckingResolution(0.01);
     si->setup();
 
@@ -128,22 +159,31 @@ int motus_ompl_rrt_connect(
     auto pdef = std::make_shared<ob::ProblemDefinition>(si);
     pdef->setStartAndGoalStates(startState, goalState);
 
-    std::shared_ptr<ob::Planner> planner;
-    if (planner_id == MOTUS_OMPL_RRT_STAR)
-        planner = std::make_shared<og::RRTstar>(si);
-    else
-        planner = std::make_shared<og::RRTConnect>(si);
-
-    planner->setProblemDefinition(pdef);
-    planner->setup();
-    planner->setRange(step_size);
-
     ob::PlannerStatus solved;
-    if (max_plan_time_sec > 0.0)
-        solved = planner->solve(ob::timedPlannerTerminationCondition(max_plan_time_sec));
+    if (planner_id == MOTUS_OMPL_RRT_STAR)
+    {
+        auto planner = std::make_shared<og::RRTstar>(si);
+        planner->setProblemDefinition(pdef);
+        planner->setup();
+        planner->setRange(step_size);
+        if (max_plan_time_sec > 0.0)
+            solved = planner->solve(ob::timedPlannerTerminationCondition(max_plan_time_sec));
+        else
+            solved = planner->solve(ob::IterationTerminationCondition(
+                static_cast<unsigned int>(std::max(1, max_iterations))));
+    }
     else
-        solved = planner->solve(ob::IterationTerminationCondition(
-            static_cast<unsigned int>(std::max(1, max_iterations))));
+    {
+        auto planner = std::make_shared<og::RRTConnect>(si);
+        planner->setProblemDefinition(pdef);
+        planner->setup();
+        planner->setRange(step_size);
+        if (max_plan_time_sec > 0.0)
+            solved = planner->solve(ob::timedPlannerTerminationCondition(max_plan_time_sec));
+        else
+            solved = planner->solve(ob::IterationTerminationCondition(
+                static_cast<unsigned int>(std::max(1, max_iterations))));
+    }
 
     if (!solved)
     {
@@ -194,9 +234,8 @@ int motus_ompl_simplify_path(
     si->setStateValidityChecker([&](const ob::State* s) {
         return IsValid(s, dims, validity, validity_userdata);
     });
-    si->setMotionValidator([&](const ob::State* a, const ob::State* b) {
-        return MotionValid(a, b, dims, step_size, validity, motion_validity, validity_userdata);
-    });
+    si->setMotionValidator(std::make_shared<MotusMotionValidator>(
+        si, dims, step_size, validity, motion_validity, validity_userdata));
     si->setup();
 
     og::PathGeometric geom(si);
