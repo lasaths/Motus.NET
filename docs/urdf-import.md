@@ -1,16 +1,10 @@
 # URDF import
 
-Motus.NET loads **serial revolute and prismatic** chains from URDF without ROS or xacro at runtime.
+Motus.NET loads **serial revolute and prismatic** chains from URDF. Minimal **xacro** expansion is supported in-process.
 
 ## Workflow
 
-1. Expand xacro offline (if needed):
-
-```bash
-xacro robot.urdf.xacro > robot.urdf
-```
-
-2. Load in C#:
+### Flat URDF
 
 ```csharp
 var robot = UrdfRobotLoader.Load("robot.urdf", new UrdfLoadOptions
@@ -20,6 +14,30 @@ var robot = UrdfRobotLoader.Load("robot.urdf", new UrdfLoadOptions
     ModelName = "my_arm"
 });
 var model = robot.ToModel(); // includes CollisionModel when URDF defines <collision>
+```
+
+### Xacro (minimal tier)
+
+```csharp
+var robot = UrdfRobotLoader.LoadXacro("robot.urdf.xacro", new UrdfLoadOptions
+{
+    BaseLink = "base_link",
+    TipLink = "tool0"
+}, new XacroOptions
+{
+    SearchPaths = new[] { "urdf/includes" },
+    Args = new Dictionary<string, string> { ["prefix"] = "my_" }
+});
+```
+
+Supported: `<xacro:include>`, `<xacro:property>`, simple `<xacro:macro>` / calls, `${name}` substitution.
+
+**Not supported:** `$(find pkg)` / rospack — preprocess offline or add files via `SearchPaths`.
+
+Or expand offline:
+
+```bash
+xacro robot.urdf.xacro > robot.urdf
 ```
 
 ## Collision geometry
@@ -45,7 +63,7 @@ Pair names can be robot link names or `CollisionBodies.RobotLink(index)` when ma
 
 - Serial chains only (no closed loops)
 - No mimic joints
-- xacro is not evaluated in-process — preprocess first
+- xacro: includes, properties, simple macros only — no `$(find)`
 
 ## Bundled fixtures
 

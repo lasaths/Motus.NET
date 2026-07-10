@@ -49,7 +49,7 @@
     "z": 0,
     "qw": 1
   },
-  "toolFrame": { "x": 0, "y": 0, "z": 0, "qw": 1, "name": "flange" },
+  "toolFrame": { "x": 0, "y": 0, "z": 0.1633, "qw": 0.7071067811865476, "qx": 0, "qy": 0.7071067811865476, "qz": 0, "name": "robotiq_2f85" },
   "collisionLinks": [
     { "link": 0, "shape": "capsule", "radius": 0.10, "length": 0.08 },
     { "link": 1, "shape": "capsule", "radius": 0.10, "length": 0.28 },

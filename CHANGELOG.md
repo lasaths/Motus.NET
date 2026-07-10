@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-07-10
+
+### Added
+
+- **Session tools** — `ToolDefinition`, `RobotModel.WithTool`, export `SessionToolFrame` when session TCP differs from preset
+- `ToolDefinition.FromPreset(RobotModel)` — build tool from bundled preset tool frame + collision
+- `HomePoseResolver` + bundled `viewer_presets.json` in `Motus.Presets`
+- `TrajectorySampler.AtTime` — joint interpolation along trajectories (shortest-angle joint lerp)
+- Public `StlReader.Read` in `Motus.Presets`
+- **Xacro (minimal)** — `XacroPreprocessor.Expand`, `UrdfRobotLoader.LoadXacro` (includes, properties, simple macros, `${arg}`; no `$(find)`)
+- **Industrial blend execution** — TCP-path truncation at segment corners; exact-stop fallback warning when infeasible
+- UR10e preset: Robotiq 2F-85 TCP offset + tool collision box
+
+### Changed
+
+- `IndustrialMotionPlanner` — feasible blend radii truncate segment exits/entries instead of always exact-stop
+- `docs/urdf-import.md` — documents in-process xacro tier
+
 ## [0.5.1] - 2026-07-10
 
 ### Added

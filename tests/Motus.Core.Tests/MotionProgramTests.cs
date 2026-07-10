@@ -45,10 +45,41 @@ public class MotionProgramTests
         Assert.True(result.Success, string.Join("; ", result.Errors));
         Assert.NotNull(result.Trajectory);
         Assert.True(result.Trajectory!.Points.Count > 6);
-        Assert.Contains(result.Warnings, w => w.Contains("fallback to exact-stop transition", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(result.Warnings, w => w.Contains("fallback to exact-stop transition", StringComparison.OrdinalIgnoreCase));
         Assert.Contains(result.Trajectory.Points, p => p.MotionType == MotionPrimitiveType.Ptp);
         Assert.Contains(result.Trajectory.Points, p => p.MotionType == MotionPrimitiveType.Lin);
         Assert.Contains(result.Trajectory.Points, p => p.MotionType == MotionPrimitiveType.Circ);
+    }
+
+    [Fact]
+    public void Blend_InfeasibleRadius_WarnsExactStopFallback()
+    {
+        var preset = PresetLoader.LoadByModelName("UR5e", ResourcesRoot);
+        var robot = new RobotModel(preset);
+        var fk = new DhForwardKinematics(preset);
+        var planner = new IndustrialMotionPlanner(preset);
+
+        var start = new JointState(new[] { 0.0, -0.5, 1.0, -1.0, 0.0, 0.0 });
+        var tcp = fk.ComputeTcp(start, preset.BaseFrame, preset.ToolFrame);
+        var shortGoal = new CartesianPose(new Frame(
+            tcp.Tcp.X + 0.002, tcp.Tcp.Y, tcp.Tcp.Z,
+            tcp.Tcp.Qw, tcp.Tcp.Qx, tcp.Tcp.Qy, tcp.Tcp.Qz));
+        var farGoal = new CartesianPose(new Frame(
+            tcp.Tcp.X + 0.02, tcp.Tcp.Y, tcp.Tcp.Z,
+            tcp.Tcp.Qw, tcp.Tcp.Qx, tcp.Tcp.Qy, tcp.Tcp.Qz));
+
+        var req = new MotionProgramRequest(
+            robot,
+            start,
+            new MotionSegment[]
+            {
+                new LinSegment(shortGoal, stepMeters: 0.001, blendRadiusMeters: 0.01),
+                new LinSegment(farGoal, stepMeters: 0.005)
+            });
+
+        var result = planner.Plan(req);
+        Assert.True(result.Success);
+        Assert.Contains(result.Warnings, w => w.Contains("fallback to exact-stop transition", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]

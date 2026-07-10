@@ -36,7 +36,8 @@ Host-agnostic library (Grasshopper, CLI, services). MoveIt-shaped seams without 
 
 - [x] `LIN` — straight-line TCP with SLERP orientation
 - [x] Toolpath through waypoint chains
-- [ ] PTP / CIRC / blend radii (future)
+- [x] Industrial blend radii (TCP truncation + exact-stop fallback)
+- [x] `CIRC` — circular arc segments
 
 ## Milestone 6 — Mesh-accurate collision · L-XL
 

@@ -18,4 +18,37 @@ public sealed class RobotModel
     }
 
     public ValidationResult ValidateJointState(JointState state) => state.Validate(Preset.JointLimits);
+
+    /// <summary>Session model with optional base/tool overrides and tool geometry merged into collision.</summary>
+    public RobotModel WithTool(ToolDefinition? tool, BaseFrame? baseOverride = null)
+    {
+        var preset = Preset;
+        if (baseOverride is not null || tool is not null)
+        {
+            preset = new RobotPreset
+            {
+                Manufacturer = Preset.Manufacturer,
+                ModelName = Preset.ModelName,
+                Family = Preset.Family,
+                AxisCount = Preset.AxisCount,
+                JointLimits = Preset.JointLimits,
+                ReachMeters = Preset.ReachMeters,
+                PayloadKg = Preset.PayloadKg,
+                BaseFrame = baseOverride ?? Preset.BaseFrame,
+                ToolFrame = tool?.ToToolFrame() ?? Preset.ToolFrame,
+                Notes = Preset.Notes,
+                SourceNote = Preset.SourceNote,
+                Disclaimer = Preset.Disclaimer
+            };
+        }
+
+        RobotCollisionModel? collision = CollisionModel;
+        if (tool?.Geometry is not null)
+        {
+            var links = CollisionModel?.Links ?? Array.Empty<LinkCollisionGeometry>();
+            collision = new RobotCollisionModel(links, tool.Geometry);
+        }
+
+        return new RobotModel(preset, collision, JointNames);
+    }
 }

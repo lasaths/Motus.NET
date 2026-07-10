@@ -4,10 +4,12 @@ namespace Motus.Geometry;
 
 /// <summary>
 /// Motion program planner for mixed PTP/LIN/CIRC segment lists.
-/// Blend radii are accepted and exported as metadata; unsupported blends fall back to exact-stop transitions.
+/// Blend radii truncate TCP paths at segment corners when feasible; otherwise exact-stop fallback.
 /// </summary>
 public sealed class IndustrialMotionPlanner
 {
+    private const double BlendPathEpsilon = 1e-9;
+
     private readonly JointLinearPlanner _joint = new();
     private readonly CartesianLinearPathPlanner _linPlanner;
     private readonly IFkSolver _fk;
@@ -28,14 +30,12 @@ public sealed class IndustrialMotionPlanner
             return PlanningResult.Failed(new[] { "Motion program requires at least one segment." });
 
         var currentState = request.Start;
-        var currentPose = new CartesianPose(Transforms.ToFrame(
-            _fk.ComputeTcpTransform(currentState.Positions, _base.Frame, _tool.Frame)));
-        var points = new List<TrajectoryPoint>
-        {
-            new(0, currentState)
-        };
+        var currentPose = TcpPose(currentState);
+        var points = new List<TrajectoryPoint> { new(0, currentState) };
         var warnings = new List<string>();
         var t = 0.0;
+        double pendingEntryBlend = 0;
+        int pendingBlendFromSegment = -1;
 
         for (var i = 0; i < request.Segments.Count; i++)
         {
@@ -44,30 +44,139 @@ public sealed class IndustrialMotionPlanner
             if (!result.Success || result.Trajectory is null)
                 return result;
 
-            var segPoints = result.Trajectory.Points;
-            for (var p = 1; p < segPoints.Count; p++)
+            var rawPoints = result.Trajectory.Points;
+            var startIdx = 0;
+            var endIdx = rawPoints.Count - 1;
+            var junction = SegmentGoalPose(segment);
+
+            if (pendingEntryBlend > 0)
             {
-                t += segPoints[p].TimeSeconds - segPoints[p - 1].TimeSeconds;
+                if (!TryTruncateStart(rawPoints, startIdx, endIdx, pendingEntryBlend, junction.Tcp, out startIdx))
+                {
+                    warnings.Add(
+                        $"Blend radius {pendingEntryBlend:F3}m requested at segment {pendingBlendFromSegment}; fallback to exact-stop transition.");
+                }
+                pendingEntryBlend = 0;
+                pendingBlendFromSegment = -1;
+            }
+
+            if (segment.BlendRadiusMeters > 0 && i < request.Segments.Count - 1)
+            {
+                var pathLen = TcpPathLength(rawPoints, startIdx, endIdx);
+                if (pathLen < BlendPathEpsilon)
+                {
+                    // zero-length segment — no truncation needed
+                }
+                else if (TryTruncateEnd(rawPoints, startIdx, endIdx, segment.BlendRadiusMeters, junction.Tcp, out endIdx))
+                {
+                    pendingEntryBlend = segment.BlendRadiusMeters;
+                    pendingBlendFromSegment = i;
+                }
+                else
+                {
+                    warnings.Add(
+                        $"Blend radius {segment.BlendRadiusMeters:F3}m requested at segment {i}; fallback to exact-stop transition.");
+                }
+            }
+
+            for (var p = Math.Max(startIdx, 1); p <= endIdx; p++)
+            {
+                t += rawPoints[p].TimeSeconds - rawPoints[p - 1].TimeSeconds;
                 points.Add(new TrajectoryPoint(
                     t,
-                    segPoints[p].JointState,
+                    rawPoints[p].JointState,
                     segment.Type,
                     i,
                     segment.BlendRadiusMeters));
             }
 
-            currentState = segPoints[^1].JointState;
-            currentPose = new CartesianPose(Transforms.ToFrame(
-                _fk.ComputeTcpTransform(currentState.Positions, _base.Frame, _tool.Frame)));
-
-            if (segment.BlendRadiusMeters > 0)
-            {
-                warnings.Add(
-                    $"Blend radius {segment.BlendRadiusMeters:F3}m requested at segment {i}; fallback to exact-stop transition.");
-            }
+            currentState = rawPoints[endIdx].JointState;
+            currentPose = TcpPose(currentState);
         }
 
         return PlanningResult.Succeeded(new Trajectory(request.Robot, points), warnings);
+    }
+
+    private CartesianPose SegmentGoalPose(MotionSegment segment) =>
+        segment switch
+        {
+            PtpSegment ptp => TcpPose(ptp.Goal),
+            LinSegment lin => lin.Goal,
+            CircSegment circ => circ.Goal,
+            _ => throw new InvalidOperationException("Unsupported motion segment type.")
+        };
+
+    private CartesianPose TcpPose(JointState joints)
+    {
+        var frame = Transforms.ToFrame(_fk.ComputeTcpTransform(joints.Positions, _base.Frame, _tool.Frame));
+        return new CartesianPose(frame);
+    }
+
+    private double TcpPathLength(IReadOnlyList<TrajectoryPoint> segPoints, int startIdx, int endIdx)
+    {
+        if (endIdx <= startIdx) return 0;
+        var total = 0.0;
+        for (var i = startIdx + 1; i <= endIdx; i++)
+        {
+            var a = TcpPose(segPoints[i - 1].JointState).Tcp;
+            var b = TcpPose(segPoints[i].JointState).Tcp;
+            total += TcpDist(a, b);
+        }
+        return total;
+    }
+
+    private bool TryTruncateEnd(
+        IReadOnlyList<TrajectoryPoint> segPoints,
+        int startIdx,
+        int endIdx,
+        double blendRadius,
+        Frame cornerTcp,
+        out int newEndIdx)
+    {
+        newEndIdx = endIdx;
+        if (endIdx <= startIdx || blendRadius <= 0) return false;
+
+        for (var i = endIdx; i >= startIdx; i--)
+        {
+            var tcp = TcpPose(segPoints[i].JointState).Tcp;
+            if (TcpDist(tcp, cornerTcp) >= blendRadius - 1e-6)
+            {
+                newEndIdx = i;
+                return i > startIdx;
+            }
+        }
+        return false;
+    }
+
+    private bool TryTruncateStart(
+        IReadOnlyList<TrajectoryPoint> segPoints,
+        int startIdx,
+        int endIdx,
+        double blendRadius,
+        Frame cornerTcp,
+        out int newStartIdx)
+    {
+        newStartIdx = startIdx;
+        if (endIdx <= startIdx || blendRadius <= 0) return false;
+
+        for (var i = startIdx; i <= endIdx; i++)
+        {
+            var tcp = TcpPose(segPoints[i].JointState).Tcp;
+            if (TcpDist(tcp, cornerTcp) >= blendRadius - 1e-6)
+            {
+                newStartIdx = i;
+                return i < endIdx;
+            }
+        }
+        return false;
+    }
+
+    private static double TcpDist(Frame a, Frame b)
+    {
+        var dx = a.X - b.X;
+        var dy = a.Y - b.Y;
+        var dz = a.Z - b.Z;
+        return Math.Sqrt(dx * dx + dy * dy + dz * dz);
     }
 
     private PlanningResult PlanSegment(
@@ -107,17 +216,8 @@ public sealed class IndustrialMotionPlanner
         if (traj is null)
             return PlanningResult.Failed(new[] { "LIN planning failed (IK at intermediate poses)." });
 
-        var checker = request.Options.CollisionChecker;
-        var scene = request.Options.CollisionScene;
-        if (PlanningCollision.SceneHasObstacles(scene))
-        {
-            checker ??= CollisionCheckerFactory.Create(request.Robot, attached: request.Options.AttachedBodies);
-            if (checker is null)
-                return PlanningResult.Failed(new[] { "Collision scene provided but no collision checker available." });
-
-            var fail = PlanningCollision.ValidateTrajectory(traj, scene!, checker, request.Options.MaxJointStepRadians);
-            if (fail is not null) return fail;
-        }
+        var fail = ValidateSegmentCollision(request, traj);
+        if (fail is not null) return fail;
 
         return PlanningResult.Succeeded(traj);
     }
@@ -140,20 +240,24 @@ public sealed class IndustrialMotionPlanner
         if (traj is null)
             return PlanningResult.Failed(new[] { "CIRC planning failed (IK on circular waypoints)." });
 
-        var checker = request.Options.CollisionChecker;
-        var scene = request.Options.CollisionScene;
-        if (PlanningCollision.SceneHasObstacles(scene))
-        {
-            checker ??= CollisionCheckerFactory.Create(request.Robot, attached: request.Options.AttachedBodies);
-            if (checker is null)
-                return PlanningResult.Failed(new[] { "Collision scene provided but no collision checker available." });
-
-            var fail = PlanningCollision.ValidateTrajectory(traj, scene!, checker, request.Options.MaxJointStepRadians);
-            if (fail is not null) return fail;
-        }
+        var fail = ValidateSegmentCollision(request, traj);
+        if (fail is not null) return fail;
 
         warnings.Add("CIRC orientation policy: SLERP from segment start orientation to final orientation.");
         return PlanningResult.Succeeded(traj);
+    }
+
+    private static PlanningResult? ValidateSegmentCollision(MotionProgramRequest request, Trajectory traj)
+    {
+        var checker = request.Options.CollisionChecker;
+        var scene = request.Options.CollisionScene;
+        if (!PlanningCollision.SceneHasObstacles(scene)) return null;
+
+        checker ??= CollisionCheckerFactory.Create(request.Robot, attached: request.Options.AttachedBodies);
+        if (checker is null)
+            return PlanningResult.Failed(new[] { "Collision scene provided but no collision checker available." });
+
+        return PlanningCollision.ValidateTrajectory(traj, scene!, checker, request.Options.MaxJointStepRadians);
     }
 
     private static IReadOnlyList<CartesianPose>? BuildCircularWaypoints(
@@ -181,7 +285,6 @@ public sealed class IndustrialMotionPlanner
         var cy = Dot(ac, v);
         if (Math.Abs(cy) < 1e-9) return null;
 
-        // Start is (0,0), via is (bx,0), goal is (cx,cy).
         var ux = bx * 0.5;
         var uy = (cx * cx + cy * cy - bx * cx) / (2 * cy);
         var r = Math.Sqrt(ux * ux + uy * uy);

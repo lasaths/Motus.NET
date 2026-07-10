@@ -18,6 +18,12 @@
              Pack="true"
              PackagePath="contentFiles\any\any\resources\robots\%(RecursiveDir)%(Filename)%(Extension)"
              PackageCopyToOutput="true" />
+    <Content Include="..\..\resources\viewer_presets.json"
+             Link="resources\viewer_presets.json"
+             CopyToOutputDirectory="PreserveNewest"
+             Pack="true"
+             PackagePath="contentFiles\any\any\resources\viewer_presets.json"
+             PackageCopyToOutput="true" />
   </ItemGroup>
 
 </Project>

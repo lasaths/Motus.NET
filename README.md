@@ -55,12 +55,13 @@ var fk = KinematicsResolver.CreateFkSolver(robot.Preset, robot.Chain);
 | `RrtConnectPlanner` | Obstacles in `PlanningOptions.CollisionScene` | `Motus.OMPL.NET` |
 | `IndustrialMotionPlanner` | Mixed `PTP/LIN/CIRC` motion programs | `Motus.Geometry` |
 
-## Motion Programs (0.5.0)
+## Motion Programs (0.6.0)
 
 ```csharp
-var planner = new IndustrialMotionPlanner(robot.Preset);
+var session = robot.WithTool(ToolDefinition.FromPreset(robot));
+var planner = new IndustrialMotionPlanner(session.Preset);
 var request = new MotionProgramRequest(
-    robot,
+    session,
     start,
     new MotionSegment[]
     {
@@ -73,8 +74,19 @@ var result = planner.Plan(request);
 ```
 
 - Segment model: `PtpSegment`, `LinSegment`, `CircSegment`
-- Current blend behavior: deterministic fallback to exact-stop when a requested blend is not feasible/supported
-- Export includes motion metadata (`motionType`, `segmentIndex`, `blendRadiusMeters`) for replay/debugging
+- Blend radii truncate TCP paths at corners when feasible; infeasible blends fall back to exact-stop with a warning
+- Export includes motion metadata (`motionType`, `segmentIndex`, `blendRadiusMeters`) and optional `toolFrame` for session tools
+
+## Xacro import (0.6.0)
+
+```csharp
+var robot = UrdfRobotLoader.LoadXacro("robot.urdf.xacro", new UrdfLoadOptions {
+    BaseLink = "base_link",
+    TipLink = "tool0"
+});
+```
+
+Minimal in-process xacro: includes, properties, simple macros. No `$(find)` — use `XacroOptions.SearchPaths` or preprocess offline.
 
 ## Attach (pick-style)
 

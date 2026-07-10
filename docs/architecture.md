@@ -18,9 +18,9 @@ See [rhino-host.md](rhino-host.md) for Windows/macOS deployment (managed-first).
 - **Presets are data** — JSON files loaded by Motus.Presets, not hardcoded switches
 - **PlanningContext** — robot + scene + attach/detach; optional `PlanningGroup` for reduced-DOF planning
 
-## Motion Program Layer (0.5.0)
+## Motion Program Layer (0.6.0)
 
-`IndustrialMotionPlanner` executes mixed `PTP/LIN/CIRC` segments; see `README.md` for usage details.
+`IndustrialMotionPlanner` executes mixed `PTP/LIN/CIRC` segments with TCP blend truncation at corners when feasible. Session tools via `ToolDefinition` / `RobotModel.WithTool`. See `README.md` for usage details.
 
 ## Key interfaces
 

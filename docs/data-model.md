@@ -5,7 +5,8 @@
 - **`RobotManufacturer`** — enum (`UniversalRobots`, `Kuka`, …)
 - **`RobotPreset`** — immutable planning defaults from JSON (limits, frames, metadata)
 - **`RobotModel`** — runtime wrapper around a preset for planning
-- **`ToolFrame`** — static TCP offset from flange (no separate end-effector type)
+- **`ToolFrame`** — static TCP offset from flange
+- **`ToolDefinition`** — named tool bundle (TCP + optional gripper collision geometry) for session models via `RobotModel.WithTool`
 
 ## Kinematics state
 

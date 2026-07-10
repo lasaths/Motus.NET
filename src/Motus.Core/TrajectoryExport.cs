@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace Motus.Core;
 
@@ -9,6 +10,8 @@ public sealed class TrajectoryExportOptions
     public bool Validate { get; init; }
     public TrajectoryRetimerOptions? Retimer { get; init; }
     public TrajectoryValidationOptions? Validation { get; init; }
+    /// <summary>When set, included in JSON export if it differs from the trajectory robot preset tool frame.</summary>
+    public ToolFrame? SessionToolFrame { get; init; }
 }
 
 public sealed class TrajectoryExportResult
@@ -47,7 +50,7 @@ public static class TrajectoryExport
 
         return new TrajectoryExportResult(
             prepared,
-            ToJson(prepared, options.Retime),
+            ToJson(prepared, options),
             ToCsv(prepared, options.Retime),
             validation);
     }
@@ -60,6 +63,7 @@ public static class TrajectoryExport
         options ??= new TrajectoryExportOptions();
         var traj = Prepare(trajectory, options);
         var jointNames = traj.Robot.JointNames;
+        var toolFrame = ResolveExportToolFrame(traj.Robot, options.SessionToolFrame);
         var obj = new
         {
             robot = traj.Robot.DisplayName,
@@ -67,6 +71,7 @@ public static class TrajectoryExport
             durationSeconds = traj.DurationSeconds,
             pointCount = traj.Points.Count,
             retimed = options.Retime,
+            toolFrame,
             points = traj.Points.Select(p =>
             {
                 Dictionary<string, double>? joints = null;
@@ -87,7 +92,11 @@ public static class TrajectoryExport
                 };
             })
         };
-        return JsonSerializer.Serialize(obj, new JsonSerializerOptions { WriteIndented = true });
+        return JsonSerializer.Serialize(obj, new JsonSerializerOptions
+        {
+            WriteIndented = true,
+            DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
+        });
     }
 
     public static string ToCsv(Trajectory trajectory, bool retime = false) =>
@@ -119,4 +128,30 @@ public static class TrajectoryExport
         }
         return sb.ToString();
     }
+
+    private static object? ResolveExportToolFrame(RobotModel robot, ToolFrame? sessionTool)
+    {
+        var presetTool = robot.Preset.ToolFrame;
+        var tool = sessionTool ?? presetTool;
+        if (sessionTool is null && FramesEqual(tool.Frame, presetTool.Frame) &&
+            string.Equals(tool.Name, presetTool.Name, StringComparison.Ordinal))
+            return null;
+
+        return new
+        {
+            name = tool.Name,
+            x = tool.Frame.X,
+            y = tool.Frame.Y,
+            z = tool.Frame.Z,
+            qw = tool.Frame.Qw,
+            qx = tool.Frame.Qx,
+            qy = tool.Frame.Qy,
+            qz = tool.Frame.Qz
+        };
+    }
+
+    private static bool FramesEqual(Frame a, Frame b) =>
+        Math.Abs(a.X - b.X) < 1e-9 && Math.Abs(a.Y - b.Y) < 1e-9 && Math.Abs(a.Z - b.Z) < 1e-9 &&
+        Math.Abs(a.Qw - b.Qw) < 1e-9 && Math.Abs(a.Qx - b.Qx) < 1e-9 &&
+        Math.Abs(a.Qy - b.Qy) < 1e-9 && Math.Abs(a.Qz - b.Qz) < 1e-9;
 }

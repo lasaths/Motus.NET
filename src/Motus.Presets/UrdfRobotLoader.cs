@@ -39,6 +39,13 @@ public static class UrdfRobotLoader
         return Load(doc, options ?? new UrdfLoadOptions(), Path.GetDirectoryName(Path.GetFullPath(urdfPath)) ?? ".");
     }
 
+    /// <summary>Expand a .xacro file then load as URDF.</summary>
+    public static UrdfRobot LoadXacro(string xacroPath, UrdfLoadOptions? options = null, XacroOptions? xacroOptions = null)
+    {
+        var doc = XacroPreprocessor.ExpandDocument(xacroPath, xacroOptions);
+        return Load(doc, options ?? new UrdfLoadOptions(), Path.GetDirectoryName(Path.GetFullPath(xacroPath)) ?? ".");
+    }
+
     public static UrdfRobot Load(XDocument doc, UrdfLoadOptions options, string? urdfDirectory = null)
     {
         urdfDirectory ??= ".";
