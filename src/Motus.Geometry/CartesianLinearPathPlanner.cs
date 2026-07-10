@@ -5,12 +5,17 @@ namespace Motus.Geometry;
 /// <summary>True Cartesian linear (LIN) motion —— TCP follows straight line, joints via IK each step.</summary>
 public sealed class CartesianLinearPathPlanner
 {
+    private const double IkPosTolMeters = 0.02;
+    private const double IkOriTolRad = 0.15;
+
     private readonly RobotPreset _preset;
     private readonly IInverseKinematics _ik;
     private readonly IFkSolver _fk;
     private readonly Random _rng;
     private readonly BaseFrame _base;
     private readonly ToolFrame _tool;
+    private readonly double[] _baseM;
+    private readonly double[] _toolM;
 
     public CartesianLinearPathPlanner(RobotPreset preset)
         : this(preset, null) { }
@@ -23,7 +28,17 @@ public sealed class CartesianLinearPathPlanner
         _rng = new Random(42);
         _base = preset.BaseFrame;
         _tool = preset.ToolFrame;
+        _baseM = Transforms.FromFrame(_base.Frame);
+        _toolM = Transforms.FromFrame(_tool.Frame);
     }
+
+    /// <summary>Plan a straight-line TCP path from startPose to goalPose.</summary>
+    public Trajectory? Plan(
+        CartesianPose startPose,
+        CartesianPose goalPose,
+        JointState startJoint,
+        CartesianLinOptions options) =>
+        Plan(startPose, goalPose, startJoint, options, options.ContinueOnIkFailure);
 
     /// <summary>Plan a straight-line TCP path from startPose to goalPose.</summary>
     /// <param name="startPose">Cartesian TCP start</param>
@@ -32,11 +47,18 @@ public sealed class CartesianLinearPathPlanner
     /// <param name="stepMeters">Cartesian step size for interpolation (default: 5mm)</param>
     /// <param name="continueOnIKFailure">If true, return partial path on IK failures (default: true)</param>
     /// <returns>Trajectory or null if IK fails at intermediate poses</returns>
-    public Trajectory? Plan(CartesianPose startPose, CartesianPose goalPose, JointState startJoint, double stepMeters = 0.005, bool continueOnIKFailure = true)
+    public Trajectory? Plan(CartesianPose startPose, CartesianPose goalPose, JointState startJoint, double stepMeters = 0.005, bool continueOnIKFailure = true) =>
+        Plan(startPose, goalPose, startJoint, new CartesianLinOptions(StepMeters: stepMeters, ContinueOnIkFailure: continueOnIKFailure), continueOnIKFailure);
+
+    private Trajectory? Plan(
+        CartesianPose startPose,
+        CartesianPose goalPose,
+        JointState startJoint,
+        CartesianLinOptions options,
+        bool continueOnIKFailure)
     {
         var elapsedFrames = 0;
 
-        // PONYTAIL: Compute number of steps from linear distance
         var startPos = new[] { startPose.Tcp.X, startPose.Tcp.Y, startPose.Tcp.Z };
         var goalPos = new[] { goalPose.Tcp.X, goalPose.Tcp.Y, goalPose.Tcp.Z };
         var dx = goalPos[0] - startPos[0];
@@ -46,7 +68,7 @@ public sealed class CartesianLinearPathPlanner
         if (distanceMeters < 1e-9)
             return new Trajectory(new RobotModel(_preset), [new TrajectoryPoint(0, startJoint)]);
 
-        var steps = Math.Max(2, (int)Math.Ceiling(distanceMeters / stepMeters));
+        var steps = options.StepCount(distanceMeters);
 
         var points = new List<TrajectoryPoint>(steps + 1);
 
@@ -64,17 +86,19 @@ public sealed class CartesianLinearPathPlanner
             var alpha = (double)i / steps;
             var interpPose = InterpolatePose(startPose, goalPose, alpha);
 
-            // PONYTAIL: Try IK with geometric seed strategy
+            // PONYTAIL: Try IK with geometric seed strategy; retry until FK verifies the pose
             JointState? solvedJoint = null;
-            for (var seedAttempts = 0; seedAttempts < 10 && solvedJoint is null; seedAttempts++)
+            for (var seedAttempts = 0; seedAttempts < options.MaxIkAttemptsPerStep && solvedJoint is null; seedAttempts++)
             {
                 if (_ik.TrySolve(interpPose, seed, out var testJoint))
-                    solvedJoint = testJoint;
+                {
+                    testJoint = UnwrapNear(currentJoint, testJoint);
+                    if (PoseMatches(interpPose.Tcp, testJoint))
+                        solvedJoint = testJoint;
+                }
 
                 if (solvedJoint is null)
-                {
                     seed = GenerateGeometricSeed(currentJoint, seedAttempts);
-                }
             }
 
             if (solvedJoint is null)
@@ -95,21 +119,6 @@ public sealed class CartesianLinearPathPlanner
             }
 
             consecutiveFailures = 0;  // Reset on success
-            solvedJoint = UnwrapNear(currentJoint, solvedJoint);
-            if (!PoseMatches(interpPose, solvedJoint))
-            {
-                if (!continueOnIKFailure)
-                    return null;
-                consecutiveFailures++;
-                if (consecutiveFailures >= maxConsecutiveFailures)
-                {
-                    if (points.Count >= steps / 2)
-                        break;
-                    return null;
-                }
-                continue;
-            }
-
             // PONYTAIL: Prefer solutions close to previous waypoint (continuity)
             if (MaxJointDelta(currentJoint, solvedJoint) < 1.0)  // ~57° tolerance for continuity preference
             {
@@ -123,12 +132,11 @@ public sealed class CartesianLinearPathPlanner
             points.Add(new TrajectoryPoint(elapsedFrames++, currentJoint));
         }
 
-        // Snap final configuration from the penultimate seed so the last segment
-        // stays on the same IK branch (avoids wrist/TCP flip at alpha=1).
-        if (points.Count >= 2 && _ik.TrySolve(goalPose, points[^2].JointState, out var finalJoint))
+        // Snap only when every waypoint succeeded — avoids a goal jump on partial paths.
+        if (points.Count == steps + 1 && _ik.TrySolve(goalPose, points[^2].JointState, out var finalJoint))
         {
             finalJoint = UnwrapNear(points[^2].JointState, finalJoint);
-            if (PoseMatches(goalPose, finalJoint))
+            if (PoseMatches(goalPose.Tcp, finalJoint))
             {
                 var last = points[^1];
                 points[^1] = new TrajectoryPoint(last.TimeSeconds, finalJoint);
@@ -266,24 +274,14 @@ public sealed class CartesianLinearPathPlanner
         return (q.w / n, q.x / n, q.y / n, q.z / n);
     }
 
-    private bool PoseMatches(CartesianPose target, JointState joints, double posTolMeters = 5e-3, double oriTolRad = 0.05)
-    {
-        var actual = _fk.ComputeTcp(joints, _base, _tool);
-        var dx = actual.Tcp.X - target.Tcp.X;
-        var dy = actual.Tcp.Y - target.Tcp.Y;
-        var dz = actual.Tcp.Z - target.Tcp.Z;
-        if (Math.Sqrt(dx * dx + dy * dy + dz * dz) > posTolMeters) return false;
+    private bool PoseMatches(Frame targetTcp, JointState joints) =>
+        Transforms.TcpMatches(
+            Transforms.TcpFromJoints(_fk, joints.Positions, _baseM, _toolM),
+            targetTcp,
+            IkPosTolMeters,
+            IkOriTolRad);
 
-        var dot = Math.Abs(
-            actual.Tcp.Qw * target.Tcp.Qw +
-            actual.Tcp.Qx * target.Tcp.Qx +
-            actual.Tcp.Qy * target.Tcp.Qy +
-            actual.Tcp.Qz * target.Tcp.Qz);
-        var oriErr = 2 * Math.Acos(Math.Clamp(dot, -1, 1));
-        return oriErr <= oriTolRad;
-    }
-
-    private static JointState UnwrapNear(JointState reference, JointState raw)
+    private JointState UnwrapNear(JointState reference, JointState raw)
     {
         var q = new double[raw.AxisCount];
         for (var i = 0; i < q.Length; i++)
@@ -291,6 +289,8 @@ public sealed class CartesianLinearPathPlanner
             var v = raw.Positions[i];
             while (v - reference.Positions[i] > Math.PI) v -= 2 * Math.PI;
             while (v - reference.Positions[i] < -Math.PI) v += 2 * Math.PI;
+            if (!_preset.JointLimits[i].Contains(v))
+                v = raw.Positions[i];
             q[i] = v;
         }
         return new JointState(q);
@@ -336,7 +336,10 @@ public sealed class CartesianLinearPathPlanner
     }
 
     /// <summary>Plan LIN from a Cartesian planning request (FK start pose → goal).</summary>
-    public PlanningResult PlanToResult(CartesianPlanningRequest request, double stepMeters = 0.005)
+    public PlanningResult PlanToResult(CartesianPlanningRequest request, double stepMeters = 0.005) =>
+        PlanToResult(request, new CartesianLinOptions(StepMeters: stepMeters));
+
+    public PlanningResult PlanToResult(CartesianPlanningRequest request, CartesianLinOptions options)
     {
         var robot = request.Robot;
         var scene = request.CollisionScene ?? request.Options.CollisionScene;
@@ -347,9 +350,20 @@ public sealed class CartesianLinearPathPlanner
 
         var startPose = new CartesianPose(Transforms.ToFrame(
             _fk.ComputeTcpTransform(request.Start.Positions, _base.Frame, _tool.Frame)));
-        var traj = Plan(startPose, request.Goal, request.Start, stepMeters, continueOnIKFailure: false);
+
+        var workspace = CartesianWorkspace.CheckReach(robot.Preset, request.Goal, startPose);
+        if (!workspace.IsWithinReach)
+            return PlanningResult.Failed(new[] { workspace.Reason ?? "Goal TCP is outside robot reach." });
+
+        var linOptions = options with { ContinueOnIkFailure = false };
+        var traj = Plan(startPose, request.Goal, request.Start, linOptions);
         if (traj is null)
-            return PlanningResult.Failed(new[] { "Cartesian LIN planning failed (IK at intermediate poses)." });
+        {
+            return PlanningResult.Failed(new[]
+            {
+                "TCP-LIN failed at intermediate poses. Use Joint State goal or wire Start near target."
+            });
+        }
 
         var checker = request.Options.CollisionChecker;
         if (PlanningCollision.SceneHasObstacles(scene) && checker is null)

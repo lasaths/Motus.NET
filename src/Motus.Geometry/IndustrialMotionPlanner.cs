@@ -99,7 +99,11 @@ public sealed class IndustrialMotionPlanner
         if (segment.StepMeters <= 0)
             return PlanningResult.Failed(new[] { "LIN stepMeters must be positive." });
 
-        var traj = _linPlanner.Plan(currentPose, segment.Goal, currentState, segment.StepMeters, continueOnIKFailure: false);
+        var traj = _linPlanner.Plan(
+            currentPose,
+            segment.Goal,
+            currentState,
+            new CartesianLinOptions(StepMeters: segment.StepMeters, ContinueOnIkFailure: false));
         if (traj is null)
             return PlanningResult.Failed(new[] { "LIN planning failed (IK at intermediate poses)." });
 

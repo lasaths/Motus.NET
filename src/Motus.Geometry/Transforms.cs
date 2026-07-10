@@ -187,4 +187,59 @@ public static class Transforms
         var dz = a[11] - b[11];
         return Math.Sqrt(dx * dx + dy * dy + dz * dz);
     }
+
+    public static double[] TcpFromJoints(IFkSolver fk, IReadOnlyList<double> joints, double[] baseM, double[] toolM) =>
+        Multiply(Multiply(baseM, fk.ComputeFlangeTransform(joints)), toolM);
+
+    public static bool TcpMatches(double[] actualM, Frame targetTcp, double posTolMeters, double oriTolRad)
+    {
+        var dx = actualM[3] - targetTcp.X;
+        var dy = actualM[7] - targetTcp.Y;
+        var dz = actualM[11] - targetTcp.Z;
+        if (dx * dx + dy * dy + dz * dz > posTolMeters * posTolMeters) return false;
+
+        var q = QuaternionFromMatrix(actualM);
+        var dot = Math.Abs(q.w * targetTcp.Qw + q.x * targetTcp.Qx + q.y * targetTcp.Qy + q.z * targetTcp.Qz);
+        var oriErr = 2 * Math.Acos(Math.Clamp(dot, -1, 1));
+        return oriErr <= oriTolRad;
+    }
+
+    private static (double w, double x, double y, double z) QuaternionFromMatrix(double[] m)
+    {
+        var trace = m[0] + m[5] + m[10];
+        double w, x, y, z;
+        if (trace > 0)
+        {
+            var s = Math.Sqrt(trace + 1) * 2;
+            w = 0.25 * s;
+            x = (m[9] - m[6]) / s;
+            y = (m[2] - m[8]) / s;
+            z = (m[4] - m[1]) / s;
+        }
+        else if (m[0] > m[5] && m[0] > m[10])
+        {
+            var s = Math.Sqrt(1 + m[0] - m[5] - m[10]) * 2;
+            w = (m[9] - m[6]) / s;
+            x = 0.25 * s;
+            y = (m[1] + m[4]) / s;
+            z = (m[2] + m[8]) / s;
+        }
+        else if (m[5] > m[10])
+        {
+            var s = Math.Sqrt(1 + m[5] - m[0] - m[10]) * 2;
+            w = (m[2] - m[8]) / s;
+            x = (m[1] + m[4]) / s;
+            y = 0.25 * s;
+            z = (m[6] + m[9]) / s;
+        }
+        else
+        {
+            var s = Math.Sqrt(1 + m[10] - m[0] - m[5]) * 2;
+            w = (m[4] - m[1]) / s;
+            x = (m[2] + m[8]) / s;
+            y = (m[6] + m[9]) / s;
+            z = 0.25 * s;
+        }
+        return NormalizeQuat(w, x, y, z);
+    }
 }

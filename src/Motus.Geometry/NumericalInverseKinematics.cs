@@ -9,6 +9,8 @@ public sealed class NumericalInverseKinematics : IInverseKinematics
     private readonly BaseFrame _base;
     private readonly ToolFrame _tool;
     private readonly IReadOnlyList<JointLimit> _limits;
+    private readonly double[] _baseM;
+    private readonly double[] _toolM;
 
     public NumericalInverseKinematics(RobotPreset preset)
         : this(KinematicsResolver.CreateFkSolver(preset), preset) { }
@@ -19,6 +21,8 @@ public sealed class NumericalInverseKinematics : IInverseKinematics
         _base = preset.BaseFrame;
         _tool = preset.ToolFrame;
         _limits = preset.JointLimits;
+        _baseM = Transforms.FromFrame(_base.Frame);
+        _toolM = Transforms.FromFrame(_tool.Frame);
     }
 
     public bool TrySolve(CartesianPose target, JointState seed, out JointState solution)
@@ -100,7 +104,7 @@ public sealed class NumericalInverseKinematics : IInverseKinematics
 
         for (var iter = 0; iter < maxIter; iter++)
         {
-            var current = _fk.ComputeTcpTransform(q, _base.Frame, _tool.Frame);
+            var current = Transforms.TcpFromJoints(_fk, q, _baseM, _toolM);
             var posErr = PositionError(current, targetM);
             var rotErr = RotationError(current, targetM);
 
@@ -132,7 +136,7 @@ public sealed class NumericalInverseKinematics : IInverseKinematics
         }
 
         solution = new JointState(Clamp(q));
-        var finalCheck = _fk.ComputeTcpTransform(solution.Positions, _base.Frame, _tool.Frame);
+        var finalCheck = Transforms.TcpFromJoints(_fk, solution.Positions, _baseM, _toolM);
         return PositionError(finalCheck, targetM) < finalPosTol
             && RotationError(finalCheck, targetM) < finalRotTol;
     }
@@ -155,16 +159,16 @@ public sealed class NumericalInverseKinematics : IInverseKinematics
         var n = q.Length;
         var j = new double[6, n];
         const double h = 1e-5;
-        var baseM = _fk.ComputeTcpTransform(q, _base.Frame, _tool.Frame);
+        var baseM = Transforms.TcpFromJoints(_fk, q, _baseM, _toolM);
         var e0 = PoseErrorVector(baseM, targetM);
         for (var i = 0; i < n; i++)
         {
-            var qp = (double[])q.Clone();
-            qp[i] += h;
-            var perturbed = _fk.ComputeTcpTransform(qp, _base.Frame, _tool.Frame);
+            q[i] += h;
+            var perturbed = Transforms.TcpFromJoints(_fk, q, _baseM, _toolM);
             var ei = PoseErrorVector(perturbed, targetM);
             for (var r = 0; r < 6; r++)
                 j[r, i] = (ei[r] - e0[r]) / h;
+            q[i] -= h;
         }
         return j;
     }

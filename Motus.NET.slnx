@@ -12,4 +12,7 @@
     <Project Path="tests/Motus.OMPL.Tests/Motus.OMPL.Tests.csproj" />
     <Project Path="tests/Motus.Presets.Tests/Motus.Presets.Tests.csproj" />
   </Folder>
+  <Folder Name="/benchmarks/">
+    <Project Path="benchmarks/Motus.Benchmarks/Motus.Benchmarks.csproj" />
+  </Folder>
 </Solution>

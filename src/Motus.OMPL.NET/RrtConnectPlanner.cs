@@ -240,7 +240,7 @@ public sealed class RrtConnectPlanner : IPlanner
     {
         var nearest = Nearest(tree, target);
         var steered = Steer(tree.Nodes[nearest].Q, target, limits);
-        if (ConfigurationDistance(tree.Nodes[nearest].Q, steered) < 1e-12) return (false, nearest);
+        if (ConfigurationDistanceSquared(tree.Nodes[nearest].Q, steered) < 1e-24) return (false, nearest);
         if (!SegmentFree(tree.Nodes[nearest].Q, steered, scene, checker, toFull)) return (false, nearest);
         tree.Nodes.Add(new RrtNode(steered, nearest));
         return (true, tree.Nodes.Count - 1);
@@ -251,32 +251,35 @@ public sealed class RrtConnectPlanner : IPlanner
         ICollisionChecker? checker, Func<double[], JointState> toFull, out int connectIndex)
     {
         connectIndex = Nearest(tree, target);
-        while (ConfigurationDistance(tree.Nodes[connectIndex].Q, target) > _options.ConnectThresholdRadians)
+        var thresholdSq = _options.ConnectThresholdRadians * _options.ConnectThresholdRadians;
+        while (ConfigurationDistanceSquared(tree.Nodes[connectIndex].Q, target) > thresholdSq)
         {
             var steered = Steer(tree.Nodes[connectIndex].Q, target, limits);
-            if (ConfigurationDistance(tree.Nodes[connectIndex].Q, steered) < 1e-12) break;
+            if (ConfigurationDistanceSquared(tree.Nodes[connectIndex].Q, steered) < 1e-24) break;
             if (!SegmentFree(tree.Nodes[connectIndex].Q, steered, scene, checker, toFull)) return false;
             tree.Nodes.Add(new RrtNode(steered, connectIndex));
             connectIndex = tree.Nodes.Count - 1;
         }
-        return ConfigurationDistance(tree.Nodes[connectIndex].Q, target) <= _options.ConnectThresholdRadians;
+        return ConfigurationDistanceSquared(tree.Nodes[connectIndex].Q, target) <= thresholdSq;
     }
 
     private bool SegmentFree(
         double[] from, double[] to, CollisionScene scene, ICollisionChecker? checker, Func<double[], JointState> toFull)
     {
         if (checker is null) return true;
+        if (checker is SphereCollisionChecker sphere)
+            return sphere.SegmentCollisionFree(from, to, scene, _options.StepRadians);
         return checker.SegmentCollisionFree(toFull(from), toFull(to), scene, _options.StepRadians);
     }
 
     private static int Nearest(RrtTree tree, double[] target)
     {
         var best = 0;
-        var bestDist = double.MaxValue;
+        var bestDistSq = double.MaxValue;
         for (var i = 0; i < tree.Nodes.Count; i++)
         {
-            var d = ConfigurationDistance(tree.Nodes[i].Q, target);
-            if (d < bestDist) { bestDist = d; best = i; }
+            var d = ConfigurationDistanceSquared(tree.Nodes[i].Q, target);
+            if (d < bestDistSq) { bestDistSq = d; best = i; }
         }
         return best;
     }
@@ -299,7 +302,7 @@ public sealed class RrtConnectPlanner : IPlanner
         return q;
     }
 
-    private static double ConfigurationDistance(double[] a, double[] b)
+    private static double ConfigurationDistanceSquared(double[] a, double[] b)
     {
         var sum = 0.0;
         for (var i = 0; i < a.Length; i++)
@@ -307,8 +310,11 @@ public sealed class RrtConnectPlanner : IPlanner
             var d = a[i] - b[i];
             sum += d * d;
         }
-        return Math.Sqrt(sum);
+        return sum;
     }
+
+    private static double ConfigurationDistance(double[] a, double[] b) =>
+        Math.Sqrt(ConfigurationDistanceSquared(a, b));
 
     private static List<double[]> Reconstruct(RrtTree tree, int index)
     {
@@ -327,16 +333,21 @@ public sealed class RrtConnectPlanner : IPlanner
         RobotModel robot, IReadOnlyList<JointState> waypoints, PlanningOptions opts,
         ICollisionChecker? checker, bool usedNative)
     {
-        var segmentOpts = checker is not null && PlanningCollision.SceneHasObstacles(opts.CollisionScene)
-            ? new PlanningOptions
-            {
-                MaxJointStepRadians = opts.MaxJointStepRadians,
-                TimeStepSeconds = opts.TimeStepSeconds,
-                MaxJointVelocityRadiansPerSecond = opts.MaxJointVelocityRadiansPerSecond,
-                CollisionScene = opts.CollisionScene,
-                CollisionChecker = checker
-            }
-            : opts;
+        var warnings = new List<string> { "RrtConnectPlanner: joint-space RRT-Connect path." };
+        warnings.Add(MotusCapabilities.Describe());
+        if (!usedNative)
+            warnings.Add(NativeOmpl.StatusMessage);
+        if (checker is null)
+            warnings.Add("RRT-Connect ran without collision checker (no kinematics chain).");
+
+        if (waypoints.Count < 2)
+            return PlanningResult.Failed(new[] { "RRT path has insufficient waypoints." });
+
+        // Waypoints are already collision-checked between consecutive pairs by RRT + PathSimplifier.
+        if (checker is not null && PlanningCollision.SceneHasObstacles(opts.CollisionScene))
+            return PlanningResult.Succeeded(new Trajectory(robot, BuildWaypointTrajectory(waypoints, opts)), warnings);
+
+        var segmentOpts = opts;
         var planner = new JointLinearPlanner();
         var points = new List<TrajectoryPoint> { new(0, waypoints[0]) };
         var t = 0.0;
@@ -352,13 +363,27 @@ public sealed class RrtConnectPlanner : IPlanner
             }
         }
 
-        var warnings = new List<string> { "RrtConnectPlanner: joint-space RRT-Connect path." };
-        warnings.Add(MotusCapabilities.Describe());
-        if (!usedNative)
-            warnings.Add(NativeOmpl.StatusMessage);
-        if (checker is null)
-            warnings.Add("RRT-Connect ran without collision checker (no kinematics chain).");
         return PlanningResult.Succeeded(new Trajectory(robot, points), warnings);
+    }
+
+    private static List<TrajectoryPoint> BuildWaypointTrajectory(IReadOnlyList<JointState> waypoints, PlanningOptions opts)
+    {
+        var points = new List<TrajectoryPoint>(waypoints.Count);
+        var t = 0.0;
+        var maxVel = opts.MaxJointVelocityRadiansPerSecond;
+        var minDt = opts.TimeStepSeconds;
+        points.Add(new TrajectoryPoint(t, waypoints[0]));
+        for (var i = 1; i < waypoints.Count; i++)
+        {
+            var maxDelta = 0.0;
+            var prev = waypoints[i - 1].Positions;
+            var cur = waypoints[i].Positions;
+            for (var j = 0; j < cur.Length; j++)
+                maxDelta = Math.Max(maxDelta, Math.Abs(cur[j] - prev[j]));
+            t += Math.Max(minDt, maxDelta / maxVel);
+            points.Add(new TrajectoryPoint(t, waypoints[i]));
+        }
+        return points;
     }
 
     private sealed class RrtTree

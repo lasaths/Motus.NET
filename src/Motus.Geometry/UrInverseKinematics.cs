@@ -11,6 +11,8 @@ public sealed class UrInverseKinematics : IInverseKinematics
     private readonly BaseFrame _base;
     private readonly ToolFrame _tool;
     private readonly IReadOnlyList<JointLimit> _limits;
+    private readonly double[] _baseM;
+    private readonly double[] _toolM;
 
     public UrInverseKinematics(RobotPreset preset)
         : this(KinematicsProfiles.GetRequired(preset), KinematicsResolver.CreateFkSolver(preset), preset) { }
@@ -23,6 +25,8 @@ public sealed class UrInverseKinematics : IInverseKinematics
         _base = preset.BaseFrame;
         _tool = preset.ToolFrame;
         _limits = preset.JointLimits;
+        _baseM = Transforms.FromFrame(_base.Frame);
+        _toolM = Transforms.FromFrame(_tool.Frame);
     }
 
     public bool TrySolve(CartesianPose target, JointState seed, out JointState solution)
@@ -51,15 +55,22 @@ public sealed class UrInverseKinematics : IInverseKinematics
             return TryNumericalFromSeeds(target, seed, targetM, out solution);
         }
 
-        return _numerical.TrySolve(target, seed, out solution);
+        if (!_numerical.TrySolve(target, seed, out solution))
+            return false;
+
+        solution = UnwrapNear(seed, solution);
+        return true;
     }
 
     private bool TryNumericalFromSeeds(CartesianPose target, JointState seed, double[] targetM, out JointState solution)
     {
         foreach (var trySeed in NumericalSeeds(seed, targetM))
         {
-            if (_numerical.TrySolve(target, trySeed, out solution))
-                return true;
+            if (!_numerical.TrySolve(target, trySeed, out var raw))
+                continue;
+
+            solution = UnwrapNear(seed, raw);
+            return true;
         }
 
         solution = seed;
@@ -95,7 +106,7 @@ public sealed class UrInverseKinematics : IInverseKinematics
         return max;
     }
 
-    private static JointState UnwrapNear(JointState reference, JointState raw)
+    private JointState UnwrapNear(JointState reference, JointState raw)
     {
         var q = new double[raw.AxisCount];
         for (var i = 0; i < q.Length; i++)
@@ -103,27 +114,19 @@ public sealed class UrInverseKinematics : IInverseKinematics
             var v = raw.Positions[i];
             while (v - reference.Positions[i] > Math.PI) v -= 2 * Math.PI;
             while (v - reference.Positions[i] < -Math.PI) v += 2 * Math.PI;
+            if (!_limits[i].Contains(v))
+                v = raw.Positions[i];
             q[i] = v;
         }
         return new JointState(q);
     }
 
-    private bool Verify(CartesianPose target, JointState candidate)
-    {
-        var actual = _fk.ComputeTcp(candidate, _base, _tool);
-        var dx = actual.Tcp.X - target.Tcp.X;
-        var dy = actual.Tcp.Y - target.Tcp.Y;
-        var dz = actual.Tcp.Z - target.Tcp.Z;
-        if (Math.Sqrt(dx * dx + dy * dy + dz * dz) >= 5e-3) return false;
-
-        var dot = Math.Abs(
-            actual.Tcp.Qw * target.Tcp.Qw +
-            actual.Tcp.Qx * target.Tcp.Qx +
-            actual.Tcp.Qy * target.Tcp.Qy +
-            actual.Tcp.Qz * target.Tcp.Qz);
-        var oriErr = 2 * Math.Acos(Math.Clamp(dot, -1, 1));
-        return oriErr < 0.05;
-    }
+    private bool Verify(CartesianPose target, JointState candidate) =>
+        Transforms.TcpMatches(
+            Transforms.TcpFromJoints(_fk, candidate.Positions, _baseM, _toolM),
+            target.Tcp,
+            5e-3,
+            0.05);
 
     private static bool IsFlangeTool(ToolFrame tool) =>
         Math.Abs(tool.Frame.X) < 1e-6 && Math.Abs(tool.Frame.Y) < 1e-6 && Math.Abs(tool.Frame.Z) < 1e-6

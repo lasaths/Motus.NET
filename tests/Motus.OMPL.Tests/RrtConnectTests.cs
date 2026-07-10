@@ -1,13 +1,17 @@
+using System.Diagnostics;
 using Motus.Core;
 using Motus.Geometry;
 using Motus.OMPL.NET;
 using Motus.Presets;
+using Xunit.Abstractions;
 
 namespace Motus.OMPL.Tests;
 
 public class RrtConnectTests
 {
-  private static string ResourcesRoot =>
+  private readonly ITestOutputHelper? _output;
+
+  public RrtConnectTests(ITestOutputHelper? output = null) => _output = output;  private static string ResourcesRoot =>
     Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "resources", "robots"));
 
   [Fact]
@@ -61,6 +65,67 @@ public class RrtConnectTests
     var planner = new RrtConnectPlanner(model.Preset, new RrtConnectOptions { MaxIterations = 10000, RandomSeed = 11 });
     var result = planner.Plan(new PlanningRequest(robot, start, goal, opts));
     Assert.True(result.Success, string.Join("; ", result.Errors));
+  }
+
+  [Fact]
+  public void PlansMultiGoalSequenceAroundObstacle()
+  {
+    var total = Stopwatch.StartNew();
+    var preset = PresetLoader.LoadByModelName("UR5e", ResourcesRoot);
+    var robot = new RobotModel(preset);
+    var checker = new SphereCollisionChecker(preset);
+    var planner = new RrtConnectPlanner(checker, new RrtConnectOptions { MaxIterations = 6000, RandomSeed = 17 });
+
+    var start = new JointState(new double[6]);
+    var goals = new[]
+    {
+      new JointState(new[] { 0.35, -0.45, 0.55, -0.45, -0.45, 0.20 }),
+      new JointState(new[] { 0.55, -0.70, 0.80, -0.60, -0.55, 0.25 }),
+      new JointState(new[] { 0.70, -0.80, 0.90, -0.70, -0.65, 0.30 }),
+    };
+
+    var sceneSw = Stopwatch.StartNew();
+    var scene = FindBlockingScene(checker, preset, start, goals[0], 0.08)
+      ?? throw new InvalidOperationException("Could not place a blocking obstacle for multi-goal RRT test.");
+    sceneSw.Stop();
+    Assert.False(checker.SegmentCollisionFree(start, goals[0], scene, 0.08));
+
+    var validator = new TrajectoryValidator();
+    var from = start;
+    var planMs = 0L;
+    var validateMs = 0L;
+    for (var i = 0; i < goals.Length; i++)
+    {
+      var goal = goals[i];
+      var opts = new PlanningOptions
+      {
+        CollisionScene = scene,
+        CollisionChecker = checker,
+        MaxJointStepRadians = 0.08
+      };
+
+      var planSw = Stopwatch.StartNew();
+      var result = planner.Plan(new PlanningRequest(robot, from, goal, opts));
+      planSw.Stop();
+      planMs += planSw.ElapsedMilliseconds;
+      Assert.True(result.Success, $"Segment {i} failed: {string.Join("; ", result.Errors)}");
+
+      var valSw = Stopwatch.StartNew();
+      var val = validator.Validate(result.Trajectory!, new TrajectoryValidationOptions
+      {
+        CollisionChecker = checker,
+        CollisionScene = scene,
+        CheckAcceleration = false
+      });
+      valSw.Stop();
+      validateMs += valSw.ElapsedMilliseconds;
+      Assert.True(val.IsValid, $"Segment {i} invalid: {string.Join("; ", val.Errors)}");
+      from = goal;
+    }
+
+    total.Stop();
+    _output?.WriteLine($"scene={sceneSw.ElapsedMilliseconds}ms plan={planMs}ms validate={validateMs}ms total={total.ElapsedMilliseconds}ms");
+    Assert.True(total.ElapsedMilliseconds < 250, $"Multi-goal obstacle planning too slow: {total.ElapsedMilliseconds}ms");
   }
 
   private static CollisionScene? FindBlockingScene(

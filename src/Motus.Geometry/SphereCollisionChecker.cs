@@ -21,38 +21,42 @@ public sealed class SphereCollisionChecker : ICollisionChecker
         _base = baseFrame;
     }
 
-    public bool IsCollisionFree(JointState state, CollisionScene scene)
+    public bool IsCollisionFree(JointState state, CollisionScene scene) =>
+        IsCollisionFree((IReadOnlyList<double>)state.Positions, scene);
+
+    public bool IsCollisionFree(IReadOnlyList<double> positions, CollisionScene scene)
     {
-        if (!SelfCollisionFree(state)) return false;
-        var origins = _fk.ComputeLinkOrigins(state.Positions, _base.Frame);
+        var origins = _fk.ComputeLinkOrigins(positions, _base.Frame);
         var radii = _fk.LinkRadiiMeters;
+        if (!SelfCollisionFree(origins, radii)) return false;
         return LinkEnvelopeCollision.SceneObstacleFree(origins, radii, scene, Intersects);
     }
 
-    public bool SegmentCollisionFree(JointState from, JointState to, CollisionScene scene, double stepRadians)
+    public bool SegmentCollisionFree(IReadOnlyList<double> from, IReadOnlyList<double> to, CollisionScene scene, double stepRadians)
     {
         if (stepRadians <= 0) stepRadians = 1e-3;
-        var n = from.AxisCount;
+        var n = from.Count;
         var maxDelta = 0.0;
         for (var i = 0; i < n; i++)
-            maxDelta = Math.Max(maxDelta, Math.Abs(to.Positions[i] - from.Positions[i]));
+            maxDelta = Math.Max(maxDelta, Math.Abs(to[i] - from[i]));
         var steps = Math.Max(1, (int)Math.Ceiling(maxDelta / stepRadians));
+        var q = new double[n];
         for (var s = 0; s <= steps; s++)
         {
             var alpha = (double)s / steps;
-            var q = new double[n];
             for (var i = 0; i < n; i++)
-                q[i] = from.Positions[i] + alpha * (to.Positions[i] - from.Positions[i]);
-            if (!IsCollisionFree(new JointState(q), scene))
+                q[i] = from[i] + alpha * (to[i] - from[i]);
+            if (!IsCollisionFree(q, scene))
                 return false;
         }
         return true;
     }
 
-    private bool SelfCollisionFree(JointState state)
+    public bool SegmentCollisionFree(JointState from, JointState to, CollisionScene scene, double stepRadians) =>
+        SegmentCollisionFree(from.Positions, to.Positions, scene, stepRadians);
+
+    private static bool SelfCollisionFree(IReadOnlyList<Frame> origins, IReadOnlyList<double> radii)
     {
-        var origins = _fk.ComputeLinkOrigins(state.Positions, _base.Frame);
-        var radii = _fk.LinkRadiiMeters;
         for (var i = 0; i < origins.Count; i++)
         {
             for (var j = i + 2; j < origins.Count; j++)
@@ -82,8 +86,8 @@ public sealed class SphereCollisionChecker : ICollisionChecker
     private static bool SphereSphereOverlap(Frame a, double ra, Frame b, double rb)
     {
         var dx = a.X - b.X; var dy = a.Y - b.Y; var dz = a.Z - b.Z;
-        var dist = Math.Sqrt(dx * dx + dy * dy + dz * dz);
-        return dist < ra + rb;
+        var limit = ra + rb;
+        return dx * dx + dy * dy + dz * dz < limit * limit;
     }
 
     private static bool SphereBoxOverlap(Frame center, double radius, CollisionObject box)

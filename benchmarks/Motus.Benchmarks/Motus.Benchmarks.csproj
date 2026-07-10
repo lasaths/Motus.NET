@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="BenchmarkDotNet" Version="0.14.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Motus.Core\Motus.Core.csproj" />
+    <ProjectReference Include="..\..\src\Motus.Geometry\Motus.Geometry.csproj" />
+    <ProjectReference Include="..\..\src\Motus.OMPL.NET\Motus.OMPL.NET.csproj" />
+    <ProjectReference Include="..\..\src\Motus.Presets\Motus.Presets.csproj" />
+  </ItemGroup>
+
+  <Import Project="..\..\src\Motus.Native\buildTransitive\Motus.Native.targets" />
+
+</Project>

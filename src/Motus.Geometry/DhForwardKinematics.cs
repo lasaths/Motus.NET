@@ -16,12 +16,26 @@ public sealed class DhForwardKinematics : IFkSolver
         return new CartesianPose(Transforms.ToFrame(tcp));
     }
 
-    public double[] ComputeTcpTransform(IReadOnlyList<double> joints, Frame baseFrame, Frame toolFrame)
+    public double[] ComputeFlangeTransform(IReadOnlyList<double> joints)
     {
-        var linkMats = ComputeLinkTransforms(joints);
-        var flange = linkMats[^1];
-        return Transforms.Multiply(Transforms.Multiply(Transforms.FromFrame(baseFrame), flange), Transforms.FromFrame(toolFrame));
+        var links = _chain.Links;
+        if (joints.Count != links.Length)
+            throw new ArgumentException($"Expected {links.Length} joints, got {joints.Count}.");
+
+        var cumulative = Transforms.Identity();
+        for (var i = 0; i < joints.Count; i++)
+        {
+            var link = links[i];
+            var local = Transforms.FromDh(joints[i] + link.ThetaOffset, link.D, link.A, link.Alpha);
+            cumulative = Transforms.Multiply(cumulative, local);
+        }
+        return cumulative;
     }
+
+    public double[] ComputeTcpTransform(IReadOnlyList<double> joints, Frame baseFrame, Frame toolFrame) =>
+        Transforms.Multiply(
+            Transforms.Multiply(Transforms.FromFrame(baseFrame), ComputeFlangeTransform(joints)),
+            Transforms.FromFrame(toolFrame));
 
     public IReadOnlyList<Frame> ComputeLinkOrigins(IReadOnlyList<double> joints, Frame baseFrame)
     {

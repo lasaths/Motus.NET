@@ -14,11 +14,28 @@ public sealed class SerialForwardKinematics : IFkSolver
     public CartesianPose ComputeTcp(JointState state, BaseFrame baseFrame, ToolFrame toolFrame) =>
         new(Transforms.ToFrame(ComputeTcpTransform(state.Positions, baseFrame.Frame, toolFrame.Frame)));
 
-    public double[] ComputeTcpTransform(IReadOnlyList<double> joints, Frame baseFrame, Frame toolFrame)
+    public double[] ComputeFlangeTransform(IReadOnlyList<double> joints)
     {
-        var flange = ComputeLinkTransforms(joints)[^1];
-        return Transforms.Multiply(Transforms.Multiply(Transforms.FromFrame(baseFrame), flange), Transforms.FromFrame(toolFrame));
+        if (joints.Count != _chain.Joints.Length)
+            throw new ArgumentException($"Expected {_chain.Joints.Length} joints, got {joints.Count}.");
+
+        var cumulative = Transforms.Identity();
+        for (var i = 0; i < joints.Count; i++)
+        {
+            var j = _chain.Joints[i];
+            var origin = Transforms.FromRpy(j.OriginX, j.OriginY, j.OriginZ, j.Roll, j.Pitch, j.Yaw);
+            var motion = j.Motion == JointMotionType.Prismatic
+                ? Transforms.FromPrismatic(j.AxisX, j.AxisY, j.AxisZ, joints[i] + j.ThetaOffset)
+                : Transforms.FromAxisAngle(j.AxisX, j.AxisY, j.AxisZ, joints[i] + j.ThetaOffset);
+            cumulative = Transforms.Multiply(cumulative, Transforms.Multiply(origin, motion));
+        }
+        return cumulative;
     }
+
+    public double[] ComputeTcpTransform(IReadOnlyList<double> joints, Frame baseFrame, Frame toolFrame) =>
+        Transforms.Multiply(
+            Transforms.Multiply(Transforms.FromFrame(baseFrame), ComputeFlangeTransform(joints)),
+            Transforms.FromFrame(toolFrame));
 
     public IReadOnlyList<Frame> ComputeLinkOrigins(IReadOnlyList<double> joints, Frame baseFrame)
     {
