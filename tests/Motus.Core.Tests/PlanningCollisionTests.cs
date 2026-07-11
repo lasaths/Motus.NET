@@ -1,5 +1,6 @@
 using Motus.Core;
 using Motus.Geometry;
+using Motus.OMPL.NET;
 using Motus.Presets;
 
 namespace Motus.Core.Tests;
@@ -138,6 +139,61 @@ public class PlanningCollisionTests
 
         Assert.False(result.Success);
         Assert.Contains(result.Errors, e => e.Contains("Collision", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void CartesianLin_FailsFastWhenGoalTcpInCollision()
+    {
+        var preset = PresetLoader.LoadByModelName("UR5e", FindResources());
+        var robot = new RobotModel(preset);
+        var checker = new SphereCollisionChecker(preset);
+        var fk = KinematicsResolver.CreateFkSolver(preset);
+        var home = new JointState(new[] { 0.0, -1.5708, 1.5708, -1.5708, 0.0, 0.0 });
+        var goalJ = new JointState(new[] { 1.2, -1.0, 1.2, -1.6, -1.5708, 0.0 });
+        var goalTcp = fk.ComputeTcp(goalJ, preset.BaseFrame, preset.ToolFrame);
+        var scene = new CollisionScene(new[] { CollisionObject.Sphere("goal_block", goalTcp.Tcp, 0.08) });
+
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        var result = new CartesianLinearPathPlanner(preset).PlanToResult(
+            new CartesianPlanningRequest(robot, home, goalTcp, new PlanningOptions
+            {
+                CollisionScene = scene,
+                CollisionChecker = checker,
+                MaxJointStepRadians = 0.05
+            }, scene),
+            new CartesianLinOptions(StepMeters: 0.005, ContinueOnIkFailure: false));
+        sw.Stop();
+
+        Assert.False(result.Success);
+        Assert.Contains(result.Errors, e => e.Contains("Goal configuration is in collision", StringComparison.OrdinalIgnoreCase));
+        Assert.True(sw.ElapsedMilliseconds < 500, $"Expected fast-fail, took {sw.ElapsedMilliseconds}ms");
+    }
+
+    [Fact]
+    public void Rrt_FailsFastWhenGoalInCollision()
+    {
+        var preset = PresetLoader.LoadByModelName("UR5e", FindResources());
+        var robot = new RobotModel(preset);
+        var checker = new SphereCollisionChecker(preset);
+        var start = new JointState(new[] { 0.0, -1.5708, 1.5708, -1.5708, 0.0, 0.0 });
+        var goal = new JointState(new[] { 1.2, -1.0, 1.2, -1.6, -1.5708, 0.0 });
+        var fk = KinematicsResolver.CreateFkSolver(preset);
+        var goalTcp = fk.ComputeTcp(goal, preset.BaseFrame, preset.ToolFrame);
+        var scene = new CollisionScene(new[] { CollisionObject.Sphere("goal_block", goalTcp.Tcp, 0.08) });
+
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        var result = new RrtConnectPlanner(checker, new RrtConnectOptions { MaxIterations = 4000, RandomSeed = 42 })
+            .Plan(new PlanningRequest(robot, start, goal, new PlanningOptions
+            {
+                CollisionScene = scene,
+                CollisionChecker = checker,
+                MaxJointStepRadians = 0.08
+            }));
+        sw.Stop();
+
+        Assert.False(result.Success);
+        Assert.Contains(result.Errors, e => e.Contains("Goal configuration is in collision", StringComparison.OrdinalIgnoreCase));
+        Assert.True(sw.ElapsedMilliseconds < 500, $"Expected fast-fail, took {sw.ElapsedMilliseconds}ms");
     }
 
     private static string FindResources()

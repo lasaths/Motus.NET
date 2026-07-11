@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.2] - 2026-07-12
+
+### Added
+
+- `PlanningCollision.ValidateEndpoints` — fast-fail when start or goal is already in collision
+- `OmplPlannerOptions.ReportIteration` — optional managed RRT progress callback
+
+### Changed
+
+- `RobotMeshCollisionChecker` — tool geometry checked against scene obstacles; attached-body vs link checks fixed
+- `JointLinearPlanner`, `CartesianLinearPathPlanner`, `RrtConnectPlanner` — endpoint validation before planning
+- Managed RRT loop reports iteration progress periodically
+
 ## [0.6.1] - 2026-07-11
 
 ### Added

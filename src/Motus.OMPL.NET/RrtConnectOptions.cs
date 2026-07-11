@@ -20,6 +20,8 @@ public class OmplPlannerOptions
     /// <summary>When true, skip native OMPL even if motus_native is available.</summary>
     public bool PreferManaged { get; init; }
     public Func<bool>? ShouldCancel { get; init; }
+    /// <summary>Managed RRT loop only; called periodically with (iteration, maxIterations).</summary>
+    public Action<int, int>? ReportIteration { get; init; }
 }
 
 /// <summary>Backward-compatible alias.</summary>

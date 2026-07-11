@@ -55,6 +55,38 @@ public class RrtConnectTests
   }
 
   [Fact]
+  public void PlansAroundObstacle_PathStartsAtStart()
+  {
+    var preset = PresetLoader.LoadByModelName("UR5e", ResourcesRoot);
+    var robot = new RobotModel(preset);
+    var start = new JointState(new double[6]);
+    var goal = new JointState(new[] { 0.6, -0.6, 0.6, -0.6, -0.6, 0.3 });
+    var checker = new SphereCollisionChecker(preset);
+    var scene = FindBlockingScene(checker, preset, start, goal, 0.08)
+      ?? throw new InvalidOperationException("Could not place a blocking obstacle for RRT direction test.");
+
+    var opts = new PlanningOptions { CollisionScene = scene, MaxJointStepRadians = 0.08, CollisionChecker = checker };
+    for (var seed = 0; seed < 32; seed++)
+    {
+      var planner = new RrtConnectPlanner(checker, new RrtConnectOptions { MaxIterations = 10000, RandomSeed = seed });
+      var result = planner.Plan(new PlanningRequest(robot, start, goal, opts));
+      Assert.True(result.Success, $"seed={seed}: {string.Join("; ", result.Errors)}");
+      var first = result.Trajectory!.Points[0].JointState;
+      var last = result.Trajectory.Points[^1].JointState;
+      Assert.True(JointNear(first, start), $"seed={seed}: path should start at start");
+      Assert.True(JointNear(last, goal), $"seed={seed}: path should end at goal");
+    }
+  }
+
+  private static bool JointNear(JointState a, JointState b, double tol = 1e-6)
+  {
+    if (a.AxisCount != b.AxisCount) return false;
+    for (var i = 0; i < a.AxisCount; i++)
+      if (Math.Abs(a.Positions[i] - b.Positions[i]) > tol) return false;
+    return true;
+  }
+
+  [Fact]
   public void PlansAroundObstacle_WithRobotMeshCheckerViaOptions()
   {
     var model = PresetLoader.LoadRobotModelByName("UR5e", ResourcesRoot);

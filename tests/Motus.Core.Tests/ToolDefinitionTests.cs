@@ -23,6 +23,45 @@ public class ToolDefinitionTests
     }
 
     [Fact]
+    public void MeshChecker_HomeFreeWithToolMesh_EmptyScene()
+    {
+        var preset = PresetLoader.LoadRobotModelByName("UR5e");
+        var links = new List<LinkCollisionGeometry>
+        {
+            new(0, "link0", CollisionObject.Capsule("l0", Frame.Identity, 0.05, 0.1))
+        };
+        var tool = new ToolDefinition(
+            "gripper",
+            new Frame(0, 0, 0.1, 1, 0, 0, 0),
+            CollisionObject.Box("gripper", Frame.Identity, 0.02, 0.02, 0.03));
+        var session = new RobotModel(preset.Preset, new RobotCollisionModel(links)).WithTool(tool);
+        var checker = new RobotMeshCollisionChecker(session);
+        var home = new JointState(new double[] { 0, -Math.PI / 2, Math.PI / 2, 0, Math.PI / 2, 0 });
+        Assert.True(checker.IsCollisionFree(home, new CollisionScene()));
+    }
+
+    [Fact]
+    public void MeshChecker_ToolBlocksObstacleWithoutAttachedBodies()
+    {
+        var preset = PresetLoader.LoadRobotModelByName("UR5e");
+        var links = new List<LinkCollisionGeometry>
+        {
+            new(0, "link0", CollisionObject.Capsule("l0", Frame.Identity, 0.05, 0.1))
+        };
+        var tool = new ToolDefinition(
+            "gripper",
+            new Frame(0, 0, 0.1, 1, 0, 0, 0),
+            CollisionObject.Box("gripper", Frame.Identity, 0.02, 0.02, 0.03));
+        var session = new RobotModel(preset.Preset, new RobotCollisionModel(links)).WithTool(tool);
+        var checker = new RobotMeshCollisionChecker(session);
+        var home = new JointState(new double[] { 0, -Math.PI / 2, Math.PI / 2, 0, Math.PI / 2, 0 });
+        var fk = KinematicsResolver.CreateFkSolver(session.Preset);
+        var tcp = fk.ComputeTcp(home, session.Preset.BaseFrame, session.Preset.ToolFrame).Tcp;
+        var scene = new CollisionScene(new[] { CollisionObject.Sphere("obs", tcp, 0.02) });
+        Assert.False(checker.IsCollisionFree(home, scene));
+    }
+
+    [Fact]
     public void WithTool_CollisionCheckerUsesSessionTcp()
     {
         var preset = PresetLoader.LoadRobotModelByName("UR5e");

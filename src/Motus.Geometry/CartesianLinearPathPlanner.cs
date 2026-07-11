@@ -375,6 +375,14 @@ public sealed class CartesianLinearPathPlanner
         {
             if (checker is null)
                 return PlanningResult.Failed(new[] { "Collision scene provided but no collision checker available." });
+            if (_ik.TrySolve(request.Goal, request.Start, out var goalJoints))
+            {
+                var endpointFail = PlanningCollision.ValidateEndpoints(
+                    request.Start, goalJoints, scene, checker);
+                if (endpointFail is not null)
+                    return endpointFail;
+            }
+
             var collisionFail = PlanningCollision.ValidateTrajectory(
                 traj, scene!, checker, request.Options.MaxJointStepRadians);
             if (collisionFail is not null) return collisionFail;

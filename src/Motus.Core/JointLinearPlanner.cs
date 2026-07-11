@@ -32,13 +32,10 @@ public sealed class JointLinearPlanner : IPlanner
         if (!goalVal.IsValid) errors.AddRange(goalVal.Errors.Select(e => $"Goal: {e}"));
         if (errors.Count > 0) return PlanningResult.Failed(errors);
 
-        if (opts.CollisionChecker is not null && scene is not null)
-        {
-            if (!opts.CollisionChecker.IsCollisionFree(request.Start, scene))
-                return PlanningResult.Failed(new[] { "Start configuration is in collision." });
-            if (!opts.CollisionChecker.IsCollisionFree(request.Goal, scene))
-                return PlanningResult.Failed(new[] { "Goal configuration is in collision." });
-        }
+        var endpointFail = PlanningCollision.ValidateEndpoints(
+            request.Start, request.Goal, scene, opts.CollisionChecker);
+        if (endpointFail is not null)
+            return endpointFail;
 
         if (opts.MaxJointStepRadians <= 0)
             return PlanningResult.Failed(new[] { "MaxJointStepRadians must be positive." });

@@ -24,4 +24,21 @@ public static class PlanningCollision
         }
         return errors.Count == 0 ? null : PlanningResult.Failed(errors);
     }
+
+    /// <summary>Fast-fail when start or goal already intersects the collision scene.</summary>
+    public static PlanningResult? ValidateEndpoints(
+        JointState start,
+        JointState goal,
+        CollisionScene? scene,
+        ICollisionChecker? checker)
+    {
+        if (checker is null || !SceneHasObstacles(scene))
+            return null;
+
+        if (!checker.IsCollisionFree(start, scene!))
+            return PlanningResult.Failed(new[] { "Start configuration is in collision." });
+        if (!checker.IsCollisionFree(goal, scene!))
+            return PlanningResult.Failed(new[] { "Goal configuration is in collision." });
+        return null;
+    }
 }

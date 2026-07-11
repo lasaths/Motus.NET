@@ -80,6 +80,10 @@ public sealed class RrtConnectPlanner : IPlanner
         var robot = request.Robot;
         var scene = request.Options.CollisionScene ?? new CollisionScene();
         var space = BuildPlanSpace(request);
+        var endpointFail = PlanningCollision.ValidateEndpoints(
+            space.ToFull(space.Start), space.ToFull(space.Goal), scene, checker);
+        if (endpointFail is not null)
+            return endpointFail;
         var n = space.Dims;
         var low = space.Limits.Select(l => l.MinRadians).ToArray();
         var high = space.Limits.Select(l => l.MaxRadians).ToArray();
@@ -189,13 +193,10 @@ public sealed class RrtConnectPlanner : IPlanner
         var goalVal = request.Goal.Validate(limits);
         if (!startVal.IsValid) return PlanningResult.Failed(startVal.Errors.Select(e => $"Start: {e}"));
         if (!goalVal.IsValid) return PlanningResult.Failed(goalVal.Errors.Select(e => $"Goal: {e}"));
-        if (checker is not null)
-        {
-            if (!checker.IsCollisionFree(space.ToFull(space.Start), scene))
-                return PlanningResult.Failed(new[] { "Start configuration is in collision." });
-            if (!checker.IsCollisionFree(space.ToFull(space.Goal), scene))
-                return PlanningResult.Failed(new[] { "Goal configuration is in collision." });
-        }
+        var endpointFail = PlanningCollision.ValidateEndpoints(
+            space.ToFull(space.Start), space.ToFull(space.Goal), scene, checker);
+        if (endpointFail is not null)
+            return endpointFail;
 
         var start = (double[])space.Start.Clone();
         var goal = (double[])space.Goal.Clone();
@@ -207,6 +208,9 @@ public sealed class RrtConnectPlanner : IPlanner
             if (_options.ShouldCancel?.Invoke() == true)
                 return PlanningResult.Failed(new[] { "Planning cancelled." });
 
+            if ((iter & 0x3F) == 0)
+                _options.ReportIteration?.Invoke(iter, _options.MaxIterations);
+
             var sample = Sample(rng, goal, space.Limits);
             var (extendedA, newIdxA) = Extend(treeA, sample, space.Limits, scene, checker, space.ToFull);
             if (extendedA && Connect(treeB, treeA.Nodes[newIdxA].Q, space.Limits, scene, checker, space.ToFull, out var connectIdxB))
@@ -215,6 +219,7 @@ public sealed class RrtConnectPlanner : IPlanner
                 var pathB = Reconstruct(treeB, connectIdxB);
                 pathB.Reverse();
                 var raw = pathA.Concat(pathB.Skip(1)).Select(q => space.ToFull(q)).ToList();
+                EnsurePathStartsAtStart(raw, space.ToFull(start), space.ToFull(goal));
                 var simplified = PathSimplifier.Simplify(raw, robot, checker, scene, _options.StepRadians * 0.5);
                 return BuildTrajectory(robot, simplified, request.Options, checker, usedNative: false);
             }
@@ -315,6 +320,15 @@ public sealed class RrtConnectPlanner : IPlanner
 
     private static double ConfigurationDistance(double[] a, double[] b) =>
         Math.Sqrt(ConfigurationDistanceSquared(a, b));
+
+    private static void EnsurePathStartsAtStart(
+        List<JointState> path, JointState start, JointState goal)
+    {
+        if (path.Count < 2) return;
+        if (ConfigurationDistanceSquared(path[0].Positions, start.Positions)
+            > ConfigurationDistanceSquared(path[0].Positions, goal.Positions))
+            path.Reverse();
+    }
 
     private static List<double[]> Reconstruct(RrtTree tree, int index)
     {
