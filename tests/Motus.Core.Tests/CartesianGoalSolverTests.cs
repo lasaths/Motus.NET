@@ -66,17 +66,12 @@ public class CartesianGoalSolverTests
         Assert.True(result.Success, string.Join("; ", result.Errors));
     }
 
+
     [Fact]
     public void Ur10eRobotiq_JointLinearHomeToExample02Goal_Succeeds()
     {
-        var urdfPath = Path.GetFullPath(Path.Combine(
-            AppContext.BaseDirectory,
-            "..", "..", "..", "..", "..", "..",
-            "Motus.Grasshopper", "resources", "robots", "ur10e_robotiq", "ur10e_robotiq.urdf"));
-        Assert.True(File.Exists(urdfPath));
-
-        var bundle = UrdfRobotLoader.Load(urdfPath, new UrdfLoadOptions { BaseLink = "base_link", TipLink = "tool0" });
-        var robot = bundle.ToModel();
+        var preset = PresetLoader.LoadByModelName("UR10e", ResourcesRoot);
+        var robot = new RobotModel(preset);
         var home = new JointState(new[] { 0.0, -1.5708, 1.5708, -1.5708, 0.0, 0.0 });
         var goalJ = new JointState(new[] { 1.2, -1.0, 1.2, -1.6, -1.5708, 0.0 });
         var joint = new JointLinearPlanner().Plan(new PlanningRequest(robot, home, goalJ));
@@ -86,17 +81,11 @@ public class CartesianGoalSolverTests
     [Fact]
     public void Ur10eRobotiq_IkFromHomeToTinyTcpDelta()
     {
-        var urdfPath = Path.GetFullPath(Path.Combine(
-            AppContext.BaseDirectory,
-            "..", "..", "..", "..", "..", "..",
-            "Motus.Grasshopper", "resources", "robots", "ur10e_robotiq", "ur10e_robotiq.urdf"));
-        var bundle = UrdfRobotLoader.Load(urdfPath, new UrdfLoadOptions { BaseLink = "base_link", TipLink = "tool0" });
-        var robot = bundle.ToModel();
-        var chain = bundle.Chain;
-        var fk = KinematicsResolver.CreateFkSolver(robot.Preset, chain);
-        var ik = KinematicsResolver.CreateInverseKinematics(robot.Preset, chain);
+        var preset = PresetLoader.LoadByModelName("UR10e", ResourcesRoot);
+        var fk = KinematicsResolver.CreateFkSolver(preset);
+        var ik = KinematicsResolver.CreateInverseKinematics(preset);
         var home = new JointState(new[] { 0.0, -1.5708, 1.5708, -1.5708, 0.0, 0.0 });
-        var homeTcp = fk.ComputeTcp(home, robot.Preset.BaseFrame, robot.Preset.ToolFrame);
+        var homeTcp = fk.ComputeTcp(home, preset.BaseFrame, preset.ToolFrame);
         var nudged = new CartesianPose(new Frame(
             homeTcp.Tcp.X + 0.01, homeTcp.Tcp.Y, homeTcp.Tcp.Z,
             homeTcp.Tcp.Qw, homeTcp.Tcp.Qx, homeTcp.Tcp.Qy, homeTcp.Tcp.Qz));
