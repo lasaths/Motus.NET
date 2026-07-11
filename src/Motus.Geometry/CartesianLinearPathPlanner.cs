@@ -9,6 +9,7 @@ public sealed class CartesianLinearPathPlanner
     private const double IkOriTolRad = 0.15;
 
     private readonly RobotPreset _preset;
+    private readonly SerialJointChain? _chain;
     private readonly IInverseKinematics _ik;
     private readonly IFkSolver _fk;
     private readonly Random _rng;
@@ -23,6 +24,7 @@ public sealed class CartesianLinearPathPlanner
     public CartesianLinearPathPlanner(RobotPreset preset, SerialJointChain? chain)
     {
         _preset = preset;
+        _chain = chain;
         _fk = KinematicsResolver.CreateFkSolver(preset, chain);
         _ik = KinematicsResolver.CreateInverseKinematics(preset, chain);
         _rng = new Random(42);
@@ -345,7 +347,7 @@ public sealed class CartesianLinearPathPlanner
         var scene = request.CollisionScene ?? request.Options.CollisionScene;
         var warnings = new List<string>();
 
-        if (!KinematicsResolver.SupportsModel(robot.Preset))
+        if (!KinematicsResolver.SupportsModel(robot.Preset, _chain))
             return PlanningResult.Failed(new[] { $"No kinematics profile for '{robot.Preset.ModelName}'." });
 
         var startPose = new CartesianPose(Transforms.ToFrame(

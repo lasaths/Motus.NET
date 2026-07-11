@@ -105,4 +105,39 @@ public class MotionProgramTests
         Assert.Contains("blendRadiusMeters", json);
         Assert.Contains("motion_type,segment_index,blend_radius_m", csv);
     }
+
+    [Fact]
+    public void MotionProgram_SetToolState_ExportsToolStateMetadata()
+    {
+        var preset = PresetLoader.LoadByModelName("UR5e", ResourcesRoot);
+        var robot = new RobotModel(preset);
+        var planner = new IndustrialMotionPlanner(preset);
+
+        var start = new JointState(new[] { 0.0, -0.5, 1.0, -1.0, 0.0, 0.0 });
+        var open = new EndEffectorState(new Dictionary<string, double> { ["width"] = 0.085 });
+        var closed = new EndEffectorState(new Dictionary<string, double> { ["width"] = 0.0 });
+        var caps = ToolCapabilities.Robotiq2F85;
+
+        var req = new MotionProgramRequest(
+            robot,
+            start,
+            new MotionSegment[]
+            {
+                new PtpSegment(start),
+                new SetToolStateSegment(closed, durationSeconds: 0.2)
+            })
+        {
+            InitialToolState = open,
+            ToolCapabilities = caps
+        };
+
+        var result = planner.Plan(req);
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+        Assert.NotNull(result.Trajectory);
+        Assert.Contains(result.Trajectory!.Points, p => p.ToolState?.GetValueOrDefault("width") == 0.0);
+
+        var json = TrajectoryExport.ToJson(result.Trajectory, new TrajectoryExportOptions { ToolCapabilities = caps });
+        Assert.Contains("toolState", json);
+        Assert.Contains("toolCapabilities", json);
+    }
 }

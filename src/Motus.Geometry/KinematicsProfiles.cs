@@ -22,8 +22,31 @@ public static class KinematicsProfiles
         ["LBR iiwa 14 R820"] = Kuka7(0.36, 0.42, 0.48, 0.42, 0.41, 0.13),
     };
 
-    public static bool TryGet(RobotPreset preset, out KinematicsChain chain) =>
-        ByModel.TryGetValue(preset.ModelName, out chain!);
+    public static bool TryGet(RobotPreset preset, out KinematicsChain chain)
+    {
+        var key = ResolveModelKey(preset.ModelName);
+        return ByModel.TryGetValue(key, out chain!);
+    }
+
+    /// <summary>True when preset maps to a Universal Robots DH profile (UR3e–UR30, ur10e URDF aliases, …).</summary>
+    public static bool IsUniversalRobots(RobotPreset preset) =>
+        TryGet(preset, out _) && ResolveModelKey(preset.ModelName).StartsWith("UR", StringComparison.OrdinalIgnoreCase);
+
+    private static string ResolveModelKey(string modelName)
+    {
+        if (ByModel.ContainsKey(modelName))
+            return modelName;
+
+        // URDF bundles: ur10e_robotiq, ur10e, …
+        if (modelName.StartsWith("ur10e", StringComparison.OrdinalIgnoreCase)) return "UR10e";
+        if (modelName.StartsWith("ur16e", StringComparison.OrdinalIgnoreCase)) return "UR16e";
+        if (modelName.StartsWith("ur20", StringComparison.OrdinalIgnoreCase)) return "UR20";
+        if (modelName.StartsWith("ur30", StringComparison.OrdinalIgnoreCase)) return "UR30";
+        if (modelName.StartsWith("ur5e", StringComparison.OrdinalIgnoreCase)) return "UR5e";
+        if (modelName.StartsWith("ur3e", StringComparison.OrdinalIgnoreCase)) return "UR3e";
+
+        return modelName;
+    }
 
     public static KinematicsChain GetRequired(RobotPreset preset) =>
         TryGet(preset, out var chain)

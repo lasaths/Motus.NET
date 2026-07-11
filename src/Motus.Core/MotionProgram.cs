@@ -4,13 +4,18 @@ public enum MotionPrimitiveType
 {
     Ptp,
     Lin,
-    Circ
+    Circ,
+    Set,
+    Wait
 }
 
 public abstract class MotionSegment
 {
     public MotionPrimitiveType Type { get; }
     public double BlendRadiusMeters { get; }
+    /// <summary>Target tool state at segment end (Ramp) or start (Instant).</summary>
+    public EndEffectorState? TargetState { get; init; }
+    public ToolStateMode ToolStateMode { get; init; } = ToolStateMode.Hold;
 
     protected MotionSegment(MotionPrimitiveType type, double blendRadiusMeters)
     {
@@ -58,12 +63,41 @@ public sealed class CircSegment : MotionSegment
     }
 }
 
+/// <summary>Hold arm pose and change tool state (optional ramp duration).</summary>
+public sealed class SetToolStateSegment : MotionSegment
+{
+    public EndEffectorState State { get; }
+    public double DurationSeconds { get; }
+
+    public SetToolStateSegment(EndEffectorState state, double durationSeconds = 0)
+        : base(MotionPrimitiveType.Set, 0)
+    {
+        State = state;
+        DurationSeconds = Math.Max(0, durationSeconds);
+    }
+}
+
+/// <summary>Dwell at current arm and tool state.</summary>
+public sealed class WaitSegment : MotionSegment
+{
+    public double DurationSeconds { get; }
+
+    public WaitSegment(double durationSeconds)
+        : base(MotionPrimitiveType.Wait, 0)
+    {
+        DurationSeconds = Math.Max(0, durationSeconds);
+    }
+}
+
 public sealed class MotionProgramRequest
 {
     public RobotModel Robot { get; }
     public JointState Start { get; }
     public IReadOnlyList<MotionSegment> Segments { get; }
     public PlanningOptions Options { get; }
+    public EndEffectorState? InitialToolState { get; init; }
+    public ToolCapabilities? ToolCapabilities { get; init; }
+    public ToolDefinition? SessionTool { get; init; }
 
     public MotionProgramRequest(
         RobotModel robot,

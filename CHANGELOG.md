@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-07-11
+
+### Added
+
+- **Actuated tool state** — `EndEffectorState`, `ToolCapabilities`, `ToolStateTimeline` annotate trajectory waypoints with gripper parameters
+- `MotionProgramValidation.ValidateToolStates` — pre-plan schema check for `SetToolStateSegment` / segment `TargetState`
+- `ToolStateCollision.ValidateTrajectory` — per-waypoint collision warnings using width-scaled tool geometry
+- `CartesianGoalSolver.TryReachFromStart` — reach Cartesian goals from a known start configuration
+- `UrdfUniversalRobotsKinematics` — improved URDF universal-robots IK routing for bundled/tool-offset models
+- `PlanningCollisionTests` — LIN validates link envelopes; TCP-on-chord sphere can pass when capsules clear
+
+### Changed
+
+- `ToolDefinition.GeometryForState` — width-scaled gripper collision for actuated tools
+- `IndustrialMotionPlanner` — applies tool-state timeline and emits `ToolStateCollision` warnings
+- `TrajectoryExport` / `TrajectorySampler` — optional `toolState` per waypoint
+
 ## [0.6.0] - 2026-07-10
 
 ### Added

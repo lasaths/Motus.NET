@@ -58,10 +58,16 @@ public static class UrdfRobotLoader
             j.Velocity ?? Math.PI,
             j.Velocity ?? Math.PI * 2)).ToList();
 
+        var robotName = robot.Attribute("name")?.Value;
+        var modelName = options.ModelName;
+        if (string.Equals(modelName, "urdf_robot", StringComparison.OrdinalIgnoreCase)
+            && !string.IsNullOrWhiteSpace(robotName))
+            modelName = robotName;
+
         var preset = new RobotPreset
         {
             Manufacturer = RobotManufacturer.Unknown,
-            ModelName = options.ModelName,
+            ModelName = modelName,
             Family = "urdf",
             AxisCount = chainJoints.Count,
             JointLimits = limits,

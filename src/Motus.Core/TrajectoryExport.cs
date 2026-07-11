@@ -12,6 +12,8 @@ public sealed class TrajectoryExportOptions
     public TrajectoryValidationOptions? Validation { get; init; }
     /// <summary>When set, included in JSON export if it differs from the trajectory robot preset tool frame.</summary>
     public ToolFrame? SessionToolFrame { get; init; }
+    /// <summary>Tool parameter schema for export header.</summary>
+    public ToolCapabilities? ToolCapabilities { get; init; }
 }
 
 public sealed class TrajectoryExportResult
@@ -64,14 +66,24 @@ public static class TrajectoryExport
         var traj = Prepare(trajectory, options);
         var jointNames = traj.Robot.JointNames;
         var toolFrame = ResolveExportToolFrame(traj.Robot, options.SessionToolFrame);
+        var toolCapabilities = options.ToolCapabilities;
         var obj = new
         {
+            exportVersion = 1,
             robot = traj.Robot.DisplayName,
             jointNames,
             durationSeconds = traj.DurationSeconds,
             pointCount = traj.Points.Count,
             retimed = options.Retime,
             toolFrame,
+            toolCapabilities = toolCapabilities is null ? null : toolCapabilities.Parameters.Select(p => new
+            {
+                name = p.Name,
+                unit = p.Unit,
+                min = p.Min,
+                max = p.Max,
+                defaultValue = p.Default
+            }),
             points = traj.Points.Select(p =>
             {
                 Dictionary<string, double>? joints = null;
@@ -88,7 +100,8 @@ public static class TrajectoryExport
                     joints,
                     motionType = p.MotionType?.ToString().ToLowerInvariant(),
                     segmentIndex = p.SegmentIndex,
-                    blendRadiusMeters = p.BlendRadiusMeters
+                    blendRadiusMeters = p.BlendRadiusMeters,
+                    toolState = p.ToolState?.Values
                 };
             })
         };
@@ -108,10 +121,12 @@ public static class TrajectoryExport
         var traj = Prepare(trajectory, options);
         var n = traj.Robot.Preset.AxisCount;
         var hasMotionMetadata = traj.Points.Any(p => p.MotionType is not null || p.SegmentIndex is not null || p.BlendRadiusMeters is not null);
+        var hasToolState = traj.Points.Any(p => p.ToolState is not null);
         var sb = new StringBuilder();
         sb.Append("time_seconds");
         for (var i = 1; i <= n; i++) sb.Append($",joint_{i}_rad");
         if (hasMotionMetadata) sb.Append(",motion_type,segment_index,blend_radius_m");
+        if (hasToolState) sb.Append(",tool_state_json");
         sb.AppendLine();
         foreach (var p in traj.Points)
         {
@@ -123,6 +138,14 @@ public static class TrajectoryExport
                 sb.Append(',').Append(p.MotionType?.ToString().ToLowerInvariant() ?? string.Empty);
                 sb.Append(',').Append(p.SegmentIndex?.ToString() ?? string.Empty);
                 sb.Append(',').Append(p.BlendRadiusMeters?.ToString("F6") ?? string.Empty);
+            }
+            if (hasToolState)
+            {
+                sb.Append(',');
+                if (p.ToolState is null)
+                    sb.Append(string.Empty);
+                else
+                    sb.Append('"').Append(JsonSerializer.Serialize(p.ToolState.Values)).Append('"');
             }
             sb.AppendLine();
         }

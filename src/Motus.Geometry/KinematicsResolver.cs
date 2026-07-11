@@ -18,9 +18,11 @@ public static class KinematicsResolver
 
     public static IInverseKinematics CreateInverseKinematics(RobotPreset preset, SerialJointChain? serialChain = null)
     {
+        if (serialChain is not null && KinematicsProfiles.IsUniversalRobots(preset))
+            return new UrdfUniversalRobotsKinematics(preset, serialChain);
         if (serialChain is not null)
             return new NumericalInverseKinematics(CreateFkSolver(preset, serialChain), preset);
-        if (preset.Manufacturer == RobotManufacturer.UniversalRobots && KinematicsProfiles.TryGet(preset, out _))
+        if (KinematicsProfiles.IsUniversalRobots(preset))
             return new UrInverseKinematics(preset);
         return new NumericalInverseKinematics(CreateFkSolver(preset), preset);
     }

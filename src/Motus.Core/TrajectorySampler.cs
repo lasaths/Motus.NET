@@ -36,6 +36,35 @@ public static class TrajectorySampler
         return pts[^1].JointState;
     }
 
+    /// <summary>Sample tool state at elapsed time (interpolates numeric parameters between waypoints).</summary>
+    public static EndEffectorState? AtTimeToolState(Trajectory trajectory, double elapsedSeconds)
+    {
+        var pts = trajectory.Points;
+        if (pts.Count == 0) return null;
+        if (pts.Count == 1 || elapsedSeconds <= pts[0].TimeSeconds)
+            return pts[0].ToolState;
+
+        if (elapsedSeconds >= pts[^1].TimeSeconds)
+            return pts[^1].ToolState;
+
+        for (var i = 0; i < pts.Count - 1; i++)
+        {
+            var t0 = pts[i].TimeSeconds;
+            var t1 = pts[i + 1].TimeSeconds;
+            if (elapsedSeconds < t1 || i == pts.Count - 2)
+            {
+                var a = pts[i].ToolState;
+                var b = pts[i + 1].ToolState;
+                if (a is null && b is null) return null;
+                if (t1 <= t0 + 1e-12) return a ?? b;
+                var alpha = (elapsedSeconds - t0) / (t1 - t0);
+                return EndEffectorState.Lerp(a, b, Math.Clamp(alpha, 0, 1));
+            }
+        }
+
+        return pts[^1].ToolState;
+    }
+
     private static JointState Lerp(JointState a, JointState b, double alpha)
     {
         var n = a.AxisCount;

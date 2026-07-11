@@ -7,21 +7,29 @@ public sealed class UrInverseKinematics : IInverseKinematics
 {
     private readonly IFkSolver _fk;
     private readonly KinematicsChain _chain;
-    private readonly NumericalInverseKinematics _numerical;
+    private readonly NumericalInverseKinematics? _numerical;
     private readonly BaseFrame _base;
     private readonly ToolFrame _tool;
     private readonly IReadOnlyList<JointLimit> _limits;
     private readonly double[] _baseM;
     private readonly double[] _toolM;
 
-    public UrInverseKinematics(RobotPreset preset)
-        : this(KinematicsProfiles.GetRequired(preset), KinematicsResolver.CreateFkSolver(preset), preset) { }
+    public UrInverseKinematics(RobotPreset preset, SerialJointChain? verifyChain = null)
+        : this(
+            KinematicsProfiles.GetRequired(preset),
+            verifyChain is not null
+                ? KinematicsResolver.CreateFkSolver(preset, verifyChain)
+                : KinematicsResolver.CreateFkSolver(preset),
+            preset,
+            verifyChain is null)
+    {
+    }
 
-    private UrInverseKinematics(KinematicsChain chain, IFkSolver fk, RobotPreset preset)
+    private UrInverseKinematics(KinematicsChain chain, IFkSolver fk, RobotPreset preset, bool allowNumericalFallback)
     {
         _chain = chain;
         _fk = fk;
-        _numerical = new NumericalInverseKinematics(fk, preset);
+        _numerical = allowNumericalFallback ? new NumericalInverseKinematics(fk, preset) : null;
         _base = preset.BaseFrame;
         _tool = preset.ToolFrame;
         _limits = preset.JointLimits;
@@ -31,58 +39,59 @@ public sealed class UrInverseKinematics : IInverseKinematics
 
     public bool TrySolve(CartesianPose target, JointState seed, out JointState solution)
     {
-        if (IsFlangeTool(_tool))
-        {
-            var targetM = Transforms.FromFrame(target.Tcp);
-            JointState? best = null;
-            var bestDelta = double.MaxValue;
-            foreach (var candidate in UrAnalyticInverseKinematics.EnumerateSolutions(_chain, targetM, _limits))
-            {
-                if (!Verify(target, candidate)) continue;
-                var delta = MaxJointDelta(seed, candidate);
-                if (delta < bestDelta)
-                {
-                    bestDelta = delta;
-                    best = candidate;
-                }
-            }
-            if (best is not null)
-            {
-                solution = UnwrapNear(seed, best);
-                return true;
-            }
+        var targetM = Transforms.FromFrame(target.Tcp);
+        var flangeM = FlangeTarget(targetM);
 
-            return TryNumericalFromSeeds(target, seed, targetM, out solution);
+        JointState? best = null;
+        var bestDelta = double.MaxValue;
+        foreach (var candidate in UrAnalyticInverseKinematics.EnumerateSolutions(_chain, flangeM, _limits))
+        {
+            if (!Verify(target, candidate)) continue;
+            var delta = MaxJointDelta(seed, candidate);
+            if (delta < bestDelta)
+            {
+                bestDelta = delta;
+                best = candidate;
+            }
         }
 
-        if (!_numerical.TrySolve(target, seed, out solution))
-            return false;
+        if (best is not null)
+        {
+            solution = UnwrapNear(seed, best);
+            return true;
+        }
 
-        solution = UnwrapNear(seed, solution);
-        return true;
+        if (_numerical is not null && TryNumericalFromSeeds(target, seed, flangeM, out solution))
+            return true;
+
+        solution = seed;
+        return false;
     }
 
-    private bool TryNumericalFromSeeds(CartesianPose target, JointState seed, double[] targetM, out JointState solution)
-    {
-        foreach (var trySeed in NumericalSeeds(seed, targetM))
-        {
-            if (!_numerical.TrySolve(target, trySeed, out var raw))
-                continue;
+    private double[] FlangeTarget(double[] targetM) =>
+        IsFlangeTool(_tool) ? targetM : Transforms.Multiply(targetM, Transforms.Inverse(_toolM));
 
-            solution = UnwrapNear(seed, raw);
-            return true;
+    private bool TryNumericalFromSeeds(CartesianPose target, JointState seed, double[] flangeM, out JointState solution)
+    {
+        foreach (var trySeed in NumericalSeeds(seed, flangeM))
+        {
+            if (_numerical!.TrySolve(target, trySeed, out var raw))
+            {
+                solution = UnwrapNear(seed, raw);
+                return true;
+            }
         }
 
         solution = seed;
         return false;
     }
 
-    private IEnumerable<JointState> NumericalSeeds(JointState seed, double[] targetM)
+    private IEnumerable<JointState> NumericalSeeds(JointState seed, double[] flangeM)
     {
         yield return seed;
         if (IsNearZero(seed))
             yield return new JointState(new[] { 0.0, 0.01, -0.01, 0.01, 0.0, 0.0 });
-        foreach (var candidate in UrAnalyticInverseKinematics.EnumerateSolutions(_chain, targetM, _limits))
+        foreach (var candidate in UrAnalyticInverseKinematics.EnumerateSolutions(_chain, flangeM, _limits))
             yield return candidate;
     }
 

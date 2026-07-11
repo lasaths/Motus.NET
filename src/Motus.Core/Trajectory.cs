@@ -7,19 +7,22 @@ public sealed class TrajectoryPoint
     public MotionPrimitiveType? MotionType { get; }
     public int? SegmentIndex { get; }
     public double? BlendRadiusMeters { get; }
+    public EndEffectorState? ToolState { get; }
 
     public TrajectoryPoint(
         double timeSeconds,
         JointState jointState,
         MotionPrimitiveType? motionType = null,
         int? segmentIndex = null,
-        double? blendRadiusMeters = null)
+        double? blendRadiusMeters = null,
+        EndEffectorState? toolState = null)
     {
         TimeSeconds = timeSeconds;
         JointState = jointState;
         MotionType = motionType;
         SegmentIndex = segmentIndex;
         BlendRadiusMeters = blendRadiusMeters;
+        ToolState = toolState;
     }
 }
 

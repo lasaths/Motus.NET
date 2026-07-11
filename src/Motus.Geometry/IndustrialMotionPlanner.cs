@@ -32,6 +32,7 @@ public sealed class IndustrialMotionPlanner
         var currentState = request.Start;
         var currentPose = TcpPose(currentState);
         var points = new List<TrajectoryPoint> { new(0, currentState) };
+        var spans = new List<ToolStateTimeline.SegmentSpan>();
         var warnings = new List<string>();
         var t = 0.0;
         double pendingEntryBlend = 0;
@@ -40,6 +41,32 @@ public sealed class IndustrialMotionPlanner
         for (var i = 0; i < request.Segments.Count; i++)
         {
             var segment = request.Segments[i];
+
+            if (segment is SetToolStateSegment setSeg)
+            {
+                var spanStart = points.Count - 1;
+                if (setSeg.DurationSeconds > 0)
+                {
+                    t += setSeg.DurationSeconds;
+                    points.Add(new TrajectoryPoint(t, currentState, MotionPrimitiveType.Set, i));
+                }
+                spans.Add(new ToolStateTimeline.SegmentSpan(i, segment, spanStart, points.Count - 1));
+                continue;
+            }
+
+            if (segment is WaitSegment waitSeg)
+            {
+                var spanStart = points.Count - 1;
+                if (waitSeg.DurationSeconds > 0)
+                {
+                    t += waitSeg.DurationSeconds;
+                    points.Add(new TrajectoryPoint(t, currentState, MotionPrimitiveType.Wait, i));
+                }
+                spans.Add(new ToolStateTimeline.SegmentSpan(i, segment, spanStart, points.Count - 1));
+                continue;
+            }
+
+            var pointStartBefore = points.Count;
             var result = PlanSegment(request, currentState, currentPose, segment, warnings);
             if (!result.Success || result.Trajectory is null)
                 return result;
@@ -90,12 +117,35 @@ public sealed class IndustrialMotionPlanner
                     segment.BlendRadiusMeters));
             }
 
+            var spanFirst = Math.Max(pointStartBefore - 1, 0);
+            var spanLast = points.Count - 1;
+            if (spanLast >= spanFirst)
+                spans.Add(new ToolStateTimeline.SegmentSpan(i, segment, spanFirst, spanLast));
+
             currentState = rawPoints[endIdx].JointState;
             currentPose = TcpPose(currentState);
         }
 
-        return PlanningResult.Succeeded(new Trajectory(request.Robot, points), warnings);
+        var initialToolState = ResolveInitialToolState(request);
+        var annotated = ToolStateTimeline.Apply(points, request.Segments, spans, initialToolState);
+        var trajectory = new Trajectory(request.Robot, annotated);
+
+        if (request.SessionTool is { Capabilities: not null } sessionTool)
+        {
+            warnings.AddRange(ToolStateCollision.ValidateTrajectory(
+                trajectory,
+                sessionTool,
+                request.Options.CollisionScene,
+                request.Options.CollisionChecker));
+        }
+
+        return PlanningResult.Succeeded(trajectory, warnings);
     }
+
+    private static EndEffectorState? ResolveInitialToolState(MotionProgramRequest request) =>
+        request.InitialToolState
+        ?? request.ToolCapabilities?.DefaultState()
+        ?? ToolDefinition.FromPreset(request.Robot)?.Capabilities?.DefaultState();
 
     private CartesianPose SegmentGoalPose(MotionSegment segment) =>
         segment switch
@@ -103,6 +153,8 @@ public sealed class IndustrialMotionPlanner
             PtpSegment ptp => TcpPose(ptp.Goal),
             LinSegment lin => lin.Goal,
             CircSegment circ => circ.Goal,
+            SetToolStateSegment => throw new InvalidOperationException("SET segment has no Cartesian goal."),
+            WaitSegment => throw new InvalidOperationException("WAIT segment has no Cartesian goal."),
             _ => throw new InvalidOperationException("Unsupported motion segment type.")
         };
 
@@ -195,6 +247,8 @@ public sealed class IndustrialMotionPlanner
                 request.Options)),
             LinSegment lin => PlanLinearSegment(request, currentState, currentPose, lin),
             CircSegment circ => PlanCircularSegment(request, currentState, currentPose, circ, warnings),
+            SetToolStateSegment => PlanningResult.Succeeded(new Trajectory(request.Robot, new[] { new TrajectoryPoint(0, currentState) })),
+            WaitSegment => PlanningResult.Succeeded(new Trajectory(request.Robot, new[] { new TrajectoryPoint(0, currentState) })),
             _ => PlanningResult.Failed(new[] { "Unsupported motion segment type." })
         };
     }

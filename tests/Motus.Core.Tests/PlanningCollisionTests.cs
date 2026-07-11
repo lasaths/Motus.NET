@@ -46,6 +46,100 @@ public class PlanningCollisionTests
         Assert.True(result.Success, string.Join("; ", result.Errors));
     }
 
+    [Fact]
+    public void CartesianLin_CanSucceedWithSphereOnTcpLine_WhenLinkEnvelopesClear()
+    {
+        var preset = PresetLoader.LoadByModelName("UR5e", FindResources());
+        var robot = new RobotModel(preset);
+        var checker = new SphereCollisionChecker(preset);
+        var fk = KinematicsResolver.CreateFkSolver(preset);
+        var extendedTool = new ToolDefinition("probe", new Frame(0, 0, 0.18, 1, 0, 0, 0)).ToToolFrame();
+        var home = new JointState(new[] { 0.0, -1.5708, 1.5708, -1.5708, 0.0, 0.0 });
+        var goalJ = new JointState(new[] { 1.2, -1.0, 1.2, -1.6, -1.5708, 0.0 });
+        var goalTcp = fk.ComputeTcp(goalJ, preset.BaseFrame, preset.ToolFrame);
+
+        var linResult = new CartesianLinearPathPlanner(preset).PlanToResult(
+            new CartesianPlanningRequest(robot, home, goalTcp, new PlanningOptions { MaxJointStepRadians = 0.05 }),
+            new CartesianLinOptions(StepMeters: 0.005, ContinueOnIkFailure: false));
+        Assert.True(linResult.Success, string.Join("; ", linResult.Errors));
+        Assert.NotNull(linResult.Trajectory);
+
+        CollisionScene? tcpOnlyScene = null;
+        var points = linResult.Trajectory!.Points;
+        for (var i = 1; i < points.Count; i++)
+        {
+            var tcpA = fk.ComputeTcp(points[i - 1].JointState, preset.BaseFrame, extendedTool).Tcp;
+            var tcpB = fk.ComputeTcp(points[i].JointState, preset.BaseFrame, extendedTool).Tcp;
+            var tcpMid = new Frame(
+                (tcpA.X + tcpB.X) / 2,
+                (tcpA.Y + tcpB.Y) / 2,
+                (tcpA.Z + tcpB.Z) / 2);
+            foreach (var radius in new[] { 0.01, 0.015, 0.02, 0.025, 0.03 })
+            {
+                var trial = new CollisionScene(new[] { CollisionObject.Sphere("tcp_only", tcpMid, radius) });
+                if (PlanningCollision.ValidateTrajectory(linResult.Trajectory, trial, checker, 0.05) is null)
+                {
+                    tcpOnlyScene = trial;
+                    break;
+                }
+            }
+
+            if (tcpOnlyScene is not null) break;
+        }
+
+        Assert.NotNull(tcpOnlyScene);
+    }
+
+    [Fact]
+    public void CartesianLin_FailsWhenSphereOverlapsLinkEnvelope()
+    {
+        var preset = PresetLoader.LoadByModelName("UR5e", FindResources());
+        var robot = new RobotModel(preset);
+        var checker = new SphereCollisionChecker(preset);
+        var fk = KinematicsResolver.CreateFkSolver(preset);
+        var home = new JointState(new[] { 0.0, -1.5708, 1.5708, -1.5708, 0.0, 0.0 });
+        var goalJ = new JointState(new[] { 1.2, -1.0, 1.2, -1.6, -1.5708, 0.0 });
+        var goalTcp = fk.ComputeTcp(goalJ, preset.BaseFrame, preset.ToolFrame);
+
+        var linResult = new CartesianLinearPathPlanner(preset).PlanToResult(
+            new CartesianPlanningRequest(robot, home, goalTcp, new PlanningOptions { MaxJointStepRadians = 0.05 }),
+            new CartesianLinOptions(StepMeters: 0.005, ContinueOnIkFailure: false));
+        Assert.True(linResult.Success);
+        Assert.NotNull(linResult.Trajectory);
+
+        CollisionScene? blocking = null;
+        foreach (var pt in linResult.Trajectory!.Points)
+        {
+            if (!checker.IsCollisionFree(pt.JointState, new CollisionScene())) continue;
+            var origins = fk.ComputeLinkOrigins(pt.JointState.Positions, preset.BaseFrame.Frame);
+            foreach (var origin in origins)
+            {
+                var trial = new CollisionScene(new[] { CollisionObject.Sphere("block", origin, 0.12) });
+                if (!checker.IsCollisionFree(pt.JointState, trial))
+                {
+                    blocking = trial;
+                    break;
+                }
+            }
+
+            if (blocking is not null) break;
+        }
+
+        Assert.NotNull(blocking);
+
+        var result = new CartesianLinearPathPlanner(preset).PlanToResult(
+            new CartesianPlanningRequest(robot, home, goalTcp, new PlanningOptions
+            {
+                CollisionScene = blocking,
+                CollisionChecker = checker,
+                MaxJointStepRadians = 0.05
+            }, blocking),
+            new CartesianLinOptions(StepMeters: 0.005, ContinueOnIkFailure: false));
+
+        Assert.False(result.Success);
+        Assert.Contains(result.Errors, e => e.Contains("Collision", StringComparison.OrdinalIgnoreCase));
+    }
+
     private static string FindResources()
     {
         var dir = AppContext.BaseDirectory;
