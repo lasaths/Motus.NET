@@ -87,4 +87,4 @@ jobs:
         env:
           MOTUS_NATIVE_FULL: "1"
         run: |
-          dotnet test Motus.NET.slnx -c Release --verbosity normal
+          dotnet test Motus.NET.slnx -c Release --verbosity normal -- --parallel none
