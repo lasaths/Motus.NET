@@ -11,14 +11,22 @@
 #include <ompl/geometric/planners/rrt/RRTConnect.h>
 #include <ompl/geometric/planners/rrt/RRTstar.h>
 #include <ompl/geometric/planners/kpiece/LBKPIECE1.h>
-#include <ompl/geometric/planners/informedtrees/AITstar.h>
-#include <ompl/geometric/planners/informedtrees/EITstar.h>
 #include <ompl/geometric/PathGeometric.h>
 #include <ompl/geometric/PathSimplifier.h>
 #include <algorithm>
 #include <cmath>
 #include <memory>
 #include <vector>
+
+#if __has_include(<ompl/geometric/planners/informedtrees/AITstar.h>)
+#include <ompl/geometric/planners/informedtrees/AITstar.h>
+#define MOTUS_HAS_AITSTAR 1
+#endif
+
+#if __has_include(<ompl/geometric/planners/informedtrees/EITstar.h>)
+#include <ompl/geometric/planners/informedtrees/EITstar.h>
+#define MOTUS_HAS_EITSTAR 1
+#endif
 
 #if __has_include(<ompl/geometric/planners/rrt/AORRTC.h>)
 #include <ompl/geometric/planners/rrt/AORRTC.h>
@@ -212,6 +220,7 @@ static ob::PlannerPtr CreatePlanner(
         return planner;
     }
     case MOTUS_OMPL_AIT_STAR:
+#ifdef MOTUS_HAS_AITSTAR
     {
         auto planner = std::make_shared<og::AITstar>(si);
         pdef->setOptimizationObjective(PathLengthObjective(si));
@@ -219,7 +228,11 @@ static ob::PlannerPtr CreatePlanner(
         planner->setup();
         return planner;
     }
+#else
+        return nullptr;
+#endif
     case MOTUS_OMPL_EIT_STAR:
+#ifdef MOTUS_HAS_EITSTAR
     {
         auto planner = std::make_shared<og::EITstar>(si);
         pdef->setOptimizationObjective(PathLengthObjective(si));
@@ -227,6 +240,9 @@ static ob::PlannerPtr CreatePlanner(
         planner->setup();
         return planner;
     }
+#else
+        return nullptr;
+#endif
     case MOTUS_OMPL_BLIT_STAR:
 #ifdef MOTUS_HAS_BLITSTAR
     {
@@ -259,9 +275,19 @@ static bool PlannerCompiled(int planner_id)
     case MOTUS_OMPL_RRT_CONNECT:
     case MOTUS_OMPL_RRT_STAR:
     case MOTUS_OMPL_LBKPIECE:
-    case MOTUS_OMPL_AIT_STAR:
-    case MOTUS_OMPL_EIT_STAR:
         return true;
+    case MOTUS_OMPL_AIT_STAR:
+#ifdef MOTUS_HAS_AITSTAR
+        return true;
+#else
+        return false;
+#endif
+    case MOTUS_OMPL_EIT_STAR:
+#ifdef MOTUS_HAS_EITSTAR
+        return true;
+#else
+        return false;
+#endif
     case MOTUS_OMPL_AORRTC:
 #ifdef MOTUS_HAS_AORRTC
         return true;
