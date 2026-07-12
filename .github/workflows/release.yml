@@ -39,7 +39,7 @@ jobs:
       - name: Build native full (Linux)
         if: matrix.full
         shell: bash
-        run: ./scripts/build-native-full.sh ${{ matrix.rid }}
+        run: bash ./scripts/build-native-full.sh ${{ matrix.rid }}
 
       - name: Upload native library
         uses: actions/upload-artifact@v4
