@@ -96,6 +96,8 @@ static int UpsertObject(motus_fcl_world* world, uint32_t id,
     if (it != world->objects.end())
     {
         it->second->setTransform(tf);
+        it->second->computeAABB();
+        world->manager->update(it->second.get());
         return MOTUS_FCL_OK;
     }
 
