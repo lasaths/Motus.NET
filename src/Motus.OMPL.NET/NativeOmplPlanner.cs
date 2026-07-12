@@ -70,9 +70,8 @@ internal static class NativeOmplPlanner
                     waypoints.Add(space.ToFull(q));
                 }
 
-                var simplified = SimplifyNativePath(
-                    waypoints, n, space, request, robot, checker, scene,
-                    stateCb, motionCb, handle, maxStates, options.StepRadians);
+                var simplified = PathSimplifier.Simplify(
+                    waypoints, robot, checker, scene, options.StepRadians * 0.5);
                 return PlanningPipeline.BuildTrajectory(robot, simplified, request.Options, checker, usedNative: true, plannerLabel);
             }
         }
@@ -80,47 +79,5 @@ internal static class NativeOmplPlanner
         {
             handle.Free();
         }
-    }
-
-    private static IReadOnlyList<JointState> SimplifyNativePath(
-        List<JointState> waypoints,
-        int dims,
-        PlanningPipeline.PlanSpace space,
-        PlanningRequest request,
-        RobotModel robot,
-        ICollisionChecker? checker,
-        CollisionScene scene,
-        NativeBindings.ValidityCallback stateCb,
-        NativeBindings.MotionValidityCallback motionCb,
-        GCHandle handle,
-        int maxStates,
-        double stepRadians)
-    {
-        var pathCount = waypoints.Count;
-        var flatPath = new double[pathCount * dims];
-        for (var i = 0; i < pathCount; i++)
-        {
-            var groupQ = request.Options.GroupMap?.ExtractGroupPositions(waypoints[i])
-                ?? waypoints[i].Positions.ToArray();
-            Array.Copy(groupQ, 0, flatPath, i * dims, dims);
-        }
-
-        var simpBuf = new double[dims * maxStates];
-        var simpRc = NativeOmpl.motus_ompl_simplify_path(
-            dims, flatPath, pathCount, stepRadians * 0.5,
-            stateCb, motionCb, GCHandle.ToIntPtr(handle),
-            simpBuf, maxStates, out var simpCount);
-
-        if (simpRc != NativeOmpl.Ok || simpCount < 2)
-            return PathSimplifier.Simplify(waypoints, robot, checker, scene, stepRadians * 0.5);
-
-        var simplified = new List<JointState>(simpCount);
-        for (var i = 0; i < simpCount; i++)
-        {
-            var q = new double[dims];
-            Array.Copy(simpBuf, i * dims, q, 0, dims);
-            simplified.Add(space.ToFull(q));
-        }
-        return simplified;
     }
 }

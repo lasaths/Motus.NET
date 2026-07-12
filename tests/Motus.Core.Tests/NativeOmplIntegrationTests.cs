@@ -25,7 +25,7 @@ public class NativeOmplIntegrationTests
         var robot = PresetLoader.LoadRobotModelByName("UR5e");
         var start = new JointState(new double[] { 0, -Math.PI / 2, Math.PI / 2, 0, Math.PI / 2, 0 });
         var goal = new JointState(new double[] { 0.25, -1.1, 1.3, 0.1, 1.0, 0.2 });
-        var checker = CollisionCheckerFactory.Create(robot);
+        var checker = new SphereCollisionChecker(robot.Preset);
         var planner = new RrtConnectPlanner(checker, new RrtConnectOptions
         {
             MaxIterations = 4000,
