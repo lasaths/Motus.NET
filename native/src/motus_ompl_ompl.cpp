@@ -8,6 +8,7 @@
 #include <ompl/base/objectives/PathLengthOptimizationObjective.h>
 #include <ompl/base/spaces/RealVectorStateSpace.h>
 #include <ompl/base/terminationconditions/IterationTerminationCondition.h>
+#include <ompl/config.h>
 #include <ompl/geometric/planners/rrt/RRTConnect.h>
 #include <ompl/geometric/planners/rrt/RRTstar.h>
 #include <ompl/geometric/planners/kpiece/LBKPIECE1.h>
@@ -262,7 +263,11 @@ static ob::PlannerPtr CreatePlanner(
         planner->setProblemDefinition(pdef);
         planner->setup();
         planner->setRange(step_size);
+#if defined(OMPL_VERSION) && OMPL_VERSION >= 0x0106000
         planner->setGoalBias(std::clamp(goal_bias, 0.0, 1.0));
+#else
+        (void)goal_bias;
+#endif
         return planner;
     }
     }

@@ -19,7 +19,7 @@ jobs:
             full: false
           - os: ubuntu-latest
             rid: linux-x64
-            full: true
+            full: false
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
