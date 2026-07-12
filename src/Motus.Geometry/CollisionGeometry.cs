@@ -94,7 +94,17 @@ internal static class CollisionGeometry
 
     private static bool MeshIntersectsObject(CollisionObject mesh, CollisionObject obstacle, Dictionary<string, BvhNode> bvhCache)
     {
-        if (mesh.MeshVertices is null) return false;
+        if (mesh.MeshVertices is null || mesh.MeshIndices is null) return false;
+
+        if (obstacle.Shape == CollisionShape.Mesh &&
+            obstacle.MeshVertices is not null &&
+            obstacle.MeshIndices is not null &&
+            bvhCache.TryGetValue(obstacle.Name, out var obstacleBvh))
+        {
+            return RobotMeshIntersectsMesh(mesh, obstacle, obstacleBvh);
+        }
+
+        // ponytail: vertex+10mm fallback for sphere/box/capsule obstacles only
         foreach (var v in mesh.MeshVertices)
         {
             var world = Transforms.TransformPoint(Transforms.FromFrame(mesh.Pose), v[0], v[1], v[2]);
@@ -102,6 +112,53 @@ internal static class CollisionGeometry
                 return true;
         }
         return false;
+    }
+
+    private static bool RobotMeshIntersectsMesh(CollisionObject robot, CollisionObject obstacle, BvhNode obstacleBvh)
+    {
+        var robotIndices = robot.MeshIndices!;
+        var robotVerts = robot.MeshVertices!;
+        var obsVerts = obstacle.MeshVertices!;
+        var obsIndices = obstacle.MeshIndices!;
+
+        for (var tri = 0; tri < robotIndices.Count / 3; tri++)
+        {
+            var bi = tri * 3;
+            var a0 = WorldVertex(robotVerts, robotIndices[bi], robot.Pose);
+            var a1 = WorldVertex(robotVerts, robotIndices[bi + 1], robot.Pose);
+            var a2 = WorldVertex(robotVerts, robotIndices[bi + 2], robot.Pose);
+            var cx = (a0.X + a1.X + a2.X) / 3;
+            var cy = (a0.Y + a1.Y + a2.Y) / 3;
+            var cz = (a0.Z + a1.Z + a2.Z) / 3;
+            var center = new Frame(cx, cy, cz);
+            var radius = Math.Max(Distance(center, a0), Math.Max(Distance(center, a1), Distance(center, a2)));
+
+            foreach (var oTri in obstacleBvh.GetPotentialTriangles(center, radius))
+            {
+                var ob = oTri * 3;
+                if (ob + 2 >= obsIndices.Count) continue;
+                var b0 = Vertex(obsVerts, obsIndices[ob]);
+                var b1 = Vertex(obsVerts, obsIndices[ob + 1]);
+                var b2 = Vertex(obsVerts, obsIndices[ob + 2]);
+                if (TriangleCollision.TriangleTriangleOverlap(a0, a1, a2, Frame.Identity, b0, b1, b2, obstacle.Pose))
+                    return true;
+            }
+        }
+        return false;
+    }
+
+    private static Frame WorldVertex(List<double[]> verts, int idx, Frame pose)
+    {
+        var local = Vertex(verts, idx);
+        return Transforms.ToFrame(Transforms.Multiply(Transforms.FromFrame(pose), Transforms.FromFrame(local)));
+    }
+
+    private static double Distance(Frame a, Frame b)
+    {
+        var dx = a.X - b.X;
+        var dy = a.Y - b.Y;
+        var dz = a.Z - b.Z;
+        return Math.Sqrt(dx * dx + dy * dy + dz * dz);
     }
 
     private static bool SphereMeshOverlap(Frame linkCenter, double linkRadius, CollisionObject mesh, Dictionary<string, BvhNode> bvhCache)

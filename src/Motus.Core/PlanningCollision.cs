@@ -36,9 +36,23 @@ public static class PlanningCollision
             return null;
 
         if (!checker.IsCollisionFree(start, scene!))
-            return PlanningResult.Failed(new[] { "Start configuration is in collision." });
+        {
+            return PlanningResult.Failed(new[]
+            {
+                checker.IsCollisionFree(start, new CollisionScene())
+                    ? "Start configuration is in collision with an obstacle."
+                    : "Start configuration has self-collision."
+            });
+        }
         if (!checker.IsCollisionFree(goal, scene!))
-            return PlanningResult.Failed(new[] { "Goal configuration is in collision." });
+        {
+            return PlanningResult.Failed(new[]
+            {
+                checker.IsCollisionFree(goal, new CollisionScene())
+                    ? "Goal configuration is in collision with an obstacle."
+                    : "Goal configuration has self-collision."
+            });
+        }
         return null;
     }
 }
