@@ -91,8 +91,15 @@ static int UpsertObject(motus_fcl_world* world, uint32_t id,
     const std::shared_ptr<fcl::CollisionGeometryd>& geom, const motus_transform* pose)
 {
     if (!world) return MOTUS_FCL_ERR;
-    UnregisterId(world, id);
-    auto obj = std::make_shared<fcl::CollisionObjectd>(geom, TransformFromMotus(pose));
+    const auto tf = TransformFromMotus(pose);
+    auto it = world->objects.find(id);
+    if (it != world->objects.end())
+    {
+        it->second->setTransform(tf);
+        return MOTUS_FCL_OK;
+    }
+
+    auto obj = std::make_shared<fcl::CollisionObjectd>(geom, tf);
     world->objects[id] = obj;
     world->manager->registerObject(obj.get());
     world->manager->setup();
