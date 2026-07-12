@@ -12,6 +12,23 @@ public class NativeOmplIntegrationTests
     private static bool ExpectFullNative =>
         string.Equals(Environment.GetEnvironmentVariable("MOTUS_NATIVE_FULL"), "1", StringComparison.Ordinal);
 
+    private static bool RunNativePlanSmoke =>
+        string.Equals(Environment.GetEnvironmentVariable("MOTUS_NATIVE_PLAN_SMOKE"), "1", StringComparison.Ordinal);
+
+    [Fact]
+    public void NativeOmpl_WhenBuilt_AvailabilitySmoke()
+    {
+        if (!NativeOmpl.IsAvailable)
+        {
+            if (ExpectFullNative)
+                Assert.Fail($"Native OMPL expected: {NativeBindings.LastError()}");
+            return;
+        }
+
+        Assert.True(NativeBindings.FclIsAvailable(), NativeBindings.LastError());
+        Assert.True(NativeOmpl.motus_ompl_planner_available(NativeBindings.PlannerRrtConnect) != 0);
+    }
+
     [Fact]
     public void NativeOmpl_WhenBuilt_PlanSmoke()
     {
@@ -21,6 +38,9 @@ public class NativeOmplIntegrationTests
                 Assert.Fail($"Native OMPL expected: {NativeBindings.LastError()}");
             return;
         }
+
+        if (ExpectFullNative && !RunNativePlanSmoke)
+            return;
 
         var preset = PresetLoader.LoadByModelName("UR5e");
         var robot = new RobotModel(preset);
@@ -33,7 +53,6 @@ public class NativeOmplIntegrationTests
         });
 
         var result = planner.Plan(new PlanningRequest(robot, start, goal));
-
         Assert.True(result.Success, string.Join("; ", result.Errors));
         Assert.Contains("native", string.Join(" ", result.Warnings), StringComparison.OrdinalIgnoreCase);
     }

@@ -87,8 +87,9 @@ jobs:
         env:
           MOTUS_NATIVE_FULL: "1"
         run: |
+          ulimit -s 65536
           dotnet build Motus.NET.slnx -c Release
           dotnet test tests/Motus.Presets.Tests/Motus.Presets.Tests.csproj -c Release --no-build --verbosity normal --settings build/native-integration.runsettings
-          dotnet test tests/Motus.OMPL.Tests/Motus.OMPL.Tests.csproj -c Release --no-build --verbosity normal --settings build/native-integration.runsettings
+          MOTUS_PREFER_MANAGED_PLANNER=1 dotnet test tests/Motus.OMPL.Tests/Motus.OMPL.Tests.csproj -c Release --no-build --verbosity normal --settings build/native-integration.runsettings
           dotnet test tests/Motus.Core.Tests/Motus.Core.Tests.csproj -c Release --no-build --verbosity normal --settings build/native-integration.runsettings --filter "FullyQualifiedName~NativeRuntimeTests|FullyQualifiedName~NativeOmplIntegrationTests"
           MOTUS_PREFER_MANAGED_PLANNER=1 dotnet test tests/Motus.Core.Tests/Motus.Core.Tests.csproj -c Release --no-build --verbosity normal --settings build/native-integration.runsettings --filter "FullyQualifiedName!~NativeRuntimeTests&FullyQualifiedName!~NativeOmplIntegrationTests"
