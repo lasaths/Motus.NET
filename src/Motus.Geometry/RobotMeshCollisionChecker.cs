@@ -77,8 +77,11 @@ public sealed class RobotMeshCollisionChecker : ICollisionChecker
         if (_robotCollision?.ToolGeometry is not { } toolGeom || scene.Objects.Count == 0)
             return true;
 
-        var tcpM = _fk.ComputeTcpTransform(state.Positions, _base.Frame, _tool.Frame);
-        var toolWorld = CollisionGeometry.Transform(toolGeom, tcpM);
+        var toolM = ToolCollisionPlacement.WorldMatrix(
+            _fk, state.Positions, _base, _tool, toolGeom,
+            _robotCollision.ToolGeometryInFlangeFrame,
+            _robotCollision.ToolGeometryAttachOffset);
+        var toolWorld = CollisionGeometry.Transform(toolGeom, toolM);
         foreach (var obj in scene.Objects)
         {
             if (scene.IsPairAllowed(toolWorld.Name, obj.Name)) continue;
@@ -142,8 +145,11 @@ public sealed class RobotMeshCollisionChecker : ICollisionChecker
         }
         if (_robotCollision.ToolGeometry is { } tool)
         {
-            var tcpM = _fk.ComputeTcpTransform(state.Positions, _base.Frame, _tool.Frame);
-            worldLinks.Add((linkMats.Count - 1, CollisionGeometry.Transform(tool, tcpM)));
+            var toolM = ToolCollisionPlacement.WorldMatrix(
+                _fk, state.Positions, _base, _tool, tool,
+                _robotCollision.ToolGeometryInFlangeFrame,
+                _robotCollision.ToolGeometryAttachOffset);
+            worldLinks.Add((linkMats.Count - 1, CollisionGeometry.Transform(tool, toolM)));
         }
         for (var i = 0; i < worldLinks.Count; i++)
         {

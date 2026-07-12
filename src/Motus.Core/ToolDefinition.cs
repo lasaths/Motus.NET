@@ -5,8 +5,12 @@ public sealed class ToolDefinition
 {
     public string Name { get; }
     public Frame Tcp { get; }
-    /// <summary>Optional gripper collision in TCP-local frame.</summary>
+    /// <summary>Optional gripper collision mesh (TCP-local unless <see cref="GeometryInFlangeFrame"/>).</summary>
     public CollisionObject? Geometry { get; }
+    /// <summary>When true, <see cref="Geometry"/> is in flange/tool0 frame and placed at the FK chain tip.</summary>
+    public bool GeometryInFlangeFrame { get; init; }
+    /// <summary>Fixed URDF offset from the last actuated FK link to <see cref="Geometry"/> (e.g. wrist_3 → tool0).</summary>
+    public Frame? GeometryAttachOffset { get; init; }
     /// <summary>Actuated parameters exposed along trajectories (e.g. gripper width).</summary>
     public ToolCapabilities? Capabilities { get; }
 

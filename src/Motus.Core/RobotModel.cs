@@ -46,9 +46,16 @@ public sealed class RobotModel
         if (tool?.Geometry is not null)
         {
             var links = CollisionModel?.Links ?? Array.Empty<LinkCollisionGeometry>();
-            collision = new RobotCollisionModel(links, tool.Geometry);
+            collision = new RobotCollisionModel(
+                links,
+                tool.Geometry,
+                tool.GeometryInFlangeFrame || UsesFlangeToolGeometry(tool.Geometry),
+                tool.GeometryAttachOffset);
         }
 
         return new RobotModel(preset, collision, JointNames);
     }
+
+    private static bool UsesFlangeToolGeometry(CollisionObject geometry) =>
+        string.Equals(geometry.Name, "robotiq_2f85", StringComparison.Ordinal);
 }

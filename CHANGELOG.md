@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.4] - 2026-07-12
+
+### Added
+
+- **`ToolCollisionPlacement`** — shared tool collision world matrix (FK tip vs TCP placement)
+- **`ToolDefinition.GeometryInFlangeFrame` / `GeometryAttachOffset`** — host-supplied tool collision frames
+- **`RobotCollisionModel.ToolGeometryInFlangeFrame` / `ToolGeometryAttachOffset`** — planning collision model metadata
+- **`UrdfFixedChain.TryTipAttachOffset`** — fixed URDF chain from last actuated link to tip (e.g. wrist_3 → tool0)
+
+### Fixed
+
+- **Robotiq 2F-85 tool collision** — bundled `robotiq_2f85` mesh placed at FK tip with wrist_3→tool0 offset instead of mis-rotated TCP frame (fixes false start-configuration collisions vs visuals)
+- **`RobotModel.WithTool`** — propagates tool attach offset into session collision model
+- **`RobotMeshCollisionChecker` / `FclCollisionChecker`** — honor tool attach offset during planning collision checks
+
 ## [0.6.3] - 2026-07-12
 
 ### Added

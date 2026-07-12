@@ -32,13 +32,27 @@ internal static class ManagedRrtConnect
         var goal = (double[])space.Goal.Clone();
         var treeA = new RrtTree { Nodes = [new RrtNode(start, -1)] };
         var treeB = new RrtTree { Nodes = [new RrtNode(goal, -1)] };
+        var started = Environment.TickCount64;
 
         for (var iter = 0; iter < options.MaxIterations; iter++)
         {
             if (options.ShouldCancel?.Invoke() == true)
                 return PlanningResult.Failed(new[] { "Planning cancelled." });
 
-            if ((iter & 0x3F) == 0)
+            if (options.MaxPlanTimeSeconds > 0)
+            {
+                var elapsed = (Environment.TickCount64 - started) / 1000.0;
+                if (elapsed >= options.MaxPlanTimeSeconds)
+                {
+                    return PlanningResult.Failed(new[]
+                    {
+                        $"Planning timed out after {options.MaxPlanTimeSeconds:F0}s. " +
+                        "Increase TimeLimit on Motus RRT Settings or reduce MaxIter."
+                    });
+                }
+            }
+
+            if ((iter & 0xF) == 0)
                 options.ReportIteration?.Invoke(iter, options.MaxIterations);
 
             var sample = Sample(rng, goal, space.Limits, options.GoalBias);
@@ -50,6 +64,7 @@ internal static class ManagedRrtConnect
                 pathB.Reverse();
                 var raw = pathA.Concat(pathB.Skip(1)).Select(q => space.ToFull(q)).ToList();
                 EnsurePathStartsAtStart(raw, space.ToFull(start), space.ToFull(goal));
+                options.ReportIteration?.Invoke(options.MaxIterations - 1, options.MaxIterations);
                 var simplified = PathSimplifier.Simplify(raw, robot, checker, scene, options.StepRadians * 0.5);
                 return PlanningPipeline.BuildTrajectory(robot, simplified, request.Options, checker, usedNative: false, plannerLabel);
             }

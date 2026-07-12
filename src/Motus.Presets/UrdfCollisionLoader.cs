@@ -61,7 +61,11 @@ internal static class UrdfCollisionLoader
     {
         if (model is null && toolGeometry is null) return null;
         if (model is null) return new RobotCollisionModel(Array.Empty<LinkCollisionGeometry>(), toolGeometry);
-        return new RobotCollisionModel(model.Links, toolGeometry ?? model.ToolGeometry);
+        return new RobotCollisionModel(
+            model.Links,
+            toolGeometry ?? model.ToolGeometry,
+            model.ToolGeometryInFlangeFrame,
+            model.ToolGeometryAttachOffset);
     }
 
     private static CollisionObject? ParseGeometry(string name, Frame pose, XElement geom, string urdfDirectory)

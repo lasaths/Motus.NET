@@ -199,8 +199,11 @@ public sealed class FclCollisionChecker : ICollisionChecker, IDisposable
 
         if (model.ToolGeometry is { } tool)
         {
-            var tcpM = _fk.ComputeTcpTransform(state.Positions, _base.Frame, _tool.Frame);
-            var worldTool = CollisionGeometry.Transform(tool, tcpM);
+            var toolM = ToolCollisionPlacement.WorldMatrix(
+                _fk, state.Positions, _base, _tool, tool,
+                model.ToolGeometryInFlangeFrame,
+                model.ToolGeometryAttachOffset);
+            var worldTool = CollisionGeometry.Transform(tool, toolM);
             UpsertGeometry(_world, ToolId, worldTool);
         }
     }
