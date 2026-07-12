@@ -22,22 +22,17 @@ public class NativeOmplIntegrationTests
             return;
         }
 
-        var robot = PresetLoader.LoadRobotModelByName("UR5e");
-        var start = new JointState(new double[] { 0, -Math.PI / 2, Math.PI / 2, 0, Math.PI / 2, 0 });
-        var goal = new JointState(new double[] { 0.25, -1.1, 1.3, 0.1, 1.0, 0.2 });
-        var checker = new SphereCollisionChecker(robot.Preset);
-        var planner = new RrtConnectPlanner(checker, new RrtConnectOptions
+        var preset = PresetLoader.LoadByModelName("UR5e");
+        var robot = new RobotModel(preset);
+        var start = new JointState(new double[6]);
+        var goal = new JointState(new[] { 0.5, -0.5, 0.5, -0.5, -0.5, 0.2 });
+        var planner = new RrtConnectPlanner(preset, new RrtConnectOptions
         {
-            MaxIterations = 4000,
-            MaxPlanTimeSeconds = 2.0,
+            MaxIterations = 3000,
             RandomSeed = 7
         });
 
-        var result = planner.Plan(new PlanningRequest(robot, start, goal, new PlanningOptions
-        {
-            CollisionChecker = checker,
-            MaxJointStepRadians = 0.08
-        }));
+        var result = planner.Plan(new PlanningRequest(robot, start, goal));
 
         Assert.True(result.Success, string.Join("; ", result.Errors));
         Assert.Contains("native", string.Join(" ", result.Warnings), StringComparison.OrdinalIgnoreCase);

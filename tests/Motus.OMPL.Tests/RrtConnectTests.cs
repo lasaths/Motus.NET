@@ -213,6 +213,8 @@ public class RrtConnectTests
   [Fact]
   public void NativeOmpl_IsUnavailableWithoutNativeBuild()
   {
+    if (string.Equals(Environment.GetEnvironmentVariable("MOTUS_NATIVE_FULL"), "1", StringComparison.Ordinal))
+      return;
     Assert.False(Motus.OMPL.Native.NativeOmpl.IsAvailable);
   }
 
