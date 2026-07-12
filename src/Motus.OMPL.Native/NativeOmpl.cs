@@ -25,7 +25,7 @@ public static class NativeOmpl
         int dims, double[] low, double[] high, double[] start, double[] goal,
         int max_iterations, double max_plan_time_sec, double step_size, double goal_bias, int planner_id,
         Motus.Native.NativeBindings.ValidityCallback validity,
-        Motus.Native.NativeBindings.MotionValidityCallback motion_validity,
+        Motus.Native.NativeBindings.MotionValidityCallback? motion_validity,
         IntPtr validity_userdata, double[] out_path, int max_states, out int out_count) =>
         Motus.Native.NativeBindings.motus_ompl_plan(
             dims, low, high, start, goal, max_iterations, max_plan_time_sec, step_size, goal_bias, planner_id,
@@ -35,7 +35,7 @@ public static class NativeOmpl
         int dims, double[] low, double[] high, double[] start, double[] goal,
         int max_iterations, double max_plan_time_sec, double step_size, double goal_bias, int planner_id,
         Motus.Native.NativeBindings.ValidityCallback validity,
-        Motus.Native.NativeBindings.MotionValidityCallback motion_validity,
+        Motus.Native.NativeBindings.MotionValidityCallback? motion_validity,
         IntPtr validity_userdata, double[] out_path, int max_states, out int out_count) =>
         motus_ompl_plan(
             dims, low, high, start, goal, max_iterations, max_plan_time_sec, step_size, goal_bias, planner_id,
@@ -44,7 +44,7 @@ public static class NativeOmpl
     public static int motus_ompl_simplify_path(
         int dims, double[] path, int path_count, double step_size,
         Motus.Native.NativeBindings.ValidityCallback validity,
-        Motus.Native.NativeBindings.MotionValidityCallback motion_validity,
+        Motus.Native.NativeBindings.MotionValidityCallback? motion_validity,
         IntPtr validity_userdata, double[] out_path, int max_states, out int out_count) =>
         Motus.Native.NativeBindings.motus_ompl_simplify_path(
             dims, path, path_count, step_size, validity, motion_validity, validity_userdata, out_path, max_states, out out_count);

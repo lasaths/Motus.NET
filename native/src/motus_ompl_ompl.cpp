@@ -63,7 +63,7 @@ static bool MotionValid(
     double maxDelta = 0.0;
     for (int i = 0; i < dims; ++i)
         maxDelta = std::max(maxDelta, std::abs(rv2->values[i] - rv1->values[i]));
-    const int steps = std::max(1, static_cast<int>(std::ceil(maxDelta / std::max(step_size, 1e-9))));
+    const int steps = std::min(512, std::max(1, static_cast<int>(std::ceil(maxDelta / std::max(step_size, 1e-9)))));
     for (int s = 0; s <= steps; ++s)
     {
         const double alpha = static_cast<double>(s) / steps;

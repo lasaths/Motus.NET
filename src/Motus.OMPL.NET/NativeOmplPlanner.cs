@@ -45,11 +45,6 @@ internal static class NativeOmplPlanner
                 var context = (NativePlanContext)GCHandle.FromIntPtr(user).Target!;
                 return context.ValidityCallback(statePtr, dims);
             };
-            NativeBindings.MotionValidityCallback motionCb = (fromPtr, toPtr, dims, user) =>
-            {
-                var context = (NativePlanContext)GCHandle.FromIntPtr(user).Target!;
-                return context.MotionValidityCallback(fromPtr, toPtr, dims);
-            };
 
             lock (NativeSync.Gate)
             {
@@ -57,7 +52,7 @@ internal static class NativeOmplPlanner
                     n, low, high, space.Start, space.Goal,
                     options.MaxIterations, options.MaxPlanTimeSeconds, options.StepRadians, options.GoalBias,
                     nativePlannerId,
-                    stateCb, motionCb, GCHandle.ToIntPtr(handle),
+                    stateCb, null, GCHandle.ToIntPtr(handle),
                     buffer, maxStates, out var count);
 
                 if (rc != NativeOmpl.Ok || count < 2) return null;
