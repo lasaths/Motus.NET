@@ -86,4 +86,8 @@ jobs:
       - name: Test with full native
         env:
           MOTUS_NATIVE_FULL: "1"
-        run: dotnet test Motus.NET.slnx -c Release --verbosity normal --settings build/native-integration.runsettings
+        run: |
+          dotnet build Motus.NET.slnx -c Release
+          dotnet test tests/Motus.Presets.Tests/Motus.Presets.Tests.csproj -c Release --no-build --verbosity normal --settings build/native-integration.runsettings
+          dotnet test tests/Motus.OMPL.Tests/Motus.OMPL.Tests.csproj -c Release --no-build --verbosity normal --settings build/native-integration.runsettings
+          dotnet test tests/Motus.Core.Tests/Motus.Core.Tests.csproj -c Release --no-build --verbosity normal --settings build/native-integration.runsettings
