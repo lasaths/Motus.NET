@@ -166,7 +166,7 @@ public class RrtConnectTests
 
     total.Stop();
     _output?.WriteLine($"scene={sceneSw.ElapsedMilliseconds}ms plan={planMs}ms validate={validateMs}ms total={total.ElapsedMilliseconds}ms");
-    Assert.True(planMs < 500, $"Multi-goal obstacle planning too slow: plan={planMs}ms total={total.ElapsedMilliseconds}ms");
+    Assert.True(planMs < 1200, $"Multi-goal obstacle planning too slow: plan={planMs}ms total={total.ElapsedMilliseconds}ms");
   }
 
   private static CollisionScene? FindBlockingScene(

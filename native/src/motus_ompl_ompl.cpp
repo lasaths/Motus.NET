@@ -263,11 +263,7 @@ static ob::PlannerPtr CreatePlanner(
         planner->setProblemDefinition(pdef);
         planner->setup();
         planner->setRange(step_size);
-#if defined(OMPL_VERSION) && OMPL_VERSION >= 0x0106000
         planner->setGoalBias(std::clamp(goal_bias, 0.0, 1.0));
-#else
-        (void)goal_bias;
-#endif
         return planner;
     }
     }
