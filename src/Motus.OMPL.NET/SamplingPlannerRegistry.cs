@@ -115,7 +115,10 @@ public static class SamplingPlannerRegistry
         if (backend.CustomDispatch is not null)
             return backend.CustomDispatch(request, options, defaultChecker, backend);
 
-        if (!options.PreferManaged && descriptor.NativeSupported && backend.NativePlannerId >= 0)
+        var preferManaged = options.PreferManaged ||
+            string.Equals(Environment.GetEnvironmentVariable("MOTUS_PREFER_MANAGED_PLANNER"), "1", StringComparison.Ordinal);
+
+        if (!preferManaged && descriptor.NativeSupported && backend.NativePlannerId >= 0)
         {
             var native = NativeOmplPlanner.TryPlan(request, options, defaultChecker, backend.NativePlannerId, backend.Label);
             if (native is not null) return native;

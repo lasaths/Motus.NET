@@ -21,6 +21,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Content Include="xunit.runner.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\..\src\Motus.Core\Motus.Core.csproj" />
     <ProjectReference Include="..\..\src\Motus.Geometry\Motus.Geometry.csproj" />
     <ProjectReference Include="..\..\src\Motus.OMPL.NET\Motus.OMPL.NET.csproj" />
