@@ -123,8 +123,8 @@ public sealed class RobotMeshCollisionChecker : ICollisionChecker
     {
         foreach (var meshObj in scene.Objects.Where(o => o.Shape == CollisionShape.Mesh))
         {
-            if (!_meshBvhCache.ContainsKey(meshObj.Name) && meshObj.MeshVertices is not null && meshObj.MeshIndices is not null)
-                _meshBvhCache[meshObj.Name] = BvhBuilder.Build(meshObj);
+            if (meshObj.MeshVertices is not null && meshObj.MeshIndices is not null)
+                _meshBvhCache[meshObj.Name] = CollisionMeshCache.GetOrBuild(meshObj);
         }
     }
 

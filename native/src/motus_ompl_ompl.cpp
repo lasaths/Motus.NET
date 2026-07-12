@@ -3,16 +3,32 @@
 #ifdef MOTUS_HAS_OMPL
 
 #include <ompl/base/MotionValidator.h>
+#include <ompl/base/OptimizationObjective.h>
 #include <ompl/base/SpaceInformation.h>
+#include <ompl/base/objectives/PathLengthOptimizationObjective.h>
 #include <ompl/base/spaces/RealVectorStateSpace.h>
 #include <ompl/base/terminationconditions/IterationTerminationCondition.h>
 #include <ompl/geometric/planners/rrt/RRTConnect.h>
 #include <ompl/geometric/planners/rrt/RRTstar.h>
+#include <ompl/geometric/planners/kpiece/LBKPIECE1.h>
+#include <ompl/geometric/planners/informedtrees/AITstar.h>
+#include <ompl/geometric/planners/informedtrees/EITstar.h>
 #include <ompl/geometric/PathGeometric.h>
 #include <ompl/geometric/PathSimplifier.h>
 #include <algorithm>
 #include <cmath>
+#include <memory>
 #include <vector>
+
+#if __has_include(<ompl/geometric/planners/rrt/AORRTC.h>)
+#include <ompl/geometric/planners/rrt/AORRTC.h>
+#define MOTUS_HAS_AORRTC 1
+#endif
+
+#if __has_include(<ompl/geometric/planners/informedtrees/BITstar.h>)
+#include <ompl/geometric/planners/informedtrees/BITstar.h>
+#define MOTUS_HAS_BLITSTAR 1
+#endif
 
 namespace ob = ompl::base;
 namespace og = ompl::geometric;
@@ -103,45 +119,23 @@ static int WritePath(const og::PathGeometric& path, int dims, int max_states, do
         if (written >= max_states) break;
         const auto* st = path.getState(i);
         const auto* rv = st->as<ob::RealVectorStateSpace::StateType>();
-        for (int i = 0; i < dims; ++i)
-            out_path[written * dims + i] = rv->values[i];
+        for (int j = 0; j < dims; ++j)
+            out_path[written * dims + j] = rv->values[j];
         ++written;
     }
     *out_count = written;
     return written > 0 ? MOTUS_OMPL_OK : MOTUS_OMPL_ERR;
 }
 
-extern "C" {
-
-int motus_ompl_is_available(void) { return 1; }
-
-int motus_ompl_rrt_connect(
+static ob::SpaceInformationPtr SetupOmplSi(
     int dims,
     const double* low,
     const double* high,
-    const double* start,
-    const double* goal,
-    int max_iterations,
-    double max_plan_time_sec,
     double step_size,
-    double goal_bias,
-    int planner_id,
     motus_ompl_validity_fn validity,
     motus_ompl_motion_validity_fn motion_validity,
-    void* validity_userdata,
-    double* out_path,
-    int max_states,
-    int* out_count)
+    void* validity_userdata)
 {
-    (void)goal_bias;
-    if (!low || !high || !start || !goal || !out_path || !out_count || dims <= 0 || max_states <= 0)
-    {
-        motus_set_last_error("invalid arguments");
-        return MOTUS_OMPL_ERR;
-    }
-
-    *out_count = 0;
-
     auto space = std::make_shared<ob::RealVectorStateSpace>(dims);
     ob::RealVectorBounds bounds(dims);
     for (int i = 0; i < dims; ++i)
@@ -159,9 +153,177 @@ int motus_ompl_rrt_connect(
         si, dims, step_size, validity, motion_validity, validity_userdata));
     si->setStateValidityCheckingResolution(0.01);
     si->setup();
+    return si;
+}
 
-    ob::ScopedState<> startState(space);
-    ob::ScopedState<> goalState(space);
+static ob::PlannerStatus SolvePlanner(
+    const ob::PlannerPtr& planner,
+    int max_iterations,
+    double max_plan_time_sec)
+{
+    if (max_plan_time_sec > 0.0)
+        return planner->solve(ob::timedPlannerTerminationCondition(max_plan_time_sec));
+    return planner->solve(ob::IterationTerminationCondition(
+        static_cast<unsigned int>(std::max(1, max_iterations))));
+}
+
+static ob::OptimizationObjectivePtr PathLengthObjective(const ob::SpaceInformationPtr& si)
+{
+    return std::make_shared<ob::PathLengthOptimizationObjective>(si);
+}
+
+static ob::PlannerPtr CreatePlanner(
+    int planner_id,
+    const ob::SpaceInformationPtr& si,
+    const std::shared_ptr<ob::ProblemDefinition>& pdef,
+    double step_size,
+    double goal_bias)
+{
+    switch (planner_id)
+    {
+    case MOTUS_OMPL_RRT_STAR:
+    {
+        auto planner = std::make_shared<og::RRTstar>(si);
+        pdef->setOptimizationObjective(PathLengthObjective(si));
+        planner->setProblemDefinition(pdef);
+        planner->setup();
+        planner->setRange(step_size);
+        return planner;
+    }
+    case MOTUS_OMPL_AORRTC:
+#ifdef MOTUS_HAS_AORRTC
+    {
+        auto planner = std::make_shared<og::AORRTC>(si);
+        pdef->setOptimizationObjective(PathLengthObjective(si));
+        planner->setProblemDefinition(pdef);
+        planner->setup();
+        planner->setRange(step_size);
+        return planner;
+    }
+#else
+        return nullptr;
+#endif
+    case MOTUS_OMPL_LBKPIECE:
+    {
+        auto planner = std::make_shared<og::LBKPIECE1>(si);
+        planner->setProblemDefinition(pdef);
+        planner->setup();
+        planner->setRange(step_size);
+        return planner;
+    }
+    case MOTUS_OMPL_AIT_STAR:
+    {
+        auto planner = std::make_shared<og::AITstar>(si);
+        pdef->setOptimizationObjective(PathLengthObjective(si));
+        planner->setProblemDefinition(pdef);
+        planner->setup();
+        return planner;
+    }
+    case MOTUS_OMPL_EIT_STAR:
+    {
+        auto planner = std::make_shared<og::EITstar>(si);
+        pdef->setOptimizationObjective(PathLengthObjective(si));
+        planner->setProblemDefinition(pdef);
+        planner->setup();
+        return planner;
+    }
+    case MOTUS_OMPL_BLIT_STAR:
+#ifdef MOTUS_HAS_BLITSTAR
+    {
+        auto planner = std::make_shared<og::BITstar>(si);
+        pdef->setOptimizationObjective(PathLengthObjective(si));
+        planner->setProblemDefinition(pdef);
+        planner->setup();
+        return planner;
+    }
+#else
+        return nullptr;
+#endif
+    case MOTUS_OMPL_RRT_CONNECT:
+    default:
+    {
+        auto planner = std::make_shared<og::RRTConnect>(si);
+        planner->setProblemDefinition(pdef);
+        planner->setup();
+        planner->setRange(step_size);
+        planner->setGoalBias(std::clamp(goal_bias, 0.0, 1.0));
+        return planner;
+    }
+    }
+}
+
+static bool PlannerCompiled(int planner_id)
+{
+    switch (planner_id)
+    {
+    case MOTUS_OMPL_RRT_CONNECT:
+    case MOTUS_OMPL_RRT_STAR:
+    case MOTUS_OMPL_LBKPIECE:
+    case MOTUS_OMPL_AIT_STAR:
+    case MOTUS_OMPL_EIT_STAR:
+        return true;
+    case MOTUS_OMPL_AORRTC:
+#ifdef MOTUS_HAS_AORRTC
+        return true;
+#else
+        return false;
+#endif
+    case MOTUS_OMPL_BLIT_STAR:
+#ifdef MOTUS_HAS_BLITSTAR
+        return true;
+#else
+        return false;
+#endif
+    default:
+        return false;
+    }
+}
+
+extern "C" {
+
+int motus_ompl_is_available(void) { return 1; }
+
+int motus_ompl_planner_available(int planner_id)
+{
+    return PlannerCompiled(planner_id) ? 1 : 0;
+}
+
+int motus_ompl_plan(
+    int dims,
+    const double* low,
+    const double* high,
+    const double* start,
+    const double* goal,
+    int max_iterations,
+    double max_plan_time_sec,
+    double step_size,
+    double goal_bias,
+    int planner_id,
+    motus_ompl_validity_fn validity,
+    motus_ompl_motion_validity_fn motion_validity,
+    void* validity_userdata,
+    double* out_path,
+    int max_states,
+    int* out_count)
+{
+    if (!low || !high || !start || !goal || !out_path || !out_count || dims <= 0 || max_states <= 0)
+    {
+        motus_set_last_error("invalid arguments");
+        return MOTUS_OMPL_ERR;
+    }
+
+    *out_count = 0;
+
+    if (!PlannerCompiled(planner_id))
+    {
+        motus_set_last_error("planner not available in this OMPL build");
+        return MOTUS_OMPL_ERR;
+    }
+
+    auto si = SetupOmplSi(dims, low, high, step_size, validity, motion_validity, validity_userdata);
+
+    ob::ScopedState<> startState(si->getStateSpace());
+    ob::ScopedState<> goalState(si->getStateSpace());
     for (int i = 0; i < dims; ++i)
     {
         startState[i] = start[i];
@@ -171,32 +333,14 @@ int motus_ompl_rrt_connect(
     auto pdef = std::make_shared<ob::ProblemDefinition>(si);
     pdef->setStartAndGoalStates(startState, goalState);
 
-    ob::PlannerStatus solved;
-    if (planner_id == MOTUS_OMPL_RRT_STAR)
+    auto planner = CreatePlanner(planner_id, si, pdef, step_size, goal_bias);
+    if (!planner)
     {
-        auto planner = std::make_shared<og::RRTstar>(si);
-        planner->setProblemDefinition(pdef);
-        planner->setup();
-        planner->setRange(step_size);
-        if (max_plan_time_sec > 0.0)
-            solved = planner->solve(ob::timedPlannerTerminationCondition(max_plan_time_sec));
-        else
-            solved = planner->solve(ob::IterationTerminationCondition(
-                static_cast<unsigned int>(std::max(1, max_iterations))));
-    }
-    else
-    {
-        auto planner = std::make_shared<og::RRTConnect>(si);
-        planner->setProblemDefinition(pdef);
-        planner->setup();
-        planner->setRange(step_size);
-        if (max_plan_time_sec > 0.0)
-            solved = planner->solve(ob::timedPlannerTerminationCondition(max_plan_time_sec));
-        else
-            solved = planner->solve(ob::IterationTerminationCondition(
-                static_cast<unsigned int>(std::max(1, max_iterations))));
+        motus_set_last_error("planner not available in this OMPL build");
+        return MOTUS_OMPL_ERR;
     }
 
+    const auto solved = SolvePlanner(planner, max_iterations, max_plan_time_sec);
     if (!solved)
     {
         motus_set_last_error("planner failed");
@@ -216,6 +360,29 @@ int motus_ompl_rrt_connect(
         std::min(static_cast<std::size_t>(max_states), stateCount)));
 
     return WritePath(*path, dims, max_states, out_path, out_count);
+}
+
+int motus_ompl_rrt_connect(
+    int dims,
+    const double* low,
+    const double* high,
+    const double* start,
+    const double* goal,
+    int max_iterations,
+    double max_plan_time_sec,
+    double step_size,
+    double goal_bias,
+    int planner_id,
+    motus_ompl_validity_fn validity,
+    motus_ompl_motion_validity_fn motion_validity,
+    void* validity_userdata,
+    double* out_path,
+    int max_states,
+    int* out_count)
+{
+    return motus_ompl_plan(
+        dims, low, high, start, goal, max_iterations, max_plan_time_sec, step_size, goal_bias, planner_id,
+        validity, motion_validity, validity_userdata, out_path, max_states, out_count);
 }
 
 int motus_ompl_simplify_path(

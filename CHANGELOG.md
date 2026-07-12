@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.3] - 2026-07-12
+
+### Added
+
+- **Sampling planner registry** — `SamplingPlannerId`, `SamplingPlannerRegistry`, `SamplingPlanner` façade with managed + native backends
+- Registered planners: RRT-Connect (managed fallback), RRT*, AORRTC, LBKPIECE, AIT*, EIT*, BLIT*, ParallelRace meta-planner
+- `ManagedRrtConnect`, `NativeOmplPlanner`, `ParallelRacePlanner`, `PlanningPipeline` — shared planning pipeline
+- `VampValidationBackend` stub (Phase 5 hook)
+- Native C ABI: `motus_ompl_plan`, `motus_ompl_planner_available`, planner IDs 2–6; goal_bias wired for RRT-Connect
+- `CollisionMeshCache`, `CollisionCheckerSessionCache`, `CollisionCheckerFactory.GetOrCreate` — mesh BVH + checker reuse
+- `scripts/build-native-full.sh/.ps1`; Linux release workflow ships full native (Win/Mac remain stubs)
+- `PlanningProfileBenchmarks`, `PlannerComparisonBenchmarks`, `SamplingPlannerRegistryTests`
+
+### Changed
+
+- `RrtConnectPlanner` — obsolete thin wrapper over `SamplingPlanner`
+- `RrtConnectOptions` / `OmplPlannerOptions` — alias `SamplingPlannerOptions`
+- `RobotMeshCollisionChecker`, `AttachAwareCollisionChecker` — shared mesh BVH cache
+- `motus_ompl_ompl.cpp` — planner factory switch with conditional OMPL 2.0 planners (AORRTC, BLIT*)
+
 ## [0.6.2] - 2026-07-12
 
 ### Added

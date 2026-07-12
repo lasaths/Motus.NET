@@ -6,16 +6,19 @@ on:
       - "v*"
 
 jobs:
-  build-stubs:
+  build-native:
     strategy:
       matrix:
         include:
           - os: windows-latest
             rid: win-x64
+            full: false
           - os: macos-latest
             rid: osx-arm64
+            full: false
           - os: ubuntu-latest
             rid: linux-x64
+            full: true
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -24,18 +27,28 @@ jobs:
         if: matrix.os == 'macos-latest'
         run: brew install cmake
 
+      - name: Install native deps (Linux full)
+        if: matrix.full
+        run: sudo apt-get update && sudo apt-get install -y libompl-dev libfcl-dev libboost-serialization-dev cmake g++
+
       - name: Build native stub
+        if: ${{ !matrix.full }}
         shell: bash
         run: ./scripts/build-native-stub.sh ${{ matrix.rid }}
 
-      - name: Upload stub
+      - name: Build native full (Linux)
+        if: matrix.full
+        shell: bash
+        run: ./scripts/build-native-full.sh ${{ matrix.rid }}
+
+      - name: Upload native library
         uses: actions/upload-artifact@v4
         with:
           name: motus-native-${{ matrix.rid }}
           path: src/Motus.Native/runtimes/${{ matrix.rid }}/native/
 
   release:
-    needs: build-stubs
+    needs: build-native
     runs-on: ubuntu-latest
     permissions:
       contents: write

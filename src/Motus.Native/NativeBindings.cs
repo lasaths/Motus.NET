@@ -13,12 +13,20 @@ public static partial class NativeBindings
 
     public const int PlannerRrtConnect = 0;
     public const int PlannerRrtStar = 1;
+    public const int PlannerAorrtc = 2;
+    public const int PlannerLbkpiece = 3;
+    public const int PlannerAitStar = 4;
+    public const int PlannerEitStar = 5;
+    public const int PlannerBlitStar = 6;
 
     [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
     public static extern IntPtr motus_last_error();
 
     [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
     public static extern int motus_ompl_is_available();
+
+    [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
+    public static extern int motus_ompl_planner_available(int planner_id);
 
     [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
     public static extern int motus_fcl_is_available();
@@ -28,6 +36,25 @@ public static partial class NativeBindings
 
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     public delegate int MotionValidityCallback(IntPtr from, IntPtr to, int dims, IntPtr userdata);
+
+    [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
+    public static extern int motus_ompl_plan(
+        int dims,
+        double[] low,
+        double[] high,
+        double[] start,
+        double[] goal,
+        int max_iterations,
+        double max_plan_time_sec,
+        double step_size,
+        double goal_bias,
+        int planner_id,
+        ValidityCallback validity,
+        MotionValidityCallback motion_validity,
+        IntPtr validity_userdata,
+        double[] out_path,
+        int max_states,
+        out int out_count);
 
     [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
     public static extern int motus_ompl_rrt_connect(

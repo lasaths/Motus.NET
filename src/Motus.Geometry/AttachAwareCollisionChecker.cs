@@ -1,3 +1,4 @@
+using System.Linq;
 using Motus.Core;
 
 namespace Motus.Geometry;
@@ -75,8 +76,15 @@ public sealed class AttachAwareCollisionChecker : ICollisionChecker
     {
         foreach (var meshObj in scene.Objects.Where(o => o.Shape == CollisionShape.Mesh))
         {
-            if (!_meshBvhCache.ContainsKey(meshObj.Name) && meshObj.MeshVertices is not null && meshObj.MeshIndices is not null)
-                _meshBvhCache[meshObj.Name] = BvhBuilder.Build(meshObj);
+            if (meshObj.MeshVertices is not null && meshObj.MeshIndices is not null)
+                _meshBvhCache[meshObj.Name] = CollisionMeshCache.GetOrBuild(meshObj);
+        }
+        foreach (var body in _attached)
+        {
+            if (body.Geometry.Shape == CollisionShape.Mesh &&
+                body.Geometry.MeshVertices is not null &&
+                body.Geometry.MeshIndices is not null)
+                _meshBvhCache[body.Name] = CollisionMeshCache.GetOrBuild(body.Geometry);
         }
     }
 }

@@ -14,13 +14,30 @@ public static class NativeOmpl
             ? "Native OMPL binding loaded."
             : "Native OMPL not built. Motus.OMPL.NET uses managed RRT-Connect fallback.";
 
+    public static int motus_ompl_planner_available(int plannerId)
+    {
+        if (!IsAvailable) return 0;
+        try { return Motus.Native.NativeBindings.motus_ompl_planner_available(plannerId); }
+        catch (EntryPointNotFoundException) { return 0; }
+    }
+
+    public static int motus_ompl_plan(
+        int dims, double[] low, double[] high, double[] start, double[] goal,
+        int max_iterations, double max_plan_time_sec, double step_size, double goal_bias, int planner_id,
+        Motus.Native.NativeBindings.ValidityCallback validity,
+        Motus.Native.NativeBindings.MotionValidityCallback motion_validity,
+        IntPtr validity_userdata, double[] out_path, int max_states, out int out_count) =>
+        Motus.Native.NativeBindings.motus_ompl_plan(
+            dims, low, high, start, goal, max_iterations, max_plan_time_sec, step_size, goal_bias, planner_id,
+            validity, motion_validity, validity_userdata, out_path, max_states, out out_count);
+
     public static int motus_ompl_rrt_connect(
         int dims, double[] low, double[] high, double[] start, double[] goal,
         int max_iterations, double max_plan_time_sec, double step_size, double goal_bias, int planner_id,
         Motus.Native.NativeBindings.ValidityCallback validity,
         Motus.Native.NativeBindings.MotionValidityCallback motion_validity,
         IntPtr validity_userdata, double[] out_path, int max_states, out int out_count) =>
-        Motus.Native.NativeBindings.motus_ompl_rrt_connect(
+        motus_ompl_plan(
             dims, low, high, start, goal, max_iterations, max_plan_time_sec, step_size, goal_bias, planner_id,
             validity, motion_validity, validity_userdata, out_path, max_states, out out_count);
 

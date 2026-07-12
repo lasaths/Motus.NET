@@ -7,7 +7,20 @@ public static class CollisionCheckerFactory
     public static ICollisionChecker Create(
         RobotModel robot,
         SerialJointChain? chain = null,
-        IReadOnlyList<AttachedBody>? attached = null)
+        IReadOnlyList<AttachedBody>? attached = null) =>
+        CreateCore(robot, chain, attached);
+
+    public static ICollisionChecker GetOrCreate(
+        RobotModel robot,
+        SerialJointChain? chain,
+        IReadOnlyList<AttachedBody>? attached,
+        CollisionScene? scene) =>
+        CollisionCheckerSessionCache.GetOrCreate(robot, chain, attached, scene);
+
+    private static ICollisionChecker CreateCore(
+        RobotModel robot,
+        SerialJointChain? chain,
+        IReadOnlyList<AttachedBody>? attached)
     {
         if (FclCollisionChecker.SupportsFcl(robot, attached))
             return new FclCollisionChecker(robot, chain, attached);
