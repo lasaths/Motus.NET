@@ -8,7 +8,6 @@ namespace Motus.OMPL.NET;
 
 internal static class NativeOmplPlanner
 {
-    private static readonly object NativeGate = new();
 
     internal static PlanningResult? TryPlan(
         PlanningRequest request,
@@ -52,7 +51,7 @@ internal static class NativeOmplPlanner
                 return context.MotionValidityCallback(fromPtr, toPtr, dims);
             };
 
-            lock (NativeGate)
+            lock (NativeSync.Gate)
             {
                 var rc = NativeOmpl.motus_ompl_plan(
                     n, low, high, space.Start, space.Goal,

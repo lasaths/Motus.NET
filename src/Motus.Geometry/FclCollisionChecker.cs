@@ -32,8 +32,18 @@ public sealed class FclCollisionChecker : ICollisionChecker, IDisposable
         _attached = attached ?? Array.Empty<AttachedBody>();
         _fallback = CreateFallback(robot, chain, attached);
         _useFcl = IsAvailable && SupportsFcl(robot, _attached);
-        _world = _useFcl ? NativeBindings.motus_fcl_world_create() : IntPtr.Zero;
-        if (_useFcl) RegisterSelfAllowedPairs();
+        if (_useFcl)
+        {
+            lock (NativeSync.Gate)
+            {
+                _world = NativeBindings.motus_fcl_world_create();
+                RegisterSelfAllowedPairs();
+            }
+        }
+        else
+        {
+            _world = IntPtr.Zero;
+        }
     }
 
     public static bool IsAvailable => NativeBindings.FclIsAvailable();
@@ -67,10 +77,13 @@ public sealed class FclCollisionChecker : ICollisionChecker, IDisposable
         if (!_useFcl || HasMeshObstacle(scene))
             return _fallback.IsCollisionFree(state, scene);
 
-        SyncScene(scene);
-        UpdateRobot(state);
-        UpdateAttached(state);
-        return NativeBindings.motus_fcl_check(_world, out _, out _) == NativeBindings.Ok;
+        lock (NativeSync.Gate)
+        {
+            ApplyScene(scene);
+            UpdateRobot(state);
+            UpdateAttached(state);
+            return NativeBindings.motus_fcl_check(_world, out _, out _) == NativeBindings.Ok;
+        }
     }
 
     public bool SegmentCollisionFree(JointState from, JointState to, CollisionScene scene, double stepRadians)
@@ -97,17 +110,20 @@ public sealed class FclCollisionChecker : ICollisionChecker, IDisposable
 
     public void Dispose()
     {
-        if (_world != IntPtr.Zero)
+        lock (NativeSync.Gate)
         {
-            NativeBindings.motus_fcl_world_destroy(_world);
-            _world = IntPtr.Zero;
+            if (_world != IntPtr.Zero)
+            {
+                NativeBindings.motus_fcl_world_destroy(_world);
+                _world = IntPtr.Zero;
+            }
         }
     }
 
     private static bool HasMeshObstacle(CollisionScene scene) =>
         scene.Objects.Any(o => o.Shape == CollisionShape.Mesh);
 
-    private void SyncScene(CollisionScene scene)
+    private void ApplyScene(CollisionScene scene)
     {
         var hash = HashScene(scene);
         if (hash == _sceneHash) return;

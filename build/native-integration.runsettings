@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<RunSettings>
+  <RunConfiguration>
+    <MaxCpuCount>1</MaxCpuCount>
+  </RunConfiguration>
+  <XUnit>
+    <ParallelizeAssembly>false</ParallelizeAssembly>
+    <ParallelizeTestCollections>false</ParallelizeTestCollections>
+  </XUnit>
+</RunSettings>
