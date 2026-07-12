@@ -8,6 +8,8 @@ namespace Motus.OMPL.NET;
 
 internal static class NativeOmplPlanner
 {
+    private static readonly object NativeGate = new();
+
     internal static PlanningResult? TryPlan(
         PlanningRequest request,
         SamplingPlannerOptions options,
@@ -50,27 +52,30 @@ internal static class NativeOmplPlanner
                 return context.MotionValidityCallback(fromPtr, toPtr, dims);
             };
 
-            var rc = NativeOmpl.motus_ompl_plan(
-                n, low, high, space.Start, space.Goal,
-                options.MaxIterations, options.MaxPlanTimeSeconds, options.StepRadians, options.GoalBias,
-                nativePlannerId,
-                stateCb, motionCb, GCHandle.ToIntPtr(handle),
-                buffer, maxStates, out var count);
-
-            if (rc != NativeOmpl.Ok || count < 2) return null;
-
-            var waypoints = new List<JointState>(count);
-            for (var i = 0; i < count; i++)
+            lock (NativeGate)
             {
-                var q = new double[n];
-                Array.Copy(buffer, i * n, q, 0, n);
-                waypoints.Add(space.ToFull(q));
-            }
+                var rc = NativeOmpl.motus_ompl_plan(
+                    n, low, high, space.Start, space.Goal,
+                    options.MaxIterations, options.MaxPlanTimeSeconds, options.StepRadians, options.GoalBias,
+                    nativePlannerId,
+                    stateCb, motionCb, GCHandle.ToIntPtr(handle),
+                    buffer, maxStates, out var count);
 
-            var simplified = SimplifyNativePath(
-                waypoints, n, space, request, robot, checker, scene,
-                stateCb, motionCb, handle, maxStates, options.StepRadians);
-            return PlanningPipeline.BuildTrajectory(robot, simplified, request.Options, checker, usedNative: true, plannerLabel);
+                if (rc != NativeOmpl.Ok || count < 2) return null;
+
+                var waypoints = new List<JointState>(count);
+                for (var i = 0; i < count; i++)
+                {
+                    var q = new double[n];
+                    Array.Copy(buffer, i * n, q, 0, n);
+                    waypoints.Add(space.ToFull(q));
+                }
+
+                var simplified = SimplifyNativePath(
+                    waypoints, n, space, request, robot, checker, scene,
+                    stateCb, motionCb, handle, maxStates, options.StepRadians);
+                return PlanningPipeline.BuildTrajectory(robot, simplified, request.Options, checker, usedNative: true, plannerLabel);
+            }
         }
         finally
         {
