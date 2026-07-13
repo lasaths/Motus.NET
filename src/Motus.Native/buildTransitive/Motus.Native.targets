@@ -13,7 +13,7 @@
     <ItemGroup Condition="'$(_MotusNativeRid)' != ''">
       <_MotusNativeRuntimeFile Include="$(MSBuildThisFileDirectory)..\runtimes\$(_MotusNativeRid)\native\$(_MotusNativeLib)" />
     </ItemGroup>
-    <MakeDir Directories="$(OutputPath)runtimes\$(_MotusNativeRid)\native\" Condition="'@(_MotusNativeRuntimeFile)' != ''" />
-    <Copy SourceFiles="@(_MotusNativeRuntimeFile)" DestinationFolder="$(OutputPath)runtimes\$(_MotusNativeRid)\native\" SkipUnchangedFiles="true" Condition="'@(_MotusNativeRuntimeFile)' != ''" />
+    <MakeDir Directories="$(OutputPath)runtimes\$(_MotusNativeRid)\native\" Condition="'@(_MotusNativeRuntimeFile)' != '' and Exists('@(_MotusNativeRuntimeFile)')" />
+    <Copy SourceFiles="@(_MotusNativeRuntimeFile)" DestinationFolder="$(OutputPath)runtimes\$(_MotusNativeRid)\native\" SkipUnchangedFiles="true" Condition="'@(_MotusNativeRuntimeFile)' != '' and Exists('@(_MotusNativeRuntimeFile)')" />
   </Target>
 </Project>

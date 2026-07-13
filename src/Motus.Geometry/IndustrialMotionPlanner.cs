@@ -304,8 +304,10 @@ public sealed class IndustrialMotionPlanner
     private static PlanningResult? ValidateSegmentCollision(MotionProgramRequest request, Trajectory traj)
     {
         var checker = request.Options.CollisionChecker;
-        var scene = request.Options.CollisionScene;
-        if (!PlanningCollision.SceneHasObstacles(scene)) return null;
+        var scene = request.Options.CollisionScene ?? new CollisionScene();
+        if (!PlanningCollision.SceneHasObstacles(scene) &&
+            request.Options.AttachedBodies is not { Count: > 0 })
+            return null;
 
         checker ??= CollisionCheckerFactory.Create(request.Robot, attached: request.Options.AttachedBodies);
         if (checker is null)

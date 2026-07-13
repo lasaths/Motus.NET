@@ -33,7 +33,8 @@ public sealed class JointLinearPlanner : IPlanner
         if (errors.Count > 0) return PlanningResult.Failed(errors);
 
         var endpointFail = PlanningCollision.ValidateEndpoints(
-            request.Start, request.Goal, scene, opts.CollisionChecker);
+            request.Start, request.Goal, scene, opts.CollisionChecker,
+            opts.AttachedBodies is { Count: > 0 });
         if (endpointFail is not null)
             return endpointFail;
 

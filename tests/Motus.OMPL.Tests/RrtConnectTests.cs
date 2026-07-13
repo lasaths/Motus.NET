@@ -10,13 +10,15 @@ namespace Motus.OMPL.Tests;
 public class RrtConnectTests
 {
   private readonly ITestOutputHelper? _output;
+  private static RobotPreset? _ur5ePreset;
 
   public RrtConnectTests(ITestOutputHelper? output = null) => _output = output;
 
   private static string ResourcesRoot =>
     Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "resources", "robots"));
 
-  private static RobotPreset Ur5ePreset => field ??= PresetLoader.LoadByModelName("UR5e", ResourcesRoot);
+  private static RobotPreset Ur5ePreset =>
+    _ur5ePreset ??= PresetLoader.LoadByModelName("UR5e", ResourcesRoot);
 
   [Fact]
   public void PlansFreeSpace()

@@ -24,7 +24,8 @@ internal static class ManagedRrtConnect
         if (!startVal.IsValid) return PlanningResult.Failed(startVal.Errors.Select(e => $"Start: {e}"));
         if (!goalVal.IsValid) return PlanningResult.Failed(goalVal.Errors.Select(e => $"Goal: {e}"));
         var endpointFail = PlanningCollision.ValidateEndpoints(
-            space.ToFull(space.Start), space.ToFull(space.Goal), scene, checker);
+            space.ToFull(space.Start), space.ToFull(space.Goal), scene, checker,
+            request.Options.AttachedBodies is { Count: > 0 });
         if (endpointFail is not null)
             return endpointFail;
 

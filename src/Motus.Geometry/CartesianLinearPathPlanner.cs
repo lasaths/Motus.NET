@@ -344,7 +344,7 @@ public sealed class CartesianLinearPathPlanner
     public PlanningResult PlanToResult(CartesianPlanningRequest request, CartesianLinOptions options)
     {
         var robot = request.Robot;
-        var scene = request.CollisionScene ?? request.Options.CollisionScene;
+        var scene = request.CollisionScene ?? request.Options.CollisionScene ?? new CollisionScene();
         var warnings = new List<string>();
 
         if (!KinematicsResolver.SupportsModel(robot.Preset, _chain))
@@ -367,18 +367,21 @@ public sealed class CartesianLinearPathPlanner
             });
         }
 
+        var hasCollision = PlanningCollision.SceneHasObstacles(scene) ||
+                           request.Options.AttachedBodies is { Count: > 0 };
         var checker = request.Options.CollisionChecker;
-        if (PlanningCollision.SceneHasObstacles(scene) && checker is null)
+        if (hasCollision && checker is null)
             checker = CollisionCheckerFactory.Create(robot, attached: request.Options.AttachedBodies);
 
-        if (PlanningCollision.SceneHasObstacles(scene))
+        if (hasCollision)
         {
             if (checker is null)
                 return PlanningResult.Failed(new[] { "Collision scene provided but no collision checker available." });
             if (_ik.TrySolve(request.Goal, request.Start, out var goalJoints))
             {
                 var endpointFail = PlanningCollision.ValidateEndpoints(
-                    request.Start, goalJoints, scene, checker);
+                    request.Start, goalJoints, scene, checker,
+                    request.Options.AttachedBodies is { Count: > 0 });
                 if (endpointFail is not null)
                     return endpointFail;
             }
