@@ -37,7 +37,13 @@ public sealed class SamplingPlanner : IPlanner
     public PlanningResult Plan(PlanningRequest request)
     {
         if (_options.StepRadians <= 0)
-            return PlanningResult.Failed(new[] { "SamplingPlannerOptions.StepRadians must be positive." });
+            return PlanningResult.Failed(new[]
+            {
+                new PlanningMessage(
+                    PlanningMessageCodes.InvalidOptions,
+                    "SamplingPlannerOptions.StepRadians must be positive.",
+                    PlanningMessageSeverity.Error)
+            });
 
         return SamplingPlannerRegistry.Dispatch(request, _options, _defaultChecker);
     }

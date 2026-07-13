@@ -1,0 +1,3 @@
+time_seconds,joint_1_rad,joint_2_rad,motion_type,segment_index,blend_radius_m,tool_state_json
+0.000000,0.000000,0.000000,ptp,0,0.002000,
+0.250000,0.200000,0.100000,lin,1,0.001000,"{"width":0.04}"

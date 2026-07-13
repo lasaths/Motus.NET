@@ -1,0 +1,70 @@
+{
+  "exportVersion": 1,
+  "contractVersion": "1.0.0",
+  "robot": "UniversalRobots ContractFixtureBot",
+  "jointNames": [
+    "joint_a",
+    "joint_b"
+  ],
+  "units": {
+    "jointAngles": "radians",
+    "time": "seconds",
+    "distance": "meters"
+  },
+  "frameConvention": {
+    "baseFrame": "robot_base",
+    "tcpFrame": "tool_center_point",
+    "jointOrder": "robot.jointNames order"
+  },
+  "durationSeconds": 0.3,
+  "pointCount": 3,
+  "retimed": false,
+  "provenance": {
+    "plannerId": "sampling-rrtconnect",
+    "randomSeed": 42,
+    "settingsHash": "fixture-sampling-rrtconnect",
+    "retimeAlgorithm": "totg-lite"
+  },
+  "diagnostics": [
+    {
+      "code": "planning.warning",
+      "severity": "warning",
+      "message": "fixture warning for sampling-rrtconnect"
+    }
+  ],
+  "points": [
+    {
+      "timeSeconds": 0,
+      "jointsRadians": [
+        0,
+        0
+      ],
+      "joints": {
+        "joint_a": 0,
+        "joint_b": 0
+      }
+    },
+    {
+      "timeSeconds": 0.15,
+      "jointsRadians": [
+        0.18,
+        0.04
+      ],
+      "joints": {
+        "joint_a": 0.18,
+        "joint_b": 0.04
+      }
+    },
+    {
+      "timeSeconds": 0.3,
+      "jointsRadians": [
+        0.35,
+        0.12
+      ],
+      "joints": {
+        "joint_a": 0.35,
+        "joint_b": 0.12
+      }
+    }
+  ]
+}

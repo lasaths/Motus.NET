@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Plan contract metadata in `TrajectoryExport`: `contractVersion`, `units`, `frameConvention`, optional `diagnostics`, optional `provenance`
+- `PlanningMessage`, `PlanningMessageSeverity`, and `PlanningMessageCodes` for machine-readable planner diagnostics
+- `PlanBundleContractTests` golden fixtures for joint/cartesian/sampling/motion-program export payloads
+
+### Changed
+
+- `PlanningResult` now carries structured `Messages` alongside existing `Errors`/`Warnings`
+- `SamplingPlanner` and collision preflight paths emit typed planning message codes on failures
+
 ## [0.6.4] - 2026-07-12
 
 ### Added

@@ -1,0 +1,58 @@
+{
+  "exportVersion": 1,
+  "contractVersion": "1.0.0",
+  "robot": "UniversalRobots ContractFixtureBot",
+  "jointNames": [
+    "joint_a",
+    "joint_b"
+  ],
+  "units": {
+    "jointAngles": "radians",
+    "time": "seconds",
+    "distance": "meters"
+  },
+  "frameConvention": {
+    "baseFrame": "robot_base",
+    "tcpFrame": "tool_center_point",
+    "jointOrder": "robot.jointNames order"
+  },
+  "durationSeconds": 0.2,
+  "pointCount": 2,
+  "retimed": false,
+  "provenance": {
+    "plannerId": "joint-linear",
+    "settingsHash": "fixture-joint-linear",
+    "retimeAlgorithm": "totg-lite"
+  },
+  "diagnostics": [
+    {
+      "code": "planning.warning",
+      "severity": "warning",
+      "message": "fixture warning for joint-linear"
+    }
+  ],
+  "points": [
+    {
+      "timeSeconds": 0,
+      "jointsRadians": [
+        0,
+        0
+      ],
+      "joints": {
+        "joint_a": 0,
+        "joint_b": 0
+      }
+    },
+    {
+      "timeSeconds": 0.2,
+      "jointsRadians": [
+        0.25,
+        0.1
+      ],
+      "joints": {
+        "joint_a": 0.25,
+        "joint_b": 0.1
+      }
+    }
+  ]
+}

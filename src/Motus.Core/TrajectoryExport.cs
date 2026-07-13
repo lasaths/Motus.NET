@@ -4,6 +4,20 @@ using System.Text.Json.Serialization;
 
 namespace Motus.Core;
 
+public static class PlanBundleContract
+{
+    public const int ExportVersion = 1;
+    public const string ContractVersion = "1.0.0";
+}
+
+public sealed class PlannerProvenance
+{
+    public string? PlannerId { get; init; }
+    public int? RandomSeed { get; init; }
+    public string? SettingsHash { get; init; }
+    public string? RetimeAlgorithm { get; init; }
+}
+
 public sealed class TrajectoryExportOptions
 {
     public bool Retime { get; init; }
@@ -14,6 +28,10 @@ public sealed class TrajectoryExportOptions
     public ToolFrame? SessionToolFrame { get; init; }
     /// <summary>Tool parameter schema for export header.</summary>
     public ToolCapabilities? ToolCapabilities { get; init; }
+    /// <summary>Stable diagnostics with machine-readable code and severity.</summary>
+    public IReadOnlyList<PlanningMessage>? Diagnostics { get; init; }
+    /// <summary>Planner provenance metadata for reproducibility/debugging.</summary>
+    public PlannerProvenance? Provenance { get; init; }
 }
 
 public sealed class TrajectoryExportResult
@@ -67,14 +85,42 @@ public static class TrajectoryExport
         var jointNames = traj.Robot.JointNames;
         var toolFrame = ResolveExportToolFrame(traj.Robot, options.SessionToolFrame);
         var toolCapabilities = options.ToolCapabilities;
+        var diagnostics = options.Diagnostics;
+        var provenance = options.Provenance;
         var obj = new
         {
-            exportVersion = 1,
+            exportVersion = PlanBundleContract.ExportVersion,
+            contractVersion = PlanBundleContract.ContractVersion,
             robot = traj.Robot.DisplayName,
             jointNames,
+            units = new
+            {
+                jointAngles = "radians",
+                time = "seconds",
+                distance = "meters"
+            },
+            frameConvention = new
+            {
+                baseFrame = "robot_base",
+                tcpFrame = "tool_center_point",
+                jointOrder = "robot.jointNames order"
+            },
             durationSeconds = traj.DurationSeconds,
             pointCount = traj.Points.Count,
             retimed = options.Retime,
+            provenance = provenance is null ? null : new
+            {
+                plannerId = provenance.PlannerId,
+                randomSeed = provenance.RandomSeed,
+                settingsHash = provenance.SettingsHash,
+                retimeAlgorithm = provenance.RetimeAlgorithm
+            },
+            diagnostics = diagnostics?.Select(d => new
+            {
+                code = d.Code,
+                severity = d.Severity.ToString().ToLowerInvariant(),
+                message = d.Message
+            }),
             toolFrame,
             toolCapabilities = toolCapabilities is null ? null : toolCapabilities.Parameters.Select(p => new
             {

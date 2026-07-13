@@ -27,6 +27,8 @@
 - **`PlanningOptions`** — step/timing limits; optional `CollisionScene`, `AttachedBodies`
 - **`PlanningContext`** — robot + scene + attach/detach lifecycle (hides scene obstacle on attach)
 - **`PlanningResult`** — success flag, trajectory, errors, warnings
+- **`PlanningMessage`** — stable diagnostic message (`Code`, `Severity`, human `Message`)
+- **`PlanningMessageCodes`** — canonical planner diagnostic code catalog
 - **`ValidationResult`** — validity, errors, warnings
 - **`PlanningGroup`** / **`JointIndexMap`** — SRDF group joint subsets
 
@@ -58,3 +60,5 @@
 ## Export
 
 - **`TrajectoryExport.ToJson`** / **`ToCsv`** — neutral serializations for downstream tools
+- **`PlanBundleContract`** — `contractVersion` + `exportVersion` constants for JSON export
+- JSON export includes `units`, `frameConvention`, optional `diagnostics`, optional `provenance`

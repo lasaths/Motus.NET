@@ -123,6 +123,22 @@ Non-group joints stay locked at the start configuration during planning.
 
 Internal units are **radians**, **seconds**, and **meters**. Use `Motus.Core.Units` for degree/radian conversion.
 
+## PlanBundle contract
+
+`TrajectoryExport.ToJson(...)` emits the stable planner contract consumed by adapter layers (for example `Motus.Grasshopper`) and downstream control plugins.
+
+- `contractVersion` tracks payload schema compatibility (current `1.0.0`)
+- `exportVersion` tracks serializer implementation version (current `1`)
+- `units` and `frameConvention` lock radians/seconds/meters and joint ordering semantics
+- `diagnostics` carries machine-readable planner messages (`code`, `severity`, `message`)
+- `provenance` optionally carries reproducibility metadata (`plannerId`, `randomSeed`, `settingsHash`, `retimeAlgorithm`)
+
+Compatibility policy:
+
+- Patch/minor updates preserve backward compatibility for existing required fields
+- New optional fields are additive and safe
+- Any removal/rename/type change of existing fields requires a `contractVersion` major bump
+
 ## 0.5.0 Migration Notes
 
 See `CHANGELOG.md` (`Unreleased`) for upgrade details.

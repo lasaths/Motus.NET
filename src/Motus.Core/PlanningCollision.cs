@@ -22,7 +22,9 @@ public static class PlanningCollision
                 errors.Add($"Collision between t={prev.TimeSeconds:F4}s and t={pt.TimeSeconds:F4}s.");
             prev = pt;
         }
-        return errors.Count == 0 ? null : PlanningResult.Failed(errors);
+        if (errors.Count == 0) return null;
+        return PlanningResult.Failed(errors.Select(e =>
+            new PlanningMessage(PlanningMessageCodes.PathCollision, e, PlanningMessageSeverity.Error)));
     }
 
     /// <summary>Fast-fail when start or goal already intersects the collision scene.</summary>
@@ -30,27 +32,35 @@ public static class PlanningCollision
         JointState start,
         JointState goal,
         CollisionScene? scene,
-        ICollisionChecker? checker)
+        ICollisionChecker? checker,
+        bool includeAttachedBodies = false)
     {
-        if (checker is null || !SceneHasObstacles(scene))
+        if (checker is null || (!SceneHasObstacles(scene) && !includeAttachedBodies))
             return null;
+        scene ??= new CollisionScene();
 
-        if (!checker.IsCollisionFree(start, scene!))
+        if (!checker.IsCollisionFree(start, scene))
         {
             return PlanningResult.Failed(new[]
             {
-                checker.IsCollisionFree(start, new CollisionScene())
-                    ? "Start configuration is in collision with an obstacle."
-                    : "Start configuration has self-collision."
+                new PlanningMessage(
+                    PlanningMessageCodes.EndpointCollision,
+                    checker.IsCollisionFree(start, new CollisionScene())
+                        ? "Start configuration is in collision with an obstacle."
+                        : "Start configuration has self-collision.",
+                    PlanningMessageSeverity.Error)
             });
         }
-        if (!checker.IsCollisionFree(goal, scene!))
+        if (!checker.IsCollisionFree(goal, scene))
         {
             return PlanningResult.Failed(new[]
             {
-                checker.IsCollisionFree(goal, new CollisionScene())
-                    ? "Goal configuration is in collision with an obstacle."
-                    : "Goal configuration has self-collision."
+                new PlanningMessage(
+                    PlanningMessageCodes.EndpointCollision,
+                    checker.IsCollisionFree(goal, new CollisionScene())
+                        ? "Goal configuration is in collision with an obstacle."
+                        : "Goal configuration has self-collision.",
+                    PlanningMessageSeverity.Error)
             });
         }
         return null;
