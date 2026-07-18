@@ -7,6 +7,11 @@ public sealed class CartesianLinearPathPlanner
 {
     private const double IkPosTolMeters = 0.02;
     private const double IkOriTolRad = 0.15;
+    /// <summary>
+    /// Reject π-scale IK branch flips between waypoints. Allows a one-time ~1.8 rad
+    /// reconfiguration when leaving wrist singularity (j5≈0 at default home).
+    /// </summary>
+    private const double MaxJointJumpRadians = 2.0;
 
     private readonly RobotPreset _preset;
     private readonly SerialJointChain? _chain;
@@ -79,66 +84,59 @@ public sealed class CartesianLinearPathPlanner
         points.Add(new TrajectoryPoint(elapsedFrames++, currentJoint));
 
         // Interpolate Cartesian poses, solve IK for each
-        var seed = startJoint;
         var consecutiveFailures = 0;
-        const int maxConsecutiveFailures = 3;  // PONYTAIL: Allow some failures but stop path if too many
+        const int maxConsecutiveFailures = 3;
 
         for (var i = 1; i <= steps; i++)
         {
             var alpha = (double)i / steps;
             var interpPose = InterpolatePose(startPose, goalPose, alpha);
 
-            // PONYTAIL: Try IK with geometric seed strategy; retry until FK verifies the pose
+            // Seed only from the previous waypoint (or local perturbations). Never accept a
+            // discontinuous IK branch — that produces wrist/elbow flips that look like
+            // "wild" robot paths even when TCP is linear.
             JointState? solvedJoint = null;
+            var attemptSeed = currentJoint;
             for (var seedAttempts = 0; seedAttempts < options.MaxIkAttemptsPerStep && solvedJoint is null; seedAttempts++)
             {
-                if (_ik.TrySolve(interpPose, seed, out var testJoint))
+                if (_ik.TrySolve(interpPose, attemptSeed, out var testJoint))
                 {
                     testJoint = UnwrapNear(currentJoint, testJoint);
-                    if (PoseMatches(interpPose.Tcp, testJoint))
+                    if (PoseMatches(interpPose.Tcp, testJoint) &&
+                        MaxJointDelta(currentJoint, testJoint) <= MaxJointJumpRadians)
                         solvedJoint = testJoint;
                 }
 
                 if (solvedJoint is null)
-                    seed = GenerateGeometricSeed(currentJoint, seedAttempts);
+                    attemptSeed = GenerateLocalSeed(currentJoint, seedAttempts);
             }
 
             if (solvedJoint is null)
             {
-                // PONYTAIL: IK failed at this waypoint
                 if (!continueOnIKFailure)
                     return null;
 
                 consecutiveFailures++;
                 if (consecutiveFailures >= maxConsecutiveFailures)
                 {
-                    // PONYTAIL: Allow partial path if we have enough points, otherwise fail
                     if (points.Count >= steps / 2)
-                        break;  // Return partial path
+                        break;
                     return null;
                 }
                 continue;
             }
 
-            consecutiveFailures = 0;  // Reset on success
-            // PONYTAIL: Prefer solutions close to previous waypoint (continuity)
-            if (MaxJointDelta(currentJoint, solvedJoint) < 1.0)  // ~57° tolerance for continuity preference
-            {
-                seed = solvedJoint;
-            }
-            else
-            {
-                seed = GenerateGeometricSeed(solvedJoint, 3);
-            }
+            consecutiveFailures = 0;
             currentJoint = solvedJoint;
             points.Add(new TrajectoryPoint(elapsedFrames++, currentJoint));
         }
 
-        // Snap only when every waypoint succeeded — avoids a goal jump on partial paths.
+        // Snap only when every waypoint succeeded — avoid a goal jump on partial paths.
         if (points.Count == steps + 1 && _ik.TrySolve(goalPose, points[^2].JointState, out var finalJoint))
         {
             finalJoint = UnwrapNear(points[^2].JointState, finalJoint);
-            if (PoseMatches(goalPose.Tcp, finalJoint))
+            if (PoseMatches(goalPose.Tcp, finalJoint) &&
+                MaxJointDelta(points[^2].JointState, finalJoint) <= MaxJointJumpRadians)
             {
                 var last = points[^1];
                 points[^1] = new TrajectoryPoint(last.TimeSeconds, finalJoint);
@@ -311,27 +309,16 @@ public sealed class CartesianLinearPathPlanner
         return max;
     }
 
-    private JointState GenerateGeometricSeed(JointState currentJoint, int attemptNumber)
+    /// <summary>Local perturbation around the current config. Full-space random seeds cause IK branch flips.</summary>
+    private JointState GenerateLocalSeed(JointState currentJoint, int attemptNumber)
     {
         var q = new double[_preset.AxisCount];
-
-        if (attemptNumber < 3)
+        var perturbationRadius = 0.05 + attemptNumber * 0.08;
+        for (var j = 0; j < q.Length; j++)
         {
-            var perturbationRadius = 0.05 + attemptNumber * 0.05;
-            for (var j = 0; j < q.Length; j++)
-            {
-                var lim = _preset.JointLimits[j];
-                var perturbation = (_rng.NextDouble() - 0.5) * 2.0 * perturbationRadius;
-                q[j] = Math.Clamp(currentJoint.Positions[j] + perturbation, lim.MinRadians, lim.MaxRadians);
-            }
-        }
-        else
-        {
-            for (var j = 0; j < q.Length; j++)
-            {
-                var lim = _preset.JointLimits[j];
-                q[j] = lim.MinRadians + _rng.NextDouble() * (lim.MaxRadians - lim.MinRadians);
-            }
+            var lim = _preset.JointLimits[j];
+            var perturbation = (_rng.NextDouble() - 0.5) * 2.0 * perturbationRadius;
+            q[j] = Math.Clamp(currentJoint.Positions[j] + perturbation, lim.MinRadians, lim.MaxRadians);
         }
 
         return new JointState(q);

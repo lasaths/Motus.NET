@@ -3,7 +3,7 @@ namespace Motus.Geometry;
 public sealed record CartesianLinOptions(
     double StepMeters = 0.005,
     int MaxSteps = 150,
-    int MaxIkAttemptsPerStep = 3,
+    int MaxIkAttemptsPerStep = 8,
     bool ContinueOnIkFailure = false)
 {
     public double EffectiveStepMeters(double tcpDistanceMeters)

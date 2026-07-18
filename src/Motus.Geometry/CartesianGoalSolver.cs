@@ -18,14 +18,44 @@ public sealed class CartesianGoalSolver
         }
 
         var ik = KinematicsResolver.CreateInverseKinematics(robot.Preset, chain);
+        JointState? best = null;
+        var bestDelta = double.MaxValue;
+        JointState? reference = null;
         foreach (var seed in seeds)
         {
-            if (ik.TrySolve(goal, seed, out var solution))
-                return CartesianReachResult.Succeeded(solution);
+            reference ??= seed;
+            if (!ik.TrySolve(goal, seed, out var solution))
+                continue;
+
+            var delta = MaxAbsJointDelta(reference, solution);
+            if (delta >= bestDelta)
+                continue;
+
+            bestDelta = delta;
+            best = solution;
+            // Close enough to the start seed — no need to hunt random configs.
+            if (delta < 0.35)
+                break;
         }
 
-        return CartesianReachResult.Failed(
-            "Goal TCP is not reachable (IK failed). Wire Motus TCP Pose for valid orientation.");
+        return best is not null
+            ? CartesianReachResult.Succeeded(best)
+            : CartesianReachResult.Failed(
+                "Goal TCP is not reachable (IK failed). Wire Motus TCP Pose for valid orientation.");
+    }
+
+    private static double MaxAbsJointDelta(JointState a, JointState b)
+    {
+        var max = 0.0;
+        var n = Math.Min(a.AxisCount, b.AxisCount);
+        for (var i = 0; i < n; i++)
+        {
+            var d = b.Positions[i] - a.Positions[i];
+            while (d > Math.PI) d -= 2 * Math.PI;
+            while (d < -Math.PI) d += 2 * Math.PI;
+            max = Math.Max(max, Math.Abs(d));
+        }
+        return max;
     }
 
     /// <summary>Multi-seed IK with joint-space homotopy fallback for URDF / numerical chains.</summary>

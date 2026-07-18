@@ -55,6 +55,24 @@ public sealed class UrInverseKinematics : IInverseKinematics
             }
         }
 
+        // Near wrist singularity analytic IK often returns a far wrist branch. Prefer a
+        // numerical refine from the seed when it stays continuous and still verifies.
+        if (_numerical is not null &&
+            (best is null || bestDelta > 1.0) &&
+            _numerical.TrySolveNear(target, seed, out var numerical))
+        {
+            numerical = UnwrapNear(seed, numerical);
+            if (Verify(target, numerical))
+            {
+                var numDelta = MaxJointDelta(seed, numerical);
+                if (best is null || numDelta < bestDelta)
+                {
+                    solution = numerical;
+                    return true;
+                }
+            }
+        }
+
         if (best is not null)
         {
             solution = UnwrapNear(seed, best);

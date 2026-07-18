@@ -33,7 +33,7 @@ public sealed class NumericalInverseKinematics : IInverseKinematics
         void Consider(JointState trySeed)
         {
             if (!TrySolveInternal(target, trySeed, out var candidate)) return;
-            var delta = MaxJointDelta(trySeed, candidate);
+            var delta = MaxJointDelta(seed, candidate);
             if (delta < bestDelta)
             {
                 bestDelta = delta;
@@ -42,6 +42,12 @@ public sealed class NumericalInverseKinematics : IInverseKinematics
         }
 
         Consider(seed);
+        if (best is not null && bestDelta < 0.35)
+        {
+            solution = best;
+            return true;
+        }
+
         Consider(PerturbSeed(seed, 1.0));
         Consider(PerturbSeed(seed, -1.0));
 
@@ -66,6 +72,10 @@ public sealed class NumericalInverseKinematics : IInverseKinematics
         solution = seed;
         return false;
     }
+
+    /// <summary>Refine from <paramref name="seed"/> only — used by LIN to stay on the current branch.</summary>
+    public bool TrySolveNear(CartesianPose target, JointState seed, out JointState solution) =>
+        TrySolveInternal(target, seed, out solution);
 
     private static double MaxJointDelta(JointState a, JointState b)
     {
@@ -94,10 +104,12 @@ public sealed class NumericalInverseKinematics : IInverseKinematics
         var targetM = Transforms.FromFrame(target.Tcp);
 
         const int maxIter = 400;
-        const double posTol = 1e-2;
-        const double rotTol = 5e-2;
-        const double finalPosTol = 0.02;
-        const double finalRotTol = 0.15;
+        // Tight enough that a 5mm LIN step actually iterates instead of accepting the seed.
+        const double posTol = 1e-3;
+        const double rotTol = 1e-2;
+        // Match UrInverseKinematics.Verify so seed-near refine is accepted there.
+        const double finalPosTol = 5e-3;
+        const double finalRotTol = 0.05;
         double lambda = 0.05;
         const double minLambda = 0.001;
         const double maxLambda = 0.5;

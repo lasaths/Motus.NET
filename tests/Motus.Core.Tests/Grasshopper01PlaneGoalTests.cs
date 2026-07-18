@@ -95,11 +95,63 @@ public class Grasshopper01PlaneGoalTests
         Assert.True(oriErr < 0.05, $"Final TCP orientation error {oriErr:F4} rad");
     }
 
+    [Fact]
+    public void Ur5e_RhinoDownPlaneGoal_LinHasNoJointFlips()
+    {
+        // Grasshopper FrameConversion: Rhino plane Z (tool approach) → Motus local X.
+        // Down-pointing World plane at a nearby TCP — same approach as viewer home.
+        var preset = PresetLoader.LoadByModelName("UR5e", ResourcesRoot);
+        var robot = new RobotModel(preset);
+        var home = new JointState(new[] { 0.0, -1.5708, 1.5708, -1.5708, 0.0, 0.0 });
+        var goal = new CartesianPose(RhinoDownPlaneFrame(-0.5, 0.45, 0.15));
+
+        var lin = new CartesianLinearPathPlanner(preset).PlanToResult(
+            new CartesianPlanningRequest(robot, home, goal, new PlanningOptions()), 0.005);
+        Assert.True(lin.Success, string.Join("; ", lin.Errors));
+        Assert.NotNull(lin.Trajectory);
+        Assert.True(lin.Trajectory!.Points.Count >= 2);
+
+        var maxJump = 0.0;
+        for (var i = 1; i < lin.Trajectory.Points.Count; i++)
+            maxJump = Math.Max(maxJump, MaxJointDelta(
+                lin.Trajectory.Points[i - 1].JointState,
+                lin.Trajectory.Points[i].JointState));
+
+        // Allow one singularity exit from default home (j5≈0), but never π branch flips.
+        Assert.True(maxJump < 2.0, $"LIN accepted a joint flip ({maxJump:F3} rad between waypoints)");
+
+        var maxAfterFirst = 0.0;
+        for (var i = 2; i < lin.Trajectory.Points.Count; i++)
+            maxAfterFirst = Math.Max(maxAfterFirst, MaxJointDelta(
+                lin.Trajectory.Points[i - 1].JointState,
+                lin.Trajectory.Points[i].JointState));
+        Assert.True(maxAfterFirst < 0.35,
+            $"LIN thrashed after singularity exit (max jump {maxAfterFirst:F3} rad)");
+    }
+
+    /// <summary>Motus.GH FrameConversion.FromPlane for Rhino Z = (0,0,-1), X = (1,0,0).</summary>
+    private static Frame RhinoDownPlaneFrame(double x, double y, double z)
+    {
+        var m = new double[]
+        {
+            0, 1, 0, x,
+            0, 0, -1, y,
+            -1, 0, 0, z,
+            0, 0, 0, 1
+        };
+        return Transforms.ToFrame(m);
+    }
+
     private static double MaxJointDelta(JointState a, JointState b)
     {
         var max = 0.0;
         for (var i = 0; i < a.AxisCount; i++)
-            max = Math.Max(max, Math.Abs(b.Positions[i] - a.Positions[i]));
+        {
+            var d = b.Positions[i] - a.Positions[i];
+            while (d > Math.PI) d -= 2 * Math.PI;
+            while (d < -Math.PI) d += 2 * Math.PI;
+            max = Math.Max(max, Math.Abs(d));
+        }
         return max;
     }
 
