@@ -63,8 +63,13 @@ internal static class ManagedRrtConnect
                 var pathA = Reconstruct(treeA, newIdxA);
                 var pathB = Reconstruct(treeB, connectIdxB);
                 pathB.Reverse();
-                var raw = pathA.Concat(pathB.Skip(1)).Select(q => space.ToFull(q)).ToList();
-                EnsurePathStartsAtStart(raw, space.ToFull(start), space.ToFull(goal));
+                // Copy each ToFull result — group embedding may reuse a scratch JointState.
+                var raw = pathA.Concat(pathB.Skip(1))
+                    .Select(q => new JointState(space.ToFull(q).Positions.ToArray()))
+                    .ToList();
+                var startFull = new JointState(space.ToFull(start).Positions.ToArray());
+                var goalFull = new JointState(space.ToFull(goal).Positions.ToArray());
+                EnsurePathStartsAtStart(raw, startFull, goalFull);
                 options.ReportIteration?.Invoke(options.MaxIterations - 1, options.MaxIterations);
                 var simplified = PathSimplifier.Simplify(raw, robot, checker, scene, options.StepRadians * 0.5);
                 return PlanningPipeline.BuildTrajectory(robot, simplified, request.Options, checker, usedNative: false, plannerLabel);
@@ -121,7 +126,12 @@ internal static class ManagedRrtConnect
         if (checker is null) return true;
         if (checker is SphereCollisionChecker sphere)
             return sphere.SegmentCollisionFree(from, to, scene, stepRadians);
-        return checker.SegmentCollisionFree(toFull(from), toFull(to), scene, stepRadians);
+        // JointIndexMap.EmbedGroupState reuses one scratch JointState — materialize copies
+        // before the second toFull call or both ends alias the same buffer.
+        var fromFull = toFull(from);
+        var fromCopy = new JointState(fromFull.Positions.ToArray());
+        var toCopy = toFull(to);
+        return checker.SegmentCollisionFree(fromCopy, toCopy, scene, stepRadians);
     }
 
     private static int Nearest(RrtTree tree, double[] target)

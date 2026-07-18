@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.9] - 2026-07-19
+
+### Fixed
+
+- Plane-goal LIN keeps IK on one joint branch (no random reseed / π-scale flips) so wrist exits stay continuous
+- Managed RRT-Connect materializes `JointState` copies when group embedding reuses a scratch buffer — stops aliasing both segment ends / path waypoints onto one array
+
 ## [0.6.8] - 2026-07-18
 
 ### Changed
@@ -295,7 +302,8 @@ Initial public release.
 - **Motus.Presets** — JSON preset loader with bundled UR and KUKA defaults
   (approximate public datasheet values for planning/visualization only).
 
-[Unreleased]: https://github.com/lasaths/Motus.NET/compare/v0.6.8...HEAD
+[Unreleased]: https://github.com/lasaths/Motus.NET/compare/v0.6.9...HEAD
+[0.6.9]: https://github.com/lasaths/Motus.NET/compare/v0.6.8...v0.6.9
 [0.6.8]: https://github.com/lasaths/Motus.NET/compare/v0.6.7...v0.6.8
 [0.6.7]: https://github.com/lasaths/Motus.NET/compare/v0.6.6...v0.6.7
 [0.5.0]: https://github.com/lasaths/Motus.NET/compare/v0.4.0...v0.5.0
