@@ -49,10 +49,20 @@ public sealed class SerialForwardKinematics : IFkSolver
 
     public IReadOnlyList<double[]> ComputeLinkTransforms(IReadOnlyList<double> joints)
     {
+        var mats = new double[joints.Count][];
+        for (var i = 0; i < mats.Length; i++)
+            mats[i] = new double[16];
+        ComputeLinkTransformsInto(joints, mats);
+        return mats;
+    }
+
+    public void ComputeLinkTransformsInto(IReadOnlyList<double> joints, double[][] mats)
+    {
         if (joints.Count != _chain.Joints.Length)
             throw new ArgumentException($"Expected {_chain.Joints.Length} joints, got {joints.Count}.");
+        if (mats.Length < joints.Count)
+            throw new ArgumentException($"Expected at least {joints.Count} matrix slots, got {mats.Length}.");
 
-        var mats = new double[joints.Count][];
         var cumulative = Transforms.Identity();
         for (var i = 0; i < joints.Count; i++)
         {
@@ -62,8 +72,7 @@ public sealed class SerialForwardKinematics : IFkSolver
                 ? Transforms.FromPrismatic(j.AxisX, j.AxisY, j.AxisZ, joints[i] + j.ThetaOffset)
                 : Transforms.FromAxisAngle(j.AxisX, j.AxisY, j.AxisZ, joints[i] + j.ThetaOffset);
             cumulative = Transforms.Multiply(cumulative, Transforms.Multiply(origin, motion));
-            mats[i] = (double[])cumulative.Clone();
+            Array.Copy(cumulative, mats[i], 16);
         }
-        return mats;
     }
 }

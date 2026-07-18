@@ -9,5 +9,7 @@ public interface IFkSolver : IForwardKinematics
     double[] ComputeTcpTransform(IReadOnlyList<double> joints, Frame baseFrame, Frame toolFrame);
     IReadOnlyList<Frame> ComputeLinkOrigins(IReadOnlyList<double> joints, Frame baseFrame);
     IReadOnlyList<double[]> ComputeLinkTransforms(IReadOnlyList<double> joints);
+    /// <summary>Write link transforms into preallocated <paramref name="mats"/> (each <c>double[16]</c>).</summary>
+    void ComputeLinkTransformsInto(IReadOnlyList<double> joints, double[][] mats);
     double[] LinkRadiiMeters { get; }
 }

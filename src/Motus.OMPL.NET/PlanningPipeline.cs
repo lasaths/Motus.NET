@@ -63,26 +63,42 @@ internal static class PlanningPipeline
         if (waypoints.Count < 2)
             return PlanningResult.Failed(new[] { "Sampling path has insufficient waypoints." });
 
+        // RRT already validated segments — densify without re-running JointLinearPlanner collision checks.
         if (checker is not null && PlanningCollision.SceneHasObstacles(opts.CollisionScene))
             return PlanningResult.Succeeded(new Trajectory(robot, BuildWaypointTrajectory(waypoints, opts)), warnings);
 
-        var segmentOpts = opts;
-        var planner = new JointLinearPlanner();
+        return PlanningResult.Succeeded(new Trajectory(robot, DensifyWaypoints(waypoints, opts)), warnings);
+    }
+
+    /// <summary>Interpolate joint-space path without limit/collision re-validation (post-RRT).</summary>
+    private static List<TrajectoryPoint> DensifyWaypoints(IReadOnlyList<JointState> waypoints, PlanningOptions opts)
+    {
+        var step = opts.MaxJointStepRadians > 0 ? opts.MaxJointStepRadians : 0.12;
+        var maxVel = opts.MaxJointVelocityRadiansPerSecond > 0 ? opts.MaxJointVelocityRadiansPerSecond : 1.0;
+        var minDt = opts.TimeStepSeconds > 0 ? opts.TimeStepSeconds : 0.01;
         var points = new List<TrajectoryPoint> { new(0, waypoints[0]) };
         var t = 0.0;
         for (var i = 1; i < waypoints.Count; i++)
         {
-            var seg = planner.Plan(new PlanningRequest(robot, waypoints[i - 1], waypoints[i], segmentOpts));
-            if (!seg.Success) return PlanningResult.Failed(seg.Errors);
-            var segPts = seg.Trajectory!.Points;
-            for (var j = 1; j < segPts.Count; j++)
+            var from = waypoints[i - 1].Positions;
+            var to = waypoints[i].Positions;
+            var n = from.Length;
+            var maxDelta = 0.0;
+            for (var j = 0; j < n; j++)
+                maxDelta = Math.Max(maxDelta, Math.Abs(to[j] - from[j]));
+            var steps = Math.Max(1, (int)Math.Ceiling(maxDelta / step));
+            for (var s = 1; s <= steps; s++)
             {
-                t += segPts[j].TimeSeconds - segPts[j - 1].TimeSeconds;
-                points.Add(new TrajectoryPoint(t, segPts[j].JointState));
+                var alpha = (double)s / steps;
+                var pos = new double[n];
+                for (var j = 0; j < n; j++)
+                    pos[j] = from[j] + alpha * (to[j] - from[j]);
+                var stepDelta = maxDelta / steps;
+                t += Math.Max(minDt, stepDelta / maxVel);
+                points.Add(new TrajectoryPoint(t, new JointState(pos)));
             }
         }
-
-        return PlanningResult.Succeeded(new Trajectory(robot, points), warnings);
+        return points;
     }
 
     private static List<TrajectoryPoint> BuildWaypointTrajectory(IReadOnlyList<JointState> waypoints, PlanningOptions opts)

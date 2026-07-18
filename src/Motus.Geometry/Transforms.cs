@@ -10,6 +10,14 @@ public static class Transforms
          0, 0, 1, 0,
          0, 0, 0, 1];
 
+    public static void IdentityInto(double[] m)
+    {
+        m[0] = 1; m[1] = 0; m[2] = 0; m[3] = 0;
+        m[4] = 0; m[5] = 1; m[6] = 0; m[7] = 0;
+        m[8] = 0; m[9] = 0; m[10] = 1; m[11] = 0;
+        m[12] = 0; m[13] = 0; m[14] = 0; m[15] = 1;
+    }
+
     public static double[] FromDh(double theta, double d, double a, double alpha)
     {
         var m = new double[16];
@@ -74,18 +82,22 @@ public static class Transforms
 
     public static double[] FromFrame(Frame frame)
     {
+        var m = new double[16];
+        FromFrameInto(m, frame);
+        return m;
+    }
+
+    public static void FromFrameInto(double[] m, Frame frame)
+    {
         var q = NormalizeQuat(frame.Qw, frame.Qx, frame.Qy, frame.Qz);
         var (w, x, y, z) = (q.w, q.x, q.y, q.z);
         var xx = x * x; var yy = y * y; var zz = z * z;
         var xy = x * y; var xz = x * z; var yz = y * z;
         var wx = w * x; var wy = w * y; var wz = w * z;
-        return
-        [
-            1 - 2 * (yy + zz), 2 * (xy - wz), 2 * (xz + wy), frame.X,
-            2 * (xy + wz), 1 - 2 * (xx + zz), 2 * (yz - wx), frame.Y,
-            2 * (xz - wy), 2 * (yz + wx), 1 - 2 * (xx + yy), frame.Z,
-            0, 0, 0, 1
-        ];
+        m[0] = 1 - 2 * (yy + zz); m[1] = 2 * (xy - wz); m[2] = 2 * (xz + wy); m[3] = frame.X;
+        m[4] = 2 * (xy + wz); m[5] = 1 - 2 * (xx + zz); m[6] = 2 * (yz - wx); m[7] = frame.Y;
+        m[8] = 2 * (xz - wy); m[9] = 2 * (yz + wx); m[10] = 1 - 2 * (xx + yy); m[11] = frame.Z;
+        m[12] = 0; m[13] = 0; m[14] = 0; m[15] = 1;
     }
 
     public static Frame ToFrame(double[] m)

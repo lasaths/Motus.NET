@@ -67,14 +67,25 @@ public sealed class JointIndexMap
         return new JointIndexMap(map, locked);
     }
 
+    // Scratch reused across OMPL validity callbacks (planning is single-threaded / gated).
+    private double[]? _embedScratch;
+    private JointState? _embedState;
+
     public JointState EmbedGroupState(JointState seed, IReadOnlyList<double> groupPositions)
     {
         if (groupPositions.Count != GroupToFull.Count)
             throw new ArgumentException("Group position count mismatch.");
-        var q = (double[])seed.Positions.ToArray().Clone();
+        var n = seed.Positions.Length;
+        if (_embedScratch is null || _embedScratch.Length != n)
+        {
+            _embedScratch = new double[n];
+            _embedState = JointState.Wrap(_embedScratch);
+        }
+        for (var i = 0; i < n; i++)
+            _embedScratch[i] = seed.Positions[i];
         for (var i = 0; i < GroupToFull.Count; i++)
-            q[GroupToFull[i]] = groupPositions[i];
-        return new JointState(q);
+            _embedScratch[GroupToFull[i]] = groupPositions[i];
+        return _embedState!;
     }
 
     public double[] ExtractGroupPositions(JointState full)

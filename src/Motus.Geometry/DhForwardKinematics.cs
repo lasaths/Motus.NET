@@ -5,6 +5,9 @@ namespace Motus.Geometry;
 public sealed class DhForwardKinematics : IFkSolver
 {
     private readonly KinematicsChain _chain;
+    private double[]? _local;
+    private double[]? _accum;
+    private double[]? _temp;
 
     public DhForwardKinematics(KinematicsChain chain) => _chain = chain;
 
@@ -22,14 +25,16 @@ public sealed class DhForwardKinematics : IFkSolver
         if (joints.Count != links.Length)
             throw new ArgumentException($"Expected {links.Length} joints, got {joints.Count}.");
 
-        var cumulative = Transforms.Identity();
+        EnsureScratch();
+        Transforms.IdentityInto(_accum!);
         for (var i = 0; i < joints.Count; i++)
         {
             var link = links[i];
-            var local = Transforms.FromDh(joints[i] + link.ThetaOffset, link.D, link.A, link.Alpha);
-            cumulative = Transforms.Multiply(cumulative, local);
+            Transforms.FromDhInto(_local!, joints[i] + link.ThetaOffset, link.D, link.A, link.Alpha);
+            Transforms.MultiplyInto(_temp!, _accum!, _local!);
+            (_accum, _temp) = (_temp, _accum);
         }
-        return cumulative;
+        return (double[])_accum!.Clone();
     }
 
     public double[] ComputeTcpTransform(IReadOnlyList<double> joints, Frame baseFrame, Frame toolFrame) =>
@@ -49,21 +54,39 @@ public sealed class DhForwardKinematics : IFkSolver
 
     public IReadOnlyList<double[]> ComputeLinkTransforms(IReadOnlyList<double> joints)
     {
-        var links = _chain.Links;
-        if (joints.Count != links.Length)
-            throw new ArgumentException($"Expected {links.Length} joints, got {joints.Count}.");
-
         var mats = new double[joints.Count][];
-        var cumulative = Transforms.Identity();
-        for (var i = 0; i < joints.Count; i++)
-        {
-            var link = links[i];
-            var local = Transforms.FromDh(joints[i] + link.ThetaOffset, link.D, link.A, link.Alpha);
-            cumulative = Transforms.Multiply(cumulative, local);
-            mats[i] = (double[])cumulative.Clone();
-        }
+        for (var i = 0; i < mats.Length; i++)
+            mats[i] = new double[16];
+        ComputeLinkTransformsInto(joints, mats);
         return mats;
     }
 
+    public void ComputeLinkTransformsInto(IReadOnlyList<double> joints, double[][] mats)
+    {
+        var links = _chain.Links;
+        if (joints.Count != links.Length)
+            throw new ArgumentException($"Expected {links.Length} joints, got {joints.Count}.");
+        if (mats.Length < joints.Count)
+            throw new ArgumentException($"Expected at least {joints.Count} matrix slots, got {mats.Length}.");
+
+        EnsureScratch();
+        Transforms.IdentityInto(_accum!);
+        for (var i = 0; i < joints.Count; i++)
+        {
+            var link = links[i];
+            Transforms.FromDhInto(_local!, joints[i] + link.ThetaOffset, link.D, link.A, link.Alpha);
+            Transforms.MultiplyInto(_temp!, _accum!, _local!);
+            (_accum, _temp) = (_temp, _accum);
+            Array.Copy(_accum!, mats[i], 16);
+        }
+    }
+
     public double[] LinkRadiiMeters => _chain.LinkRadiiMeters;
+
+    private void EnsureScratch()
+    {
+        _local ??= new double[16];
+        _accum ??= new double[16];
+        _temp ??= new double[16];
+    }
 }

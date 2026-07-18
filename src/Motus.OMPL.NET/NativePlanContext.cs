@@ -11,6 +11,14 @@ internal sealed class NativePlanContext
     private readonly CollisionScene _scene;
     private readonly double _stepRadians;
     private readonly Func<double[], JointState>? _toFull;
+    private double[]? _validityQ;
+    private double[]? _fromQ;
+    private double[]? _toQ;
+    private double[]? _fromFullQ;
+    private double[]? _toFullQ;
+    private JointState? _fromFullState;
+    private JointState? _toFullState;
+    private JointState? _validityFullState;
 
     public NativePlanContext(
         ICollisionChecker? collision,
@@ -24,53 +32,84 @@ internal sealed class NativePlanContext
         _toFull = toFull;
     }
 
-    private JointState ToFullState(double[] q) =>
-        _toFull is not null ? _toFull(q) : new JointState(q);
-
     public int ValidityCallback(IntPtr statePtr, int dims)
     {
         if (_collision is null) return 1;
-        var q = ArrayPool<double>.Shared.Rent(dims);
+        var rented = ArrayPool<double>.Shared.Rent(dims);
         try
         {
-            Marshal.Copy(statePtr, q, 0, dims);
+            Marshal.Copy(statePtr, rented, 0, dims);
             if (_collision is SphereCollisionChecker sphere)
-                return sphere.IsCollisionFree(new ArraySegment<double>(q, 0, dims), _scene) ? 1 : 0;
-            var joints = new double[dims];
-            Array.Copy(q, joints, dims);
-            return _collision.IsCollisionFree(ToFullState(joints), _scene) ? 1 : 0;
+                return sphere.IsCollisionFree(new ArraySegment<double>(rented, 0, dims), _scene) ? 1 : 0;
+
+            EnsureGroupBuffer(ref _validityQ, dims);
+            Array.Copy(rented, _validityQ!, dims);
+            var full = MaterializeFull(_validityQ!, ref _fromFullQ, ref _validityFullState);
+            return _collision.IsCollisionFree(full, _scene) ? 1 : 0;
         }
         finally
         {
-            ArrayPool<double>.Shared.Return(q);
+            ArrayPool<double>.Shared.Return(rented);
         }
     }
 
     public int MotionValidityCallback(IntPtr fromPtr, IntPtr toPtr, int dims)
     {
         if (_collision is null) return 1;
-        var from = ArrayPool<double>.Shared.Rent(dims);
-        var to = ArrayPool<double>.Shared.Rent(dims);
+        var fromRented = ArrayPool<double>.Shared.Rent(dims);
+        var toRented = ArrayPool<double>.Shared.Rent(dims);
         try
         {
-            Marshal.Copy(fromPtr, from, 0, dims);
-            Marshal.Copy(toPtr, to, 0, dims);
+            Marshal.Copy(fromPtr, fromRented, 0, dims);
+            Marshal.Copy(toPtr, toRented, 0, dims);
             if (_collision is SphereCollisionChecker sphere)
                 return sphere.SegmentCollisionFree(
-                    new ArraySegment<double>(from, 0, dims),
-                    new ArraySegment<double>(to, 0, dims),
+                    new ArraySegment<double>(fromRented, 0, dims),
+                    new ArraySegment<double>(toRented, 0, dims),
                     _scene,
                     _stepRadians) ? 1 : 0;
-            var fromJoints = new double[dims];
-            var toJoints = new double[dims];
-            Array.Copy(from, fromJoints, dims);
-            Array.Copy(to, toJoints, dims);
-            return _collision.SegmentCollisionFree(ToFullState(fromJoints), ToFullState(toJoints), _scene, _stepRadians) ? 1 : 0;
+
+            EnsureGroupBuffer(ref _fromQ, dims);
+            EnsureGroupBuffer(ref _toQ, dims);
+            Array.Copy(fromRented, _fromQ!, dims);
+            Array.Copy(toRented, _toQ!, dims);
+
+            // Distinct full-state buffers — EmbedGroupState reuses one scratch.
+            var fromFull = MaterializeFull(_fromQ!, ref _fromFullQ, ref _fromFullState);
+            var toFull = MaterializeFull(_toQ!, ref _toFullQ, ref _toFullState);
+            return _collision.SegmentCollisionFree(fromFull, toFull, _scene, _stepRadians) ? 1 : 0;
         }
         finally
         {
-            ArrayPool<double>.Shared.Return(from);
-            ArrayPool<double>.Shared.Return(to);
+            ArrayPool<double>.Shared.Return(fromRented);
+            ArrayPool<double>.Shared.Return(toRented);
         }
+    }
+
+    private JointState MaterializeFull(double[] groupOrFull, ref double[]? fullBuf, ref JointState? fullState)
+    {
+        if (_toFull is null)
+        {
+            EnsureGroupBuffer(ref fullBuf, groupOrFull.Length);
+            Array.Copy(groupOrFull, fullBuf!, groupOrFull.Length);
+            fullState ??= JointState.Wrap(fullBuf!);
+            return fullState;
+        }
+
+        var embedded = _toFull(groupOrFull);
+        var n = embedded.Positions.Length;
+        if (fullBuf is null || fullBuf.Length != n)
+        {
+            fullBuf = new double[n];
+            fullState = JointState.Wrap(fullBuf);
+        }
+        Array.Copy(embedded.Positions, fullBuf, n);
+        return fullState!;
+    }
+
+    private static void EnsureGroupBuffer(ref double[]? buf, int dims)
+    {
+        if (buf is null || buf.Length != dims)
+            buf = new double[dims];
     }
 }

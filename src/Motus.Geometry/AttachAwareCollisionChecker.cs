@@ -1,4 +1,3 @@
-using System.Linq;
 using Motus.Core;
 
 namespace Motus.Geometry;
@@ -12,6 +11,11 @@ public sealed class AttachAwareCollisionChecker : ICollisionChecker
     private readonly ToolFrame _tool;
     private readonly IReadOnlyList<AttachedBody> _attached;
     private readonly Dictionary<int, BvhNode> _meshBvhCache = new();
+    private readonly CollisionQueryScratch _scratch = new();
+    private double[]? _segmentQ;
+    private JointState? _segmentState;
+    private int _sceneFingerprint;
+    private bool _sceneFingerprintValid;
 
     public AttachAwareCollisionChecker(
         ICollisionChecker inner,
@@ -42,13 +46,21 @@ public sealed class AttachAwareCollisionChecker : ICollisionChecker
         for (var i = 0; i < n; i++)
             maxDelta = Math.Max(maxDelta, Math.Abs(to.Positions[i] - from.Positions[i]));
         var steps = Math.Max(1, (int)Math.Ceiling(maxDelta / stepRadians));
+
+        if (_segmentQ is null || _segmentQ.Length != n)
+        {
+            _segmentQ = new double[n];
+            _segmentState = JointState.Wrap(_segmentQ);
+        }
+
+        var q = _segmentQ;
+        var state = _segmentState!;
         for (var s = 0; s <= steps; s++)
         {
             var alpha = (double)s / steps;
-            var q = new double[n];
             for (var i = 0; i < n; i++)
                 q[i] = from.Positions[i] + alpha * (to.Positions[i] - from.Positions[i]);
-            if (!AttachedCollisionFree(new JointState(q), scene)) return false;
+            if (!AttachedCollisionFree(state, scene)) return false;
         }
         return true;
     }
@@ -56,31 +68,47 @@ public sealed class AttachAwareCollisionChecker : ICollisionChecker
     private bool AttachedCollisionFree(JointState state, CollisionScene scene)
     {
         if (_attached.Count == 0) return true;
-        BuildBvhCache(scene);
+        EnsureBvhCache(scene);
         var tcpM = _fk.ComputeTcpTransform(state.Positions, _base.Frame, _tool.Frame);
         foreach (var body in _attached)
         {
             var localM = Transforms.Multiply(tcpM, Transforms.FromFrame(body.TcpLocalPose));
-            var att = CollisionGeometry.Transform(body.Geometry, localM);
+            var worldM = CollisionGeometry.ComposeWorldMatrix(localM, body.Geometry.Pose);
             foreach (var obj in scene.Objects)
             {
-                if (scene.IsPairAllowed(att.Name, obj.Name)) continue;
+                if (scene.IsPairAllowed(body.Geometry.Name, obj.Name)) continue;
                 if (scene.IsPairAllowed(CollisionBodies.Attached(body.Name), obj.Name)) continue;
-                if (CollisionGeometry.Intersects(att, obj, _meshBvhCache)) return false;
+                if (CollisionGeometry.IntersectsAtPose(body.Geometry, worldM, obj, _meshBvhCache, _scratch))
+                    return false;
             }
         }
         return true;
     }
 
-    private void BuildBvhCache(CollisionScene scene)
+    private void EnsureBvhCache(CollisionScene scene)
     {
-        foreach (var meshObj in scene.Objects.Where(o => o.Shape == CollisionShape.Mesh))
+        var hash = new HashCode();
+        hash.Add(scene.Objects.Count);
+        for (var i = 0; i < scene.Objects.Count; i++)
         {
-            if (meshObj.MeshVertices is not null && meshObj.MeshIndices is not null)
-            {
-                var key = CollisionMeshCache.GeometryFingerprint(meshObj);
-                _meshBvhCache[key] = CollisionMeshCache.GetOrBuild(meshObj);
-            }
+            var o = scene.Objects[i];
+            hash.Add(o.ContentHash);
+            hash.Add(o.Pose.X);
+            hash.Add(o.Pose.Y);
+            hash.Add(o.Pose.Z);
+        }
+        var fp = hash.ToHashCode();
+        if (_sceneFingerprintValid && fp == _sceneFingerprint)
+            return;
+
+        _meshBvhCache.Clear();
+        for (var i = 0; i < scene.Objects.Count; i++)
+        {
+            var meshObj = scene.Objects[i];
+            if (meshObj.Shape != CollisionShape.Mesh) continue;
+            if (meshObj.MeshVertices is null || meshObj.MeshIndices is null) continue;
+            var key = CollisionMeshCache.GeometryFingerprint(meshObj);
+            _meshBvhCache[key] = CollisionMeshCache.GetOrBuild(meshObj);
         }
         foreach (var body in _attached)
         {
@@ -92,5 +120,7 @@ public sealed class AttachAwareCollisionChecker : ICollisionChecker
                 _meshBvhCache[key] = CollisionMeshCache.GetOrBuild(body.Geometry);
             }
         }
+        _sceneFingerprint = fp;
+        _sceneFingerprintValid = true;
     }
 }
