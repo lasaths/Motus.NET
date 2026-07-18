@@ -11,7 +11,7 @@ public sealed class AttachAwareCollisionChecker : ICollisionChecker
     private readonly BaseFrame _base;
     private readonly ToolFrame _tool;
     private readonly IReadOnlyList<AttachedBody> _attached;
-    private readonly Dictionary<string, BvhNode> _meshBvhCache = new();
+    private readonly Dictionary<int, BvhNode> _meshBvhCache = new();
 
     public AttachAwareCollisionChecker(
         ICollisionChecker inner,
@@ -77,14 +77,20 @@ public sealed class AttachAwareCollisionChecker : ICollisionChecker
         foreach (var meshObj in scene.Objects.Where(o => o.Shape == CollisionShape.Mesh))
         {
             if (meshObj.MeshVertices is not null && meshObj.MeshIndices is not null)
-                _meshBvhCache[meshObj.Name] = CollisionMeshCache.GetOrBuild(meshObj);
+            {
+                var key = CollisionMeshCache.GeometryFingerprint(meshObj);
+                _meshBvhCache[key] = CollisionMeshCache.GetOrBuild(meshObj);
+            }
         }
         foreach (var body in _attached)
         {
             if (body.Geometry.Shape == CollisionShape.Mesh &&
                 body.Geometry.MeshVertices is not null &&
                 body.Geometry.MeshIndices is not null)
-                _meshBvhCache[body.Name] = CollisionMeshCache.GetOrBuild(body.Geometry);
+            {
+                var key = CollisionMeshCache.GeometryFingerprint(body.Geometry);
+                _meshBvhCache[key] = CollisionMeshCache.GetOrBuild(body.Geometry);
+            }
         }
     }
 }

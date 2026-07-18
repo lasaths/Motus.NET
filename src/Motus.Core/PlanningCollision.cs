@@ -18,13 +18,28 @@ public static class PlanningCollision
         {
             if (!checker.IsCollisionFree(pt.JointState, scene))
                 errors.Add($"Collision at t={pt.TimeSeconds:F4}s.");
-            if (prev is not null && !checker.SegmentCollisionFree(prev.JointState, pt.JointState, scene, segmentStepRadians))
+            if (prev is not null &&
+                !JointDeltaWithinStep(prev.JointState, pt.JointState, segmentStepRadians) &&
+                !checker.SegmentCollisionFree(prev.JointState, pt.JointState, scene, segmentStepRadians))
                 errors.Add($"Collision between t={prev.TimeSeconds:F4}s and t={pt.TimeSeconds:F4}s.");
             prev = pt;
         }
         if (errors.Count == 0) return null;
         return PlanningResult.Failed(errors.Select(e =>
             new PlanningMessage(PlanningMessageCodes.PathCollision, e, PlanningMessageSeverity.Error)));
+    }
+
+    /// <summary>True when every joint delta is ≤ step — point checks already cover the segment.</summary>
+    public static bool JointDeltaWithinStep(JointState from, JointState to, double stepRadians)
+    {
+        if (stepRadians <= 0) return false;
+        var n = Math.Min(from.AxisCount, to.AxisCount);
+        for (var i = 0; i < n; i++)
+        {
+            if (Math.Abs(to.Positions[i] - from.Positions[i]) > stepRadians)
+                return false;
+        }
+        return true;
     }
 
     /// <summary>Fast-fail when start or goal already intersects the collision scene.</summary>

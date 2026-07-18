@@ -135,4 +135,142 @@ public class MeshCollisionTests
     // PONYTAIL: SAT per-triangle not implemented yet - test waits for TriangleCollision.SphereTriangleIntersect
     Assert.True(true);  // PONYTAIL: Placeholder until TriangleCollision enhanced
   }
+
+  [Fact]
+  public void DuplicateNamedMeshes_HaveDistinctFingerprintsAndBvhs()
+  {
+    var meshA = CollisionObject.Mesh(
+      "mesh",
+      Frame.Identity,
+      new List<double[]>
+      {
+        new[] { 0.0, 0.0, 0.0 },
+        new[] { 1.0, 0.0, 0.0 },
+        new[] { 0.0, 1.0, 0.0 }
+      },
+      new List<int> { 0, 1, 2 });
+    var meshB = CollisionObject.Mesh(
+      "mesh",
+      Frame.Identity,
+      new List<double[]>
+      {
+        new[] { 5.0, 0.0, 0.0 },
+        new[] { 6.0, 0.0, 0.0 },
+        new[] { 5.0, 1.0, 0.0 }
+      },
+      new List<int> { 0, 1, 2 });
+
+    Assert.NotEqual(
+      CollisionMeshCache.GeometryFingerprint(meshA),
+      CollisionMeshCache.GeometryFingerprint(meshB));
+    Assert.NotEqual(meshA.ContentHash, meshB.ContentHash);
+    Assert.NotSame(CollisionMeshCache.GetOrBuild(meshA), CollisionMeshCache.GetOrBuild(meshB));
+  }
+
+  [Fact]
+  public void TransformLocalAabbToWorld_RejectsFarObstacleViaBroadphase()
+  {
+    var mesh = CollisionObject.Mesh(
+      "unit",
+      Frame.Identity,
+      new List<double[]>
+      {
+        new[] { 0.0, 0.0, 0.0 },
+        new[] { 0.1, 0.0, 0.0 },
+        new[] { 0.0, 0.1, 0.0 }
+      },
+      new List<int> { 0, 1, 2 });
+
+    var worldM = Transforms.Identity();
+    var min = new double[3];
+    var max = new double[3];
+    CollisionGeometry.TransformLocalAabbToWorld(mesh, worldM, min, max);
+
+    var farMin = new[] { 10.0, 10.0, 10.0 };
+    var farMax = new[] { 11.0, 11.0, 11.0 };
+    Assert.False(CollisionGeometry.AabbAabbOverlap(min, max, farMin, farMax));
+
+    var nearMin = new[] { -0.01, -0.01, -0.01 };
+    var nearMax = new[] { 0.05, 0.05, 0.05 };
+    Assert.True(CollisionGeometry.AabbAabbOverlap(min, max, nearMin, nearMax));
+  }
+
+  [Fact]
+  public void RobotMeshChecker_FarMeshObstacle_IsCollisionFree()
+  {
+    var robot = BuildMeshLinkRobot();
+    var checker = new RobotMeshCollisionChecker(robot);
+    var state = new JointState(new double[robot.Preset.AxisCount]);
+    var far = CollisionObject.Mesh(
+      "far",
+      Frame.Identity,
+      new List<double[]>
+      {
+        new[] { 5.0, 5.0, 5.0 },
+        new[] { 5.1, 5.0, 5.0 },
+        new[] { 5.0, 5.1, 5.0 }
+      },
+      new List<int> { 0, 1, 2 });
+    Assert.True(checker.IsCollisionFree(state, new CollisionScene(new[] { far })));
+  }
+
+  [Fact]
+  public void JointDeltaWithinStep_SkipsDenseSegmentValidation()
+  {
+    var a = new JointState(new[] { 0.0, 0.0, 0.0, 0.0, 0.0, 0.0 });
+    var b = new JointState(new[] { 0.04, 0.0, 0.0, 0.0, 0.0, 0.0 });
+    Assert.True(PlanningCollision.JointDeltaWithinStep(a, b, 0.05));
+    Assert.False(PlanningCollision.JointDeltaWithinStep(a, b, 0.03));
+  }
+
+  [Fact]
+  public void RobotMeshChecker_RepeatedChecks_StayAllocReasonable()
+  {
+    var robot = BuildMeshLinkRobot();
+    var checker = new RobotMeshCollisionChecker(robot);
+    var state = new JointState(new double[robot.Preset.AxisCount]);
+    var obstacle = CollisionObject.Box("box", new Frame(0.4, 0.0, 0.3), 0.05, 0.05, 0.05);
+    var scene = new CollisionScene(new[] { obstacle });
+
+    // Warmup (BVH build, JIT)
+    for (var i = 0; i < 20; i++)
+      checker.IsCollisionFree(state, scene);
+
+    var before = GC.GetAllocatedBytesForCurrentThread();
+    const int n = 200;
+    for (var i = 0; i < n; i++)
+      checker.IsCollisionFree(state, scene);
+    var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+    // Soft gate: without world-mesh copies this should stay well under ~2MB for 200 checks.
+    Assert.True(allocated < 2_000_000, $"Allocated {allocated} bytes for {n} checks (expected < 2MB).");
+  }
+
+  private static RobotModel BuildMeshLinkRobot()
+  {
+    var baseRobot = PresetLoader.LoadRobotModelByName("UR5e", ResourcesRoot);
+    var verts = new List<double[]>();
+    var indices = new List<int>();
+    // Dense-ish local link mesh (~200 tris) to stress transform/narrowphase allocs
+    for (var i = 0; i < 10; i++)
+    for (var j = 0; j < 10; j++)
+    {
+      var x0 = i * 0.01;
+      var y0 = j * 0.01;
+      var b = verts.Count;
+      verts.Add(new[] { x0, y0, 0.0 });
+      verts.Add(new[] { x0 + 0.01, y0, 0.0 });
+      verts.Add(new[] { x0, y0 + 0.01, 0.0 });
+      verts.Add(new[] { x0 + 0.01, y0 + 0.01, 0.0 });
+      indices.AddRange(new[] { b, b + 1, b + 2, b + 1, b + 3, b + 2 });
+    }
+
+    var linkMesh = CollisionObject.Mesh("link0", Frame.Identity, verts, indices);
+    var collision = new RobotCollisionModel(new[]
+    {
+      new LinkCollisionGeometry(0, "base_link", linkMesh),
+      new LinkCollisionGeometry(3, "forearm", linkMesh),
+    });
+    return new RobotModel(baseRobot.Preset, collision, baseRobot.JointNames);
+  }
 }

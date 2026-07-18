@@ -40,8 +40,15 @@ public class BvhNode
     public List<int> GetPotentialTriangles(Frame sphereCenter, double sphereRadius)
     {
         var results = new List<int>();
-        GetPotentialTrianglesRecursive(sphereCenter, sphereRadius, results);
+        GetPotentialTriangles(sphereCenter, sphereRadius, results);
         return results;
+    }
+
+    /// <summary>Append candidate triangle indices into a caller-owned list (cleared first).</summary>
+    public void GetPotentialTriangles(Frame sphereCenter, double sphereRadius, List<int> results)
+    {
+        results.Clear();
+        GetPotentialTrianglesRecursive(sphereCenter, sphereRadius, results);
     }
 
     private void GetPotentialTrianglesRecursive(Frame sphereCenter, double sphereRadius, List<int> results)

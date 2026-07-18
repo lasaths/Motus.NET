@@ -9,6 +9,14 @@ public sealed class JointState
         Positions = positions.ToArray();
     }
 
+    /// <summary>Wrap an existing buffer without copying. Mutating <see cref="Positions"/> mutates the buffer.</summary>
+    public static JointState Wrap(double[] positions) => new(positions, copy: false);
+
+    private JointState(double[] positions, bool copy)
+    {
+        Positions = copy ? positions.ToArray() : positions;
+    }
+
     public int AxisCount => Positions.Length;
 
     public ValidationResult Validate(IReadOnlyList<JointLimit> limits)

@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.7] - 2026-07-18
+
+### Changed
+
+- **Managed mesh collision hot path** — keep robot link meshes in local space; pose-only transforms with AABB broadphase and conservative link envelopes before triangle SAT (no per-state world-mesh vertex copies)
+- **`CollisionObject.ContentHash`** — geometry fingerprint computed once at construction; BVH / session caches use it instead of re-hashing verts
+- **`BvhNode.GetPotentialTriangles`** — caller-owned list overload to avoid per-query allocations
+- **`RobotMeshCollisionChecker.SegmentCollisionFree`** — reuses joint buffer via `JointState.Wrap`
+- **`PlanningCollision.ValidateTrajectory`** — skips redundant `SegmentCollisionFree` when consecutive waypoints already lie within the step size
+- BVH caches keyed by content hash (not mesh name) in `MeshCollisionChecker` / `AttachAwareCollisionChecker`
+
+### Added
+
+- `Transforms.TransformPointInto` — allocation-free point transform
+- `JointState.Wrap` — adopt an existing joint buffer without copying
+- `Example03CollisionRrtPerfTests` — UR10e + ColSphere scenario aligned with Motus.Grasshopper `examples/03_collision_rrt.ghx`
+
 ## [0.6.6] - 2026-07-13
 
 ### Added
@@ -271,7 +288,8 @@ Initial public release.
 - **Motus.Presets** — JSON preset loader with bundled UR and KUKA defaults
   (approximate public datasheet values for planning/visualization only).
 
-[Unreleased]: https://github.com/lasaths/Motus.NET/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/lasaths/Motus.NET/compare/v0.6.7...HEAD
+[0.6.7]: https://github.com/lasaths/Motus.NET/compare/v0.6.6...v0.6.7
 [0.5.0]: https://github.com/lasaths/Motus.NET/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/lasaths/Motus.NET/compare/v0.3.3...v0.4.0
 [0.3.3]: https://github.com/lasaths/Motus.NET/compare/v0.3.2...v0.3.3

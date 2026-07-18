@@ -61,13 +61,15 @@ public static class Transforms
 
     public static double[] TransformPoint(double[] m, double x, double y, double z)
     {
-        return
-        [
-            m[0] * x + m[1] * y + m[2] * z + m[3],
-            m[4] * x + m[5] * y + m[6] * z + m[7],
-            m[8] * x + m[9] * y + m[10] * z + m[11],
-            1
-        ];
+        TransformPointInto(m, x, y, z, out var ox, out var oy, out var oz);
+        return [ox, oy, oz, 1];
+    }
+
+    public static void TransformPointInto(double[] m, double x, double y, double z, out double ox, out double oy, out double oz)
+    {
+        ox = m[0] * x + m[1] * y + m[2] * z + m[3];
+        oy = m[4] * x + m[5] * y + m[6] * z + m[7];
+        oz = m[8] * x + m[9] * y + m[10] * z + m[11];
     }
 
     public static double[] FromFrame(Frame frame)

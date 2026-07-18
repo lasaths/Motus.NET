@@ -12,7 +12,21 @@ public sealed class RobotMeshCollisionChecker : ICollisionChecker
     private readonly RobotCollisionModel? _robotCollision;
     private readonly SphereCollisionChecker _fallback;
     private readonly IReadOnlyList<AttachedBody> _attached;
-    private readonly Dictionary<string, BvhNode> _meshBvhCache = new();
+    private readonly Dictionary<int, BvhNode> _meshBvhCache = new();
+    private readonly CollisionQueryScratch _scratch = new();
+    private readonly List<LinkCollisionEntry> _links = new();
+    private readonly LinkCollisionEntry? _toolEntry;
+    private readonly List<(AttachedBody body, LinkCollisionEntry entry)> _attachEntries = new();
+    private double[]? _segmentQ;
+    private JointState? _segmentState;
+
+    private sealed class LinkCollisionEntry
+    {
+        public required CollisionObject Geometry { get; init; }
+        public int LinkIndex { get; init; }
+        public BvhNode? LocalBvh { get; init; }
+        public double EnvelopeRadius { get; init; }
+    }
 
     public RobotMeshCollisionChecker(RobotModel robot, SerialJointChain? chain = null, IReadOnlyList<AttachedBody>? attached = null)
     {
@@ -22,6 +36,51 @@ public sealed class RobotMeshCollisionChecker : ICollisionChecker
         _robotCollision = robot.CollisionModel;
         _attached = attached ?? Array.Empty<AttachedBody>();
         _fallback = new SphereCollisionChecker(_fk, _base);
+
+        if (_robotCollision is not null)
+        {
+            foreach (var link in _robotCollision.Links)
+                _links.Add(BuildEntry(link.LocalGeometry, link.LinkIndex));
+
+            if (_robotCollision.ToolGeometry is { } tool)
+                _toolEntry = BuildEntry(tool, -1);
+        }
+
+        foreach (var body in _attached)
+            _attachEntries.Add((body, BuildEntry(body.Geometry, -1)));
+    }
+
+    private static LinkCollisionEntry BuildEntry(CollisionObject geom, int linkIndex)
+    {
+        BvhNode? bvh = null;
+        var envelope = 0.01;
+        if (geom.Shape == CollisionShape.Mesh &&
+            geom.MeshVertices is not null &&
+            geom.MeshIndices is not null &&
+            geom.MeshIndices.Count >= 3)
+        {
+            bvh = CollisionMeshCache.GetOrBuild(geom);
+            envelope = CollisionGeometry.MeshEnvelopeRadius(geom);
+        }
+        else
+        {
+            envelope = geom.Shape switch
+            {
+                CollisionShape.Sphere => geom.ExtentX,
+                CollisionShape.Capsule => geom.ExtentX + geom.ExtentY,
+                CollisionShape.Box => Math.Sqrt(
+                    geom.ExtentX * geom.ExtentX + geom.ExtentY * geom.ExtentY + geom.ExtentZ * geom.ExtentZ),
+                _ => 0.01
+            };
+        }
+
+        return new LinkCollisionEntry
+        {
+            Geometry = geom,
+            LinkIndex = linkIndex,
+            LocalBvh = bvh,
+            EnvelopeRadius = envelope
+        };
     }
 
     public bool IsCollisionFree(JointState state, CollisionScene scene)
@@ -38,14 +97,16 @@ public sealed class RobotMeshCollisionChecker : ICollisionChecker
         var baseM = Transforms.FromFrame(_base.Frame);
         foreach (var obj in scene.Objects)
         {
-            foreach (var link in _robotCollision.Links)
+            foreach (var entry in _links)
             {
-                if (link.LinkIndex < 0 || link.LinkIndex >= linkMats.Count) continue;
-                if (scene.IsPairAllowed(CollisionBodies.RobotLink(link.LinkIndex), obj.Name))
+                if (entry.LinkIndex < 0 || entry.LinkIndex >= linkMats.Count) continue;
+                if (scene.IsPairAllowed(CollisionBodies.RobotLink(entry.LinkIndex), obj.Name))
                     continue;
-                var worldM = Transforms.Multiply(baseM, linkMats[link.LinkIndex]);
-                var worldGeom = CollisionGeometry.Transform(link.LocalGeometry, worldM);
-                if (CollisionGeometry.Intersects(worldGeom, obj, _meshBvhCache))
+                var worldM = CollisionGeometry.ComposeWorldMatrix(
+                    Transforms.Multiply(baseM, linkMats[entry.LinkIndex]), entry.Geometry.Pose);
+                if (!CollisionGeometry.EnvelopeMayHit(entry.Geometry, worldM, entry.EnvelopeRadius, obj, _meshBvhCache, _scratch))
+                    continue;
+                if (CollisionGeometry.IntersectsAtPose(entry.Geometry, worldM, obj, _meshBvhCache, _scratch))
                     return false;
             }
         }
@@ -60,13 +121,21 @@ public sealed class RobotMeshCollisionChecker : ICollisionChecker
         for (var i = 0; i < n; i++)
             maxDelta = Math.Max(maxDelta, Math.Abs(to.Positions[i] - from.Positions[i]));
         var steps = Math.Max(1, (int)Math.Ceiling(maxDelta / stepRadians));
+
+        if (_segmentQ is null || _segmentQ.Length != n)
+        {
+            _segmentQ = new double[n];
+            _segmentState = JointState.Wrap(_segmentQ);
+        }
+
+        var q = _segmentQ;
+        var state = _segmentState!;
         for (var s = 0; s <= steps; s++)
         {
             var alpha = (double)s / steps;
-            var q = new double[n];
             for (var i = 0; i < n; i++)
                 q[i] = from.Positions[i] + alpha * (to.Positions[i] - from.Positions[i]);
-            if (!IsCollisionFree(new JointState(q), scene))
+            if (!IsCollisionFree(state, scene))
                 return false;
         }
         return true;
@@ -74,52 +143,79 @@ public sealed class RobotMeshCollisionChecker : ICollisionChecker
 
     private bool ToolSceneCollisionFree(JointState state, CollisionScene scene)
     {
-        if (_robotCollision?.ToolGeometry is not { } toolGeom || scene.Objects.Count == 0)
+        if (_toolEntry is null || scene.Objects.Count == 0 || _robotCollision is null)
             return true;
 
         var toolM = ToolCollisionPlacement.WorldMatrix(
-            _fk, state.Positions, _base, _tool, toolGeom,
+            _fk, state.Positions, _base, _tool, _toolEntry.Geometry,
             _robotCollision.ToolGeometryInFlangeFrame,
             _robotCollision.ToolGeometryAttachOffset);
-        var toolWorld = CollisionGeometry.Transform(toolGeom, toolM);
+        var worldM = CollisionGeometry.ComposeWorldMatrix(toolM, _toolEntry.Geometry.Pose);
         foreach (var obj in scene.Objects)
         {
-            if (scene.IsPairAllowed(toolWorld.Name, obj.Name)) continue;
-            if (CollisionGeometry.Intersects(toolWorld, obj, _meshBvhCache)) return false;
+            if (scene.IsPairAllowed(_toolEntry.Geometry.Name, obj.Name)) continue;
+            if (!CollisionGeometry.EnvelopeMayHit(_toolEntry.Geometry, worldM, _toolEntry.EnvelopeRadius, obj, _meshBvhCache, _scratch))
+                continue;
+            if (CollisionGeometry.IntersectsAtPose(_toolEntry.Geometry, worldM, obj, _meshBvhCache, _scratch))
+                return false;
         }
         return true;
     }
 
     private bool AttachedBodiesCollisionFree(JointState state, CollisionScene scene)
     {
-        if (_attached.Count == 0) return true;
+        if (_attachEntries.Count == 0) return true;
 
         var tcpM = _fk.ComputeTcpTransform(state.Positions, _base.Frame, _tool.Frame);
         var linkMats = _fk.ComputeLinkTransforms(state.Positions);
         var baseM = Transforms.FromFrame(_base.Frame);
 
-        foreach (var body in _attached)
+        foreach (var (body, entry) in _attachEntries)
         {
             var localM = Transforms.Multiply(tcpM, Transforms.FromFrame(body.TcpLocalPose));
-            var att = CollisionGeometry.Transform(body.Geometry, localM);
+            var attWorldM = CollisionGeometry.ComposeWorldMatrix(localM, entry.Geometry.Pose);
 
             foreach (var obj in scene.Objects)
             {
-                if (scene.IsPairAllowed(att.Name, obj.Name)) continue;
-                if (CollisionGeometry.Intersects(att, obj, _meshBvhCache)) return false;
+                if (scene.IsPairAllowed(attWorldName(entry), obj.Name)) continue;
+                if (!CollisionGeometry.EnvelopeMayHit(entry.Geometry, attWorldM, entry.EnvelopeRadius, obj, _meshBvhCache, _scratch))
+                    continue;
+                if (CollisionGeometry.IntersectsAtPose(entry.Geometry, attWorldM, obj, _meshBvhCache, _scratch))
+                    return false;
             }
 
-            if (_robotCollision is null) continue;
-            foreach (var link in _robotCollision.Links)
+            foreach (var link in _links)
             {
                 if (link.LinkIndex < 0 || link.LinkIndex >= linkMats.Count) continue;
-                if (scene.IsPairAllowed(att.Name, CollisionBodies.RobotLink(link.LinkIndex))) continue;
-                var worldM = Transforms.Multiply(baseM, linkMats[link.LinkIndex]);
-                var linkGeom = CollisionGeometry.Transform(link.LocalGeometry, worldM);
-                if (CollisionGeometry.Intersects(att, linkGeom, _meshBvhCache)) return false;
+                if (scene.IsPairAllowed(entry.Geometry.Name, CollisionBodies.RobotLink(link.LinkIndex))) continue;
+                var linkMat = Transforms.Multiply(baseM, linkMats[link.LinkIndex]);
+                var linkWorldM = CollisionGeometry.ComposeWorldMatrix(linkMat, link.Geometry.Pose);
+
+                CollisionGeometry.TransformLocalAabbToWorld(entry.Geometry, attWorldM, _scratch.WorldAabbMin, _scratch.WorldAabbMax);
+                CollisionGeometry.TransformLocalAabbToWorld(link.Geometry, linkWorldM, _scratch.WorldAabbMinB, _scratch.WorldAabbMaxB);
+                if (!CollisionGeometry.AabbAabbOverlap(
+                        _scratch.WorldAabbMin, _scratch.WorldAabbMax,
+                        _scratch.WorldAabbMinB, _scratch.WorldAabbMaxB))
+                    continue;
+
+                if (entry.Geometry.Shape == CollisionShape.Mesh && link.Geometry.Shape == CollisionShape.Mesh)
+                {
+                    if (CollisionGeometry.IntersectsMeshesAtPoses(
+                            entry.Geometry, attWorldM, link.Geometry, linkWorldM, link.LocalBvh, _scratch))
+                        return false;
+                }
+                else if (CollisionGeometry.IntersectsAtPose(
+                             entry.Geometry, attWorldM,
+                             CollisionGeometry.Transform(link.Geometry, linkMat),
+                             _meshBvhCache, _scratch))
+                {
+                    return false;
+                }
             }
         }
         return true;
+
+        static string attWorldName(LinkCollisionEntry e) => e.Geometry.Name;
     }
 
     private void BuildBvhCache(CollisionScene scene)
@@ -127,36 +223,60 @@ public sealed class RobotMeshCollisionChecker : ICollisionChecker
         foreach (var meshObj in scene.Objects.Where(o => o.Shape == CollisionShape.Mesh))
         {
             if (meshObj.MeshVertices is not null && meshObj.MeshIndices is not null)
-                _meshBvhCache[meshObj.Name] = CollisionMeshCache.GetOrBuild(meshObj);
+            {
+                var key = CollisionMeshCache.GeometryFingerprint(meshObj);
+                _meshBvhCache[key] = CollisionMeshCache.GetOrBuild(meshObj);
+            }
         }
     }
 
     private bool SelfCollisionFree(JointState state)
     {
         if (_robotCollision is null) return _fallback.IsCollisionFree(state, new CollisionScene());
+
         var linkMats = _fk.ComputeLinkTransforms(state.Positions);
         var baseM = Transforms.FromFrame(_base.Frame);
-        var worldLinks = new List<(int index, CollisionObject geom)>();
-        foreach (var link in _robotCollision.Links)
+        var posed = new List<(int index, LinkCollisionEntry entry, double[] linkMat, double[] worldM)>(_links.Count + 1);
+
+        foreach (var entry in _links)
         {
-            if (link.LinkIndex < 0 || link.LinkIndex >= linkMats.Count) continue;
-            var worldM = Transforms.Multiply(baseM, linkMats[link.LinkIndex]);
-            worldLinks.Add((link.LinkIndex, CollisionGeometry.Transform(link.LocalGeometry, worldM)));
+            if (entry.LinkIndex < 0 || entry.LinkIndex >= linkMats.Count) continue;
+            var linkMat = Transforms.Multiply(baseM, linkMats[entry.LinkIndex]);
+            var worldM = CollisionGeometry.ComposeWorldMatrix(linkMat, entry.Geometry.Pose);
+            posed.Add((entry.LinkIndex, entry, linkMat, worldM));
         }
-        if (_robotCollision.ToolGeometry is { } tool)
+
+        if (_toolEntry is not null)
         {
             var toolM = ToolCollisionPlacement.WorldMatrix(
-                _fk, state.Positions, _base, _tool, tool,
+                _fk, state.Positions, _base, _tool, _toolEntry.Geometry,
                 _robotCollision.ToolGeometryInFlangeFrame,
                 _robotCollision.ToolGeometryAttachOffset);
-            worldLinks.Add((linkMats.Count - 1, CollisionGeometry.Transform(tool, toolM)));
+            var worldM = CollisionGeometry.ComposeWorldMatrix(toolM, _toolEntry.Geometry.Pose);
+            posed.Add((linkMats.Count - 1, _toolEntry, toolM, worldM));
         }
-        for (var i = 0; i < worldLinks.Count; i++)
+
+        for (var i = 0; i < posed.Count; i++)
         {
-            for (var j = i + 2; j < worldLinks.Count; j++)
+            for (var j = i + 2; j < posed.Count; j++)
             {
-                if (Math.Abs(worldLinks[i].index - worldLinks[j].index) <= 3) continue;
-                if (CollisionGeometry.Intersects(worldLinks[i].geom, worldLinks[j].geom, _meshBvhCache))
+                if (Math.Abs(posed[i].index - posed[j].index) <= 3) continue;
+
+                var a = posed[i];
+                var b = posed[j];
+
+                if (a.entry.Geometry.Shape == CollisionShape.Mesh && b.entry.Geometry.Shape == CollisionShape.Mesh)
+                {
+                    if (CollisionGeometry.IntersectsMeshesAtPoses(
+                            a.entry.Geometry, a.worldM, b.entry.Geometry, b.worldM, b.entry.LocalBvh, _scratch))
+                        return false;
+                    continue;
+                }
+
+                if (CollisionGeometry.IntersectsAtPose(
+                        a.entry.Geometry, a.worldM,
+                        CollisionGeometry.Transform(b.entry.Geometry, b.linkMat),
+                        _meshBvhCache, _scratch))
                     return false;
             }
         }

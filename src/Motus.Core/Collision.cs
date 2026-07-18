@@ -26,6 +26,9 @@ public sealed class CollisionObject
     public double[]? MeshAabbMin { get; }  // [minX, minY, minZ]
     public double[]? MeshAabbMax { get; }  // [maxX, maxY, maxZ]
 
+    /// <summary>Stable content key computed once at construction (verts/indices or primitive extents).</summary>
+    public int ContentHash { get; }
+
     // PONYTAIL: Sphere/Box constructor (existing)
     private CollisionObject(string name, Frame pose, CollisionShape shape, double extentX, double extentY, double extentZ)
     {
@@ -35,6 +38,7 @@ public sealed class CollisionObject
         ExtentX = extentX;
         ExtentY = shape == CollisionShape.Box ? extentY : shape == CollisionShape.Capsule ? extentY : extentX;
         ExtentZ = shape == CollisionShape.Box ? extentZ : extentX;
+        ContentHash = ComputePrimitiveContentHash(name, ExtentX, ExtentY, ExtentZ);
     }
     
     // PONYTAIL: Mesh constructor
@@ -51,6 +55,7 @@ public sealed class CollisionObject
         
         // PONYTAIL: Compute AABB once at construction
         (MeshAabbMin, MeshAabbMax) = ComputeAabb(vertices);
+        ContentHash = ComputeMeshContentHash(name, vertices, indices);
     }
 
     public static CollisionObject Sphere(string name, Frame pose, double radiusMeters) =>
@@ -85,5 +90,35 @@ public sealed class CollisionObject
         }
         
         return (min, max);
+    }
+
+    private static int ComputePrimitiveContentHash(string name, double extentX, double extentY, double extentZ)
+    {
+        var hash = new HashCode();
+        hash.Add(name, StringComparer.Ordinal);
+        hash.Add(extentX);
+        hash.Add(extentY);
+        hash.Add(extentZ);
+        return hash.ToHashCode();
+    }
+
+    private static int ComputeMeshContentHash(string name, List<double[]> vertices, List<int> indices)
+    {
+        var hash = new HashCode();
+        hash.Add(name, StringComparer.Ordinal);
+        hash.Add(0.0); // ExtentX/Y/Z for meshes (matches historical GeometryFingerprint)
+        hash.Add(0.0);
+        hash.Add(0.0);
+        hash.Add(vertices.Count);
+        foreach (var v in vertices)
+        {
+            hash.Add(v[0]);
+            hash.Add(v[1]);
+            hash.Add(v[2]);
+        }
+        hash.Add(indices.Count);
+        foreach (var i in indices)
+            hash.Add(i);
+        return hash.ToHashCode();
     }
 }

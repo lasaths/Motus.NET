@@ -10,7 +10,7 @@ public sealed class MeshCollisionChecker : ICollisionChecker
 {
     private readonly DhForwardKinematics _fk;
     private readonly BaseFrame _base;
-    private Dictionary<string, BvhNode> _meshBvhCache = new();
+    private Dictionary<int, BvhNode> _meshBvhCache = new();
 
     public MeshCollisionChecker(RobotPreset preset)
     {
@@ -33,8 +33,12 @@ public sealed class MeshCollisionChecker : ICollisionChecker
     {
         foreach (var meshObj in scene.Objects.Where(o => o.Shape == CollisionShape.Mesh))
         {
-            if (!_meshBvhCache.ContainsKey(meshObj.Name) && meshObj.MeshVertices is not null && meshObj.MeshIndices is not null)
-                _meshBvhCache[meshObj.Name] = BvhBuilder.Build(meshObj);
+            if (meshObj.MeshVertices is not null && meshObj.MeshIndices is not null)
+            {
+                var key = CollisionMeshCache.GeometryFingerprint(meshObj);
+                if (!_meshBvhCache.ContainsKey(key))
+                    _meshBvhCache[key] = BvhBuilder.Build(meshObj);
+            }
         }
     }
 
@@ -95,7 +99,8 @@ public sealed class MeshCollisionChecker : ICollisionChecker
 
     private bool SphereMeshOverlap(Frame linkCenter, double linkRadius, CollisionObject mesh)
     {
-        if (!_meshBvhCache.TryGetValue(mesh.Name, out var bvh))
+        var key = CollisionMeshCache.GeometryFingerprint(mesh);
+        if (!_meshBvhCache.TryGetValue(key, out var bvh))
             return SphereAabbOverlap(linkCenter, linkRadius, mesh);
         
         // PONYTAIL: Broad phase: BVH query
