@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.8] - 2026-07-18
+
+### Changed
+
+- Further mesh-collision / planning hot-path allocation cuts: reuse FK and link-transform buffers, skip unchanged BVH rebuilds, hash allowed pairs, densify post-RRT paths without re-running `JointLinearPlanner` validation
+- Root README tightened for quicker install / first-plan guidance
+
 ## [0.6.7] - 2026-07-18
 
 ### Changed
@@ -288,7 +295,8 @@ Initial public release.
 - **Motus.Presets** — JSON preset loader with bundled UR and KUKA defaults
   (approximate public datasheet values for planning/visualization only).
 
-[Unreleased]: https://github.com/lasaths/Motus.NET/compare/v0.6.7...HEAD
+[Unreleased]: https://github.com/lasaths/Motus.NET/compare/v0.6.8...HEAD
+[0.6.8]: https://github.com/lasaths/Motus.NET/compare/v0.6.7...v0.6.8
 [0.6.7]: https://github.com/lasaths/Motus.NET/compare/v0.6.6...v0.6.7
 [0.5.0]: https://github.com/lasaths/Motus.NET/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/lasaths/Motus.NET/compare/v0.3.3...v0.4.0
