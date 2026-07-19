@@ -7,10 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.1] - 2026-07-19
+
 ### Added
 
 - `KinematicTree` / `TreeForwardKinematics` / `ReachSampling` — kinematic tree FK with mimic expansion, tip-chain extract for legacy TCP, capped Halton reach samples
 - `UrdfRobotLoader.LoadTree` + URDF `<mimic>` parse; `Load` wraps tip extract and exposes `UrdfRobot.Tree`
+- `SerialKinematicTrees.FromLengths` — parametric serial / rail+arm trees for Grasshopper Motus Serial Chain
+- Transforms `*Into` helpers for zero-alloc TreeFK hot path
 
 ## [0.7.0] - 2026-07-19
 
