@@ -44,10 +44,18 @@ internal static class CollisionGeometry
     {
         return robot.Shape switch
         {
+<<<<<<< HEAD
             CollisionShape.Sphere => SphereIntersectsObject(robot.Pose, robot.ExtentX, obstacle, bvhCache, scratch),
             CollisionShape.Capsule => CapsuleIntersectsObject(robot, obstacle, bvhCache, scratch),
             CollisionShape.Box => BoxIntersectsObject(robot, obstacle, bvhCache, scratch),
             CollisionShape.Mesh => MeshIntersectsObject(robot, obstacle, bvhCache, scratch),
+=======
+            CollisionShape.Sphere => SphereIntersectsObject(robot.Pose, robot.ExtentX, obstacle, bvhCache),
+            CollisionShape.Capsule => CapsuleIntersectsObject(robot, obstacle, bvhCache),
+            CollisionShape.Box => BoxIntersectsObject(robot, obstacle, bvhCache),
+            CollisionShape.Mesh => MeshIntersectsObject(robot, obstacle, bvhCache),
+            CollisionShape.Plane => false, // planes are scene obstacles only
+>>>>>>> 0721fae (Add infinite plane collision objects and proximal-link ignore.)
             _ => false
         };
     }
@@ -305,6 +313,7 @@ internal static class CollisionGeometry
         {
             CollisionShape.Sphere => SphereSphereOverlap(center, radius, obj.Pose, obj.ExtentX),
             CollisionShape.Box => SphereBoxOverlap(center, radius, obj),
+<<<<<<< HEAD
             CollisionShape.Capsule => CapsuleIntersectsObject(obj, CollisionObject.Sphere("_", center, radius), bvhCache, scratch),
             CollisionShape.Mesh => SphereMeshOverlap(center, radius, obj, bvhCache, scratch),
             _ => false
@@ -312,7 +321,29 @@ internal static class CollisionGeometry
 
     private static bool BoxIntersectsObject(
         CollisionObject box, CollisionObject obstacle, Dictionary<int, BvhNode> bvhCache, CollisionQueryScratch? scratch)
+=======
+            CollisionShape.Capsule => CapsuleIntersectsObject(obj, CollisionObject.Sphere("_", center, radius), bvhCache),
+            CollisionShape.Mesh => SphereMeshOverlap(center, radius, obj, bvhCache),
+            CollisionShape.Plane => SpherePlaneOverlap(center, radius, obj),
+            _ => false
+        };
+
+    /// <summary>Half-space: Motus local +X is free. Collide when signed distance &lt; radius.</summary>
+    private static bool SpherePlaneOverlap(Frame center, double radius, CollisionObject plane)
     {
+        var m = Transforms.FromFrame(plane.Pose);
+        var nx = m[0]; var ny = m[4]; var nz = m[8];
+        var signed = (center.X - plane.Pose.X) * nx + (center.Y - plane.Pose.Y) * ny + (center.Z - plane.Pose.Z) * nz;
+        return signed < radius;
+    }
+
+    private static bool BoxIntersectsObject(CollisionObject box, CollisionObject obstacle, Dictionary<string, BvhNode> bvhCache)
+>>>>>>> 0721fae (Add infinite plane collision objects and proximal-link ignore.)
+    {
+        // O(1) for plane: box vs half-space via 8 corners (still tiny)
+        if (obstacle.Shape == CollisionShape.Plane)
+            return BoxPlaneOverlap(box, obstacle);
+
         var hx = box.ExtentX; var hy = box.ExtentY; var hz = box.ExtentZ;
         var offsets = new[]
         {
@@ -329,8 +360,30 @@ internal static class CollisionGeometry
         return SphereIntersectsObject(box.Pose, Math.Max(hx, Math.Max(hy, hz)), obstacle, bvhCache, scratch);
     }
 
+<<<<<<< HEAD
     private static bool SphereMeshOverlap(
         Frame linkCenter, double linkRadius, CollisionObject mesh, Dictionary<int, BvhNode> bvhCache, CollisionQueryScratch? scratch)
+=======
+    private static bool BoxPlaneOverlap(CollisionObject box, CollisionObject plane)
+    {
+        var hx = box.ExtentX; var hy = box.ExtentY; var hz = box.ExtentZ;
+        var boxM = Transforms.FromFrame(box.Pose);
+        Span<(double x, double y, double z)> corners =
+        [
+            (-hx, -hy, -hz), (hx, -hy, -hz), (-hx, hy, -hz), (hx, hy, -hz),
+            (-hx, -hy, hz), (hx, -hy, hz), (-hx, hy, hz), (hx, hy, hz)
+        ];
+        foreach (var (ox, oy, oz) in corners)
+        {
+            var w = Transforms.TransformPoint(boxM, ox, oy, oz);
+            if (SpherePlaneOverlap(new Frame(w[0], w[1], w[2]), 0, plane))
+                return true;
+        }
+        return false;
+    }
+
+    private static bool MeshIntersectsObject(CollisionObject mesh, CollisionObject obstacle, Dictionary<string, BvhNode> bvhCache)
+>>>>>>> 0721fae (Add infinite plane collision objects and proximal-link ignore.)
     {
         if (!TryGetMeshBvh(bvhCache, mesh, out var bvh))
             return SphereAabbOverlap(linkCenter, linkRadius, mesh);

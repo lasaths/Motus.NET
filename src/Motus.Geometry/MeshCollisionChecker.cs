@@ -65,8 +65,17 @@ public sealed class MeshCollisionChecker : ICollisionChecker
             CollisionShape.Sphere => SphereSphereOverlap(link, linkRadius, obj.Pose, obj.ExtentX),
             CollisionShape.Box => SphereBoxOverlap(link, linkRadius, obj),
             CollisionShape.Mesh => SphereMeshOverlap(link, linkRadius, obj),
+            CollisionShape.Plane => SpherePlaneOverlap(link, linkRadius, obj),
             _ => false
         };
+
+    private static bool SpherePlaneOverlap(Frame center, double radius, CollisionObject plane)
+    {
+        var m = Transforms.FromFrame(plane.Pose);
+        var nx = m[0]; var ny = m[4]; var nz = m[8];
+        var signed = (center.X - plane.Pose.X) * nx + (center.Y - plane.Pose.Y) * ny + (center.Z - plane.Pose.Z) * nz;
+        return signed < radius;
+    }
 
     private static bool SphereSphereOverlap(Frame a, double ra, Frame b, double rb)
     {

@@ -120,8 +120,9 @@ public sealed class FclCollisionChecker : ICollisionChecker, IDisposable
         }
     }
 
+    // Plane has no FCL upsert yet — fall back so planes are not silently ignored.
     private static bool HasMeshObstacle(CollisionScene scene) =>
-        scene.Objects.Any(o => o.Shape == CollisionShape.Mesh);
+        scene.Objects.Any(o => o.Shape is CollisionShape.Mesh or CollisionShape.Plane);
 
     private void ApplyScene(CollisionScene scene)
     {

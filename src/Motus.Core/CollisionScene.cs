@@ -36,6 +36,7 @@ public sealed class CollisionScene
     public CollisionScene(IReadOnlyList<CollisionObject>? objects = null, IReadOnlyList<(string, string)>? allowedPairs = null)
     {
         Objects = objects ?? Array.Empty<CollisionObject>();
+<<<<<<< HEAD
         AllowedPairs = allowedPairs ?? Array.Empty<(string, string)>();
         if (AllowedPairs.Count > 0)
         {
@@ -43,6 +44,10 @@ public sealed class CollisionScene
             foreach (var (a, b) in AllowedPairs)
                 _allowedSet.Add(NormalizePair(a, b));
         }
+=======
+        // ponytail: plane at robot origin clips proximal envelopes — skip link:-1..1 vs planes
+        AllowedPairs = WithPlaneBasePairs(Objects, allowedPairs);
+>>>>>>> 0721fae (Add infinite plane collision objects and proximal-link ignore.)
     }
 
     public bool IsPairAllowed(string bodyA, string bodyB)
@@ -51,6 +56,37 @@ public sealed class CollisionScene
         return _allowedSet.Contains(NormalizePair(bodyA, bodyB));
     }
 
+<<<<<<< HEAD
     private static (string, string) NormalizePair(string a, string b) =>
         string.CompareOrdinal(a, b) <= 0 ? (a, b) : (b, a);
+=======
+    private static IReadOnlyList<(string A, string B)> WithPlaneBasePairs(
+        IReadOnlyList<CollisionObject> objects,
+        IReadOnlyList<(string, string)>? allowedPairs)
+    {
+        List<(string, string)>? merged = null;
+        foreach (var obj in objects)
+        {
+            if (obj.Shape != CollisionShape.Plane) continue;
+            merged ??= allowedPairs is null
+                ? new List<(string, string)>()
+                : new List<(string, string)>(allowedPairs);
+            // UR/industrial base+shoulder sit on the mounting plane
+            for (var i = -1; i <= 1; i++)
+                EnsurePair(merged, CollisionBodies.RobotLink(i), obj.Name);
+        }
+
+        return merged ?? allowedPairs ?? Array.Empty<(string, string)>();
+    }
+
+    private static void EnsurePair(List<(string, string)> pairs, string a, string b)
+    {
+        foreach (var (x, y) in pairs)
+        {
+            if ((x == a && y == b) || (x == b && y == a))
+                return;
+        }
+        pairs.Add((a, b));
+    }
+>>>>>>> 0721fae (Add infinite plane collision objects and proximal-link ignore.)
 }

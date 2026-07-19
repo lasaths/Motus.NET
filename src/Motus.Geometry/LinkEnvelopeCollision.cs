@@ -112,8 +112,19 @@ internal static class LinkEnvelopeCollision
             CollisionShape.Sphere => SphereSphereOverlapXyz(
                 x, y, z, radius, obj.Pose.X, obj.Pose.Y, obj.Pose.Z, obj.ExtentX),
             CollisionShape.Box => SphereBoxOverlapXyz(x, y, z, radius, obj),
+            CollisionShape.Plane => SpherePlaneOverlapXyz(x, y, z, radius, obj),
             _ => false
         };
+
+    /// <summary>Half-space: Motus local +X is free. Collide when signed distance &lt; radius.</summary>
+    private static bool SpherePlaneOverlapXyz(double x, double y, double z, double radius, CollisionObject plane)
+    {
+        var m = Transforms.FromFrame(plane.Pose);
+        // Local +X axis in world = first column
+        var nx = m[0]; var ny = m[4]; var nz = m[8];
+        var signed = (x - plane.Pose.X) * nx + (y - plane.Pose.Y) * ny + (z - plane.Pose.Z) * nz;
+        return signed < radius;
+    }
 
     private static bool SphereSphereOverlapXyz(
         double ax, double ay, double az, double ra,

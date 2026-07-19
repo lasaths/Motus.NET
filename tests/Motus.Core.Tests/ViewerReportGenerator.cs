@@ -331,6 +331,14 @@ internal static class ViewerReportGenerator
       HalfY = obj.ExtentY,
       HalfZ = obj.ExtentZ,
     },
+    CollisionShape.Plane => new ViewerObstacleReport
+    {
+      Shape = "plane",
+      Name = obj.Name,
+      X = obj.Pose.X,
+      Y = obj.Pose.Y,
+      Z = obj.Pose.Z,
+    },
     _ => throw new NotSupportedException($"Viewer export does not support {obj.Shape}"),
   };
 
