@@ -59,10 +59,20 @@ var scene = SrdfLoader.MergeAllowedPairs(obstacleScene, pairs, linkNameToIndex);
 
 Pair names can be robot link names or `CollisionBodies.RobotLink(index)` when mapped.
 
+## Kinematic tree
+
+`UrdfRobotLoader.LoadTree` builds a full `KinematicTree` (all links/joints), including URDF `<mimic joint="..." multiplier="..." offset="..."/>`.
+
+`Load` remains the legacy serial tip path (`ExtractSerialTip` → `SerialJointChain` + optional tip tool offset) and attaches `UrdfRobot.Tree`. Serial tip extract / `Load` still reject mimic joints on the tip path (off-path mimics are fine on the tree).
+
+Tree FK: `TreeForwardKinematics.ComputeLinkTransformsInto(driverQ, mats)` — caller-owned `double[16]` mats, one per link in tree link order; mimics expand into a reused buffer.
+
+Reach samples: `ReachSampling.FillTcpPointsInto` (Halton over driver limits, capped — never a joint-grid product).
+
 ## Limits
 
-- Serial chains only (no closed loops)
-- No mimic joints
+- Tree topology only (no closed loops)
+- Mimic: supported by `LoadTree` + Tree FK; not on the serial tip path used by `Load`
 - xacro: includes, properties, simple macros only — no `$(find)`
 
 ## Bundled fixtures
