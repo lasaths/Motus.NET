@@ -8,6 +8,9 @@ public static class CollisionBodies
 
     public static string RobotLink(int index)
     {
+        // ponytail: negative indices are plane-proximal aliases (link:-1), not cache slots
+        if (index < 0)
+            return $"link:{index}";
         if ((uint)index >= (uint)_linkNames.Length)
             GrowLinkNames(index + 1);
         return _linkNames[index];
@@ -36,18 +39,14 @@ public sealed class CollisionScene
     public CollisionScene(IReadOnlyList<CollisionObject>? objects = null, IReadOnlyList<(string, string)>? allowedPairs = null)
     {
         Objects = objects ?? Array.Empty<CollisionObject>();
-<<<<<<< HEAD
-        AllowedPairs = allowedPairs ?? Array.Empty<(string, string)>();
+        // ponytail: plane at robot origin clips proximal envelopes — skip link:-1..1 vs planes
+        AllowedPairs = WithPlaneBasePairs(Objects, allowedPairs);
         if (AllowedPairs.Count > 0)
         {
             _allowedSet = new HashSet<(string, string)>();
             foreach (var (a, b) in AllowedPairs)
                 _allowedSet.Add(NormalizePair(a, b));
         }
-=======
-        // ponytail: plane at robot origin clips proximal envelopes — skip link:-1..1 vs planes
-        AllowedPairs = WithPlaneBasePairs(Objects, allowedPairs);
->>>>>>> 0721fae (Add infinite plane collision objects and proximal-link ignore.)
     }
 
     public bool IsPairAllowed(string bodyA, string bodyB)
@@ -56,10 +55,9 @@ public sealed class CollisionScene
         return _allowedSet.Contains(NormalizePair(bodyA, bodyB));
     }
 
-<<<<<<< HEAD
     private static (string, string) NormalizePair(string a, string b) =>
         string.CompareOrdinal(a, b) <= 0 ? (a, b) : (b, a);
-=======
+
     private static IReadOnlyList<(string A, string B)> WithPlaneBasePairs(
         IReadOnlyList<CollisionObject> objects,
         IReadOnlyList<(string, string)>? allowedPairs)
@@ -88,5 +86,4 @@ public sealed class CollisionScene
         }
         pairs.Add((a, b));
     }
->>>>>>> 0721fae (Add infinite plane collision objects and proximal-link ignore.)
 }
