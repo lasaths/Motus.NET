@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.2] - 2026-07-19
+
+### Added
+
+- `ToolParameterBinding` — Robotiq 2F-85 width → primary knuckle driver q (TreeFK + mimic)
+- `JointTableTrees.FromRows` — branching/serial kinematic trees from one joint table
+- `MobilityModel.HolonomicSE2` / `Fixed` — base-frame hook for non-fixed cells
+
+### Changed
+
+- `KinematicsResolver` analytic UR IK only when AxisCount == 6 (N-DOF / rail → numerical)
+
 ## [0.7.1] - 2026-07-19
 
 ### Added

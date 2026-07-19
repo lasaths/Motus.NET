@@ -18,11 +18,15 @@ public static class KinematicsResolver
 
     public static IInverseKinematics CreateInverseKinematics(RobotPreset preset, SerialJointChain? serialChain = null)
     {
-        if (serialChain is not null && KinematicsProfiles.IsUniversalRobots(preset))
+        // Analytic UR IK is 6R only — N-DOF / rail / serial trees use numerical IK.
+        if (serialChain is not null
+            && KinematicsProfiles.IsUniversalRobots(preset)
+            && preset.AxisCount == 6
+            && serialChain.Joints.Length == 6)
             return new UrdfUniversalRobotsKinematics(preset, serialChain);
         if (serialChain is not null)
             return new NumericalInverseKinematics(CreateFkSolver(preset, serialChain), preset);
-        if (KinematicsProfiles.IsUniversalRobots(preset))
+        if (KinematicsProfiles.IsUniversalRobots(preset) && preset.AxisCount == 6)
             return new UrInverseKinematics(preset);
         return new NumericalInverseKinematics(CreateFkSolver(preset), preset);
     }
