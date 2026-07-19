@@ -165,51 +165,75 @@ public static class Transforms
 
     public static double[] FromRpy(double x, double y, double z, double roll, double pitch, double yaw)
     {
-        var t = FromRpyRotation(roll, pitch, yaw);
-        t[3] = x; t[7] = y; t[11] = z;
+        var t = new double[16];
+        FromRpyInto(t, x, y, z, roll, pitch, yaw);
         return t;
+    }
+
+    public static void FromRpyInto(double[] m, double x, double y, double z, double roll, double pitch, double yaw)
+    {
+        FromRpyRotationInto(m, roll, pitch, yaw);
+        m[3] = x; m[7] = y; m[11] = z;
     }
 
     public static double[] FromRpyRotation(double roll, double pitch, double yaw)
     {
+        var m = new double[16];
+        FromRpyRotationInto(m, roll, pitch, yaw);
+        return m;
+    }
+
+    public static void FromRpyRotationInto(double[] m, double roll, double pitch, double yaw)
+    {
         var cr = Math.Cos(roll); var sr = Math.Sin(roll);
         var cp = Math.Cos(pitch); var sp = Math.Sin(pitch);
         var cy = Math.Cos(yaw); var sy = Math.Sin(yaw);
-        return
-        [
-            cy * cp, cy * sp * sr - sy * cr, cy * sp * cr + sy * sr, 0,
-            sy * cp, sy * sp * sr + cy * cr, sy * sp * cr - cy * sr, 0,
-            -sp, cp * sr, cp * cr, 0,
-            0, 0, 0, 1
-        ];
+        m[0] = cy * cp; m[1] = cy * sp * sr - sy * cr; m[2] = cy * sp * cr + sy * sr; m[3] = 0;
+        m[4] = sy * cp; m[5] = sy * sp * sr + cy * cr; m[6] = sy * sp * cr - cy * sr; m[7] = 0;
+        m[8] = -sp; m[9] = cp * sr; m[10] = cp * cr; m[11] = 0;
+        m[12] = 0; m[13] = 0; m[14] = 0; m[15] = 1;
     }
 
     public static double[] FromPrismatic(double ax, double ay, double az, double distance)
     {
+        var m = new double[16];
+        FromPrismaticInto(m, ax, ay, az, distance);
+        return m;
+    }
+
+    public static void FromPrismaticInto(double[] m, double ax, double ay, double az, double distance)
+    {
         var len = Math.Sqrt(ax * ax + ay * ay + az * az);
-        if (len < 1e-12) return Identity();
-        var m = Identity();
+        IdentityInto(m);
+        if (len < 1e-12) return;
         m[3] = ax / len * distance;
         m[7] = ay / len * distance;
         m[11] = az / len * distance;
-        return m;
     }
 
     public static double[] FromAxisAngle(double ax, double ay, double az, double theta)
     {
+        var m = new double[16];
+        FromAxisAngleInto(m, ax, ay, az, theta);
+        return m;
+    }
+
+    public static void FromAxisAngleInto(double[] m, double ax, double ay, double az, double theta)
+    {
         var len = Math.Sqrt(ax * ax + ay * ay + az * az);
-        if (len < 1e-12) return Identity();
+        if (len < 1e-12)
+        {
+            IdentityInto(m);
+            return;
+        }
         ax /= len; ay /= len; az /= len;
         var c = Math.Cos(theta);
         var s = Math.Sin(theta);
         var t = 1 - c;
-        return
-        [
-            t * ax * ax + c, t * ax * ay - s * az, t * ax * az + s * ay, 0,
-            t * ax * ay + s * az, t * ay * ay + c, t * ay * az - s * ax, 0,
-            t * ax * az - s * ay, t * ay * az + s * ax, t * az * az + c, 0,
-            0, 0, 0, 1
-        ];
+        m[0] = t * ax * ax + c; m[1] = t * ax * ay - s * az; m[2] = t * ax * az + s * ay; m[3] = 0;
+        m[4] = t * ax * ay + s * az; m[5] = t * ay * ay + c; m[6] = t * ay * az - s * ax; m[7] = 0;
+        m[8] = t * ax * az - s * ay; m[9] = t * ay * az + s * ax; m[10] = t * az * az + c; m[11] = 0;
+        m[12] = 0; m[13] = 0; m[14] = 0; m[15] = 1;
     }
 
     public static double Distance(double[] a, double[] b)
