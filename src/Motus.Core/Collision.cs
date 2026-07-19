@@ -19,8 +19,6 @@ public sealed class CollisionObject
     public double ExtentX { get; }
     public double ExtentY { get; }
     public double ExtentZ { get; }
-    /// <summary>Stable hash of shape payload (extents or mesh topology) for cache keys.</summary>
-    public int ContentHash { get; }
 
     // PONYTAIL: Mesh data (vertices [x,y,z], triangle indices)
     public List<double[]>? MeshVertices { get; }
@@ -30,14 +28,10 @@ public sealed class CollisionObject
     public double[]? MeshAabbMin { get; }  // [minX, minY, minZ]
     public double[]? MeshAabbMax { get; }  // [maxX, maxY, maxZ]
 
-<<<<<<< HEAD
     /// <summary>Stable content key computed once at construction (verts/indices or primitive extents).</summary>
     public int ContentHash { get; }
 
-    // PONYTAIL: Sphere/Box constructor (existing)
-=======
     // PONYTAIL: Sphere/Box/Capsule/Plane constructor
->>>>>>> 0721fae (Add infinite plane collision objects and proximal-link ignore.)
     private CollisionObject(string name, Frame pose, CollisionShape shape, double extentX, double extentY, double extentZ)
     {
         Name = name;
@@ -46,11 +40,7 @@ public sealed class CollisionObject
         ExtentX = extentX;
         ExtentY = shape == CollisionShape.Box ? extentY : shape == CollisionShape.Capsule ? extentY : extentX;
         ExtentZ = shape == CollisionShape.Box ? extentZ : extentX;
-<<<<<<< HEAD
-        ContentHash = ComputePrimitiveContentHash(name, ExtentX, ExtentY, ExtentZ);
-=======
-        ContentHash = HashCode.Combine((int)shape, ExtentX, ExtentY, ExtentZ);
->>>>>>> 0721fae (Add infinite plane collision objects and proximal-link ignore.)
+        ContentHash = ComputePrimitiveContentHash(name, shape, ExtentX, ExtentY, ExtentZ);
     }
 
     // PONYTAIL: Mesh constructor
@@ -67,17 +57,7 @@ public sealed class CollisionObject
 
         // PONYTAIL: Compute AABB once at construction
         (MeshAabbMin, MeshAabbMax) = ComputeAabb(vertices);
-<<<<<<< HEAD
         ContentHash = ComputeMeshContentHash(name, vertices, indices);
-=======
-        var h = new HashCode();
-        h.Add((int)CollisionShape.Mesh);
-        h.Add(vertices.Count);
-        h.Add(indices.Count);
-        h.Add(MeshAabbMin[0]); h.Add(MeshAabbMin[1]); h.Add(MeshAabbMin[2]);
-        h.Add(MeshAabbMax[0]); h.Add(MeshAabbMax[1]); h.Add(MeshAabbMax[2]);
-        ContentHash = h.ToHashCode();
->>>>>>> 0721fae (Add infinite plane collision objects and proximal-link ignore.)
     }
 
     public static CollisionObject Sphere(string name, Frame pose, double radiusMeters) =>
@@ -121,10 +101,12 @@ public sealed class CollisionObject
         return (min, max);
     }
 
-    private static int ComputePrimitiveContentHash(string name, double extentX, double extentY, double extentZ)
+    private static int ComputePrimitiveContentHash(
+        string name, CollisionShape shape, double extentX, double extentY, double extentZ)
     {
         var hash = new HashCode();
         hash.Add(name, StringComparer.Ordinal);
+        hash.Add((int)shape);
         hash.Add(extentX);
         hash.Add(extentY);
         hash.Add(extentZ);

@@ -7,7 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-<<<<<<< HEAD
+## [0.7.0] - 2026-07-19
+
+### Added
+
+- `CollisionShape.Plane` / `CollisionObject.Plane` — infinite half-space (Motus local +X free); O(1) signed-distance tests in managed checkers
+- Plane obstacles auto-allow proximal `link:-1..1` pairs (robot + floor at origin)
+
 ## [0.6.9] - 2026-07-19
 
 ### Fixed
@@ -38,13 +44,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `Transforms.TransformPointInto` — allocation-free point transform
 - `JointState.Wrap` — adopt an existing joint buffer without copying
 - `Example03CollisionRrtPerfTests` — UR10e + ColSphere scenario aligned with Motus.Grasshopper `examples/03_collision_rrt.ghx`
-=======
-### Added
-
-- `CollisionShape.Plane` / `CollisionObject.Plane` — infinite half-space (Motus local +X free); O(1) signed-distance tests in managed checkers
-- `CollisionObject.ContentHash` — stable shape payload hash for cache keys
-- Plane obstacles auto-allow proximal `link:-1..1` pairs (robot + floor at origin)
->>>>>>> 0721fae (Add infinite plane collision objects and proximal-link ignore.)
 
 ## [0.6.6] - 2026-07-13
 
@@ -310,7 +309,8 @@ Initial public release.
 - **Motus.Presets** — JSON preset loader with bundled UR and KUKA defaults
   (approximate public datasheet values for planning/visualization only).
 
-[Unreleased]: https://github.com/lasaths/Motus.NET/compare/v0.6.9...HEAD
+[Unreleased]: https://github.com/lasaths/Motus.NET/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/lasaths/Motus.NET/compare/v0.6.9...v0.7.0
 [0.6.9]: https://github.com/lasaths/Motus.NET/compare/v0.6.8...v0.6.9
 [0.6.8]: https://github.com/lasaths/Motus.NET/compare/v0.6.7...v0.6.8
 [0.6.7]: https://github.com/lasaths/Motus.NET/compare/v0.6.6...v0.6.7
