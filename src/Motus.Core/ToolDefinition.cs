@@ -13,6 +13,12 @@ public sealed class ToolDefinition
     public Frame? GeometryAttachOffset { get; init; }
     /// <summary>Actuated parameters exposed along trajectories (e.g. gripper width).</summary>
     public ToolCapabilities? Capabilities { get; }
+    /// <summary>
+    /// Declarative Cap→driver-joint bindings (Wave 3). When non-null and non-empty, mechanism FK (kinematic-tree
+    /// driver q) owns jaw motion and <see cref="GeometryForState"/> returns <see cref="Geometry"/> unchanged —
+    /// no mesh squash. Legacy static-tool mesh squash only applies when this is null/empty.
+    /// </summary>
+    public IReadOnlyList<ToolDriverBinding>? Bindings { get; init; }
 
     public ToolDefinition(string name, Frame tcp, CollisionObject? geometry = null, ToolCapabilities? capabilities = null)
     {
@@ -26,6 +32,9 @@ public sealed class ToolDefinition
     public CollisionObject? GeometryForState(EndEffectorState? state)
     {
         if (Geometry is null || state is null || Capabilities is null)
+            return Geometry;
+
+        if (Bindings is { Count: > 0 })
             return Geometry;
 
         if (!state.Values.TryGetValue("width", out var width))

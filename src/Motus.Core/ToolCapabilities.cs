@@ -82,4 +82,17 @@ public sealed class ToolCapabilities
         new ToolParameter("speed", "ratio", 0, 1, 0.5),
         new ToolParameter("force", "ratio", 0, 1, 0.5)
     });
+
+    /// <summary>
+    /// Declarative Wave-3 <c>width</c>→driver binding for the bundled Robotiq 2F-85 URDF, whose primary
+    /// actuated knuckle joint is named exactly <c>robotiq_left_knuckle</c> (URDF mimic joints follow it).
+    /// </summary>
+    public static IReadOnlyList<ToolDriverBinding> Robotiq2F85DefaultBindings { get; } = new[]
+    {
+        new ToolDriverBinding(
+            Parameter: "width",
+            DriverJoint: "robotiq_left_knuckle",
+            OpenValue: ToolParameterBinding.Robotiq2F85OpenWidthMeters,
+            ClosedDriverValue: ToolParameterBinding.Robotiq2F85ClosedDriverRadians)
+    };
 }

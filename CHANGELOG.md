@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-07-22
+
+### Added
+
+- `RobotDescription` / `UrdfLink` / `UrdfJoint` / `UrdfGeometry` — in-memory URDF authoring (Assemble, Attach, Explode, TipTcp, HomeQ)
+- `RobotDescriptionSession.Project` — description → `KinematicTree` + optional tip extract (defaults tip to `TipLink`)
+- `KinematicTree.Attach` — rotation-aware graft of a mechanism tree (driver-index remap, join-name / root checks)
+- `UrdfWriter` / `UrdfName` / `StlWriter` — serialize descriptions (+ optional mesh sidecars); relative mesh paths only
+- `ToolDriverBinding` + `ToolDefinition.Bindings` — declarative Cap→driver map; skips mesh-squash when bindings set
+- `ToolCapabilities.Robotiq2F85DefaultBindings` — `robotiq_left_knuckle` width binding
+
+### Changed
+
+- `ToolParameterBinding.ApplyInto` accepts optional explicit bindings (Wave 3) ahead of Robotiq heuristics
+
 ## [0.7.2] - 2026-07-19
 
 ### Added

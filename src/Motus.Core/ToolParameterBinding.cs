@@ -1,6 +1,17 @@
 namespace Motus.Core;
 
 /// <summary>
+/// Declarative capability-parameter → kinematic driver-joint mapping (Wave 3).
+/// State value <c>Parameter</c> maps linearly from <c>OpenValue</c>→0 driver to <c>ClosedDriverValue</c>,
+/// written onto the driver q entry whose joint name equals <c>DriverJoint</c>.
+/// </summary>
+public readonly record struct ToolDriverBinding(
+    string Parameter,
+    string DriverJoint,
+    double OpenValue,
+    double ClosedDriverValue);
+
+/// <summary>
 /// Maps tool state parameters onto kinematic-tree driver q (Wave 2).
 /// Robotiq 2F-85: width → left knuckle driver; URDF mimic owns the rest.
 /// </summary>
@@ -59,6 +70,57 @@ public static class ToolParameterBinding
             if (!IsRobotiq2F85PrimaryDriver(driverJointNames[i])) continue;
             driverQ[i] = jaw;
             written++;
+        }
+        return written;
+    }
+
+    /// <summary>
+    /// Apply <paramref name="state"/> onto driver q using declarative <paramref name="bindings"/> when supplied
+    /// (Cap→driver-joint map: exact joint-name match, linear OpenValue→0 to ClosedDriverValue).
+    /// Falls back to the legacy Robotiq2F85 heuristic when <paramref name="bindings"/> is null/empty, for compat.
+    /// Returns number of drivers written.
+    /// </summary>
+    public static int ApplyInto(
+        ToolCapabilities? capabilities,
+        EndEffectorState? state,
+        IReadOnlyList<string> driverJointNames,
+        Span<double> driverQ,
+        IReadOnlyList<ToolDriverBinding>? bindings,
+        double openWidthMeters = Robotiq2F85OpenWidthMeters)
+    {
+        if (state is null || driverJointNames.Count == 0)
+            return 0;
+
+        if (bindings is { Count: > 0 })
+            return ApplyBindings(state, driverJointNames, driverQ, bindings);
+
+        return ApplyInto(capabilities, state, driverJointNames, driverQ, openWidthMeters);
+    }
+
+    private static int ApplyBindings(
+        EndEffectorState state,
+        IReadOnlyList<string> driverJointNames,
+        Span<double> driverQ,
+        IReadOnlyList<ToolDriverBinding> bindings)
+    {
+        var n = Math.Min(driverJointNames.Count, driverQ.Length);
+        var written = 0;
+        foreach (var binding in bindings)
+        {
+            if (!state.Values.TryGetValue(binding.Parameter, out var value))
+                continue;
+
+            var open = binding.OpenValue;
+            var ratio = Math.Abs(open) > 1e-9 ? Math.Clamp(value / open, 0, 1) : 0.0;
+            var driverValue = (1.0 - ratio) * binding.ClosedDriverValue;
+
+            for (var i = 0; i < n; i++)
+            {
+                if (!string.Equals(driverJointNames[i], binding.DriverJoint, StringComparison.OrdinalIgnoreCase))
+                    continue;
+                driverQ[i] = driverValue;
+                written++;
+            }
         }
         return written;
     }

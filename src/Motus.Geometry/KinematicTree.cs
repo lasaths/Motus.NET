@@ -132,6 +132,87 @@ public sealed class KinematicTree
     public SerialJointChain ExtractSerialChain(string baseLink, string tipLink) =>
         ExtractSerialTip(baseLink, tipLink).Chain;
 
+    /// <summary>
+    /// Graft <paramref name="mechanism"/> (e.g. a tool mechanism projected from a
+    /// <see cref="RobotDescription"/>) onto this tree at <paramref name="ontoLink"/> via a new fixed
+    /// joint to <paramref name="mechanism"/>'s <paramref name="mechanismRootLink"/>, offset by
+    /// <paramref name="attachFrame"/>. Unlike <see cref="RobotDescription.Attach"/> (translation-only
+    /// joint origins — fine for from-scratch mechanisms, not for URDF-loaded arms with rotated joint
+    /// origins), this supports full rotation, since <see cref="KinematicJoint"/> carries roll/pitch/yaw.
+    /// Driver order is this tree's drivers followed by the mechanism's (existing driver-index callers —
+    /// e.g. an arm's <c>JointNames</c> — are unaffected); <see cref="ExtractSerialTip"/> from this tree's
+    /// own links is likewise unaffected since the graft only adds descendants below <paramref name="ontoLink"/>.
+    /// </summary>
+    public KinematicTree Attach(string ontoLink, KinematicTree mechanism, string mechanismRootLink, Frame attachFrame, string? name = null)
+    {
+        if (mechanism is null) throw new ArgumentNullException(nameof(mechanism));
+        var ontoIndex = IndexOfLink(ontoLink);
+        var mechRootIndex = mechanism.IndexOfLink(mechanismRootLink);
+        var mechanismRootName = mechanism.Links[mechanism.RootLinkIndex].Name;
+        if (!string.Equals(mechanismRootLink, mechanismRootName, StringComparison.OrdinalIgnoreCase))
+            throw new ArgumentException(
+                $"mechanismRootLink must be the mechanism root ('{mechanismRootName}'), not '{mechanismRootLink}'.",
+                nameof(mechanismRootLink));
+
+        var clashingLinks = mechanism.Links.Select(l => l.Name)
+            .Where(n => _linkIndex.ContainsKey(n)).ToList();
+        if (clashingLinks.Count > 0)
+            throw new InvalidOperationException($"Attach: link name clash with '{Name}': {string.Join(", ", clashingLinks)}.");
+
+        var ownJointNames = new HashSet<string>(Joints.Select(j => j.Name), StringComparer.OrdinalIgnoreCase);
+        var mechJointNames = new HashSet<string>(mechanism.Joints.Select(j => j.Name), StringComparer.OrdinalIgnoreCase);
+        var clashingJoints = mechanism.Joints.Select(j => j.Name)
+            .Where(ownJointNames.Contains).ToList();
+        if (clashingJoints.Count > 0)
+            throw new InvalidOperationException($"Attach: joint name clash with '{Name}': {string.Join(", ", clashingJoints)}.");
+
+        var joinName = $"{ontoLink}_to_{mechanismRootLink}_fixed";
+        if (ownJointNames.Contains(joinName) || mechJointNames.Contains(joinName))
+            throw new InvalidOperationException($"Attach: joint name '{joinName}' already exists.");
+
+        var linkOffset = Links.Count;
+        var jointOffset = Joints.Count + 1;
+
+        var combinedLinks = new List<KinematicLink>(Links.Count + mechanism.Links.Count);
+        combinedLinks.AddRange(Links);
+        combinedLinks.AddRange(mechanism.Links);
+
+        var (ox, oy, oz, roll, pitch, yaw) = FrameToXyzRpy(attachFrame);
+        var attachJoint = new KinematicJoint(
+            joinName, KinematicJointType.Fixed, ontoIndex, mechRootIndex + linkOffset,
+            ox, oy, oz, roll, pitch, yaw,
+            0, 0, 1, 0, 0, velocity: null, driverIndex: -1, mimic: null);
+
+        var combinedJoints = new List<KinematicJoint>(Joints.Count + mechanism.Joints.Count + 1);
+        combinedJoints.AddRange(Joints);
+        combinedJoints.Add(attachJoint);
+        var driverQOffset = DriverCount;
+        foreach (var j in mechanism.Joints)
+        {
+            var mimic = j.Mimic is { } m ? new KinematicMimic(m.JointIndex + jointOffset, m.Multiplier, m.Offset) : (KinematicMimic?)null;
+            // DriverIndex indexes the combined driver-q (arm drivers first, then mechanism).
+            var driverIndex = j.DriverIndex < 0 ? -1 : j.DriverIndex + driverQOffset;
+            combinedJoints.Add(new KinematicJoint(
+                j.Name, j.Type,
+                j.ParentLinkIndex + linkOffset, j.ChildLinkIndex + linkOffset,
+                j.OriginX, j.OriginY, j.OriginZ,
+                j.Roll, j.Pitch, j.Yaw,
+                j.AxisX, j.AxisY, j.AxisZ,
+                j.Lower, j.Upper, j.Velocity,
+                driverIndex, mimic));
+        }
+
+        var driverIndices = new List<int>(DriverJointIndices.Count + mechanism.DriverJointIndices.Count);
+        driverIndices.AddRange(DriverJointIndices);
+        foreach (var di in mechanism.DriverJointIndices)
+            driverIndices.Add(di + jointOffset);
+
+        return new KinematicTree(name ?? $"{Name}+{mechanism.Name}", combinedLinks, combinedJoints, RootLinkIndex, driverIndices);
+    }
+
+    private static (double x, double y, double z, double roll, double pitch, double yaw) FrameToXyzRpy(Frame f) =>
+        MatrixToXyzRpy(Transforms.FromFrame(f));
+
     public SerialTipExtraction ExtractSerialTip(string baseLink, string tipLink)
     {
         var byChild = new Dictionary<int, KinematicJoint>(Joints.Count);
