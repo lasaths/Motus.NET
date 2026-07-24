@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.1] - 2026-07-24
+
+### Fixed
+
+- Serial PlanBundle JSON shape restored (no spurious \amily\ / unit fields); Stewart-only export branch
+
 ## [0.9.0] - 2026-07-24
 
 ### Added
