@@ -87,20 +87,93 @@ public static class TrajectoryExport
         var toolCapabilities = options.ToolCapabilities;
         var diagnostics = options.Diagnostics;
         var provenance = options.Provenance;
-        var stewart = Units.IsStewart(traj.Robot.Preset);
-        var jointUnit = stewart ? "meters" : "radians";
+        var jsonOptions = new JsonSerializerOptions
+        {
+            WriteIndented = true,
+            DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
+        };
+
+        // Stewart-only shape (meters). Serial keeps PlanBundle golden fixture shape below.
+        if (Units.IsStewart(traj.Robot.Preset))
+        {
+            var stewartObj = new
+            {
+                exportVersion = PlanBundleContract.ExportVersion,
+                contractVersion = PlanBundleContract.ContractVersion,
+                robot = traj.Robot.DisplayName,
+                family = traj.Robot.Preset.Family,
+                jointNames,
+                units = new
+                {
+                    jointCoordinates = "meters",
+                    legLengths = "meters",
+                    time = "seconds",
+                    distance = "meters"
+                },
+                frameConvention = new
+                {
+                    baseFrame = "robot_base",
+                    tcpFrame = "tool_center_point",
+                    jointOrder = "robot.jointNames order"
+                },
+                durationSeconds = traj.DurationSeconds,
+                pointCount = traj.Points.Count,
+                retimed = options.Retime,
+                provenance = provenance is null ? null : new
+                {
+                    plannerId = provenance.PlannerId,
+                    randomSeed = provenance.RandomSeed,
+                    settingsHash = provenance.SettingsHash,
+                    retimeAlgorithm = provenance.RetimeAlgorithm
+                },
+                diagnostics = diagnostics?.Select(d => new
+                {
+                    code = d.Code,
+                    severity = d.Severity.ToString().ToLowerInvariant(),
+                    message = d.Message
+                }),
+                toolFrame,
+                toolCapabilities = toolCapabilities is null ? null : toolCapabilities.Parameters.Select(p => new
+                {
+                    name = p.Name,
+                    unit = p.Unit,
+                    min = p.Min,
+                    max = p.Max,
+                    defaultValue = p.Default
+                }),
+                points = traj.Points.Select(p =>
+                {
+                    Dictionary<string, double>? joints = null;
+                    if (jointNames is not null)
+                    {
+                        joints = new Dictionary<string, double>();
+                        for (var i = 0; i < jointNames.Count; i++)
+                            joints[jointNames[i]] = p.JointState.Positions[i];
+                    }
+                    return new
+                    {
+                        timeSeconds = p.TimeSeconds,
+                        jointCoordinates = p.JointState.Positions,
+                        joints,
+                        motionType = p.MotionType?.ToString().ToLowerInvariant(),
+                        segmentIndex = p.SegmentIndex,
+                        blendRadiusMeters = p.BlendRadiusMeters,
+                        toolState = p.ToolState?.Values
+                    };
+                })
+            };
+            return JsonSerializer.Serialize(stewartObj, jsonOptions);
+        }
+
         var obj = new
         {
             exportVersion = PlanBundleContract.ExportVersion,
             contractVersion = PlanBundleContract.ContractVersion,
             robot = traj.Robot.DisplayName,
-            family = traj.Robot.Preset.Family,
             jointNames,
             units = new
             {
-                jointCoordinates = jointUnit,
-                jointAngles = stewart ? null : "radians",
-                legLengths = stewart ? "meters" : null,
+                jointAngles = "radians",
                 time = "seconds",
                 distance = "meters"
             },
@@ -147,8 +220,7 @@ public static class TrajectoryExport
                 return new
                 {
                     timeSeconds = p.TimeSeconds,
-                    jointsRadians = stewart ? null : p.JointState.Positions,
-                    jointCoordinates = p.JointState.Positions,
+                    jointsRadians = p.JointState.Positions,
                     joints,
                     motionType = p.MotionType?.ToString().ToLowerInvariant(),
                     segmentIndex = p.SegmentIndex,
@@ -157,11 +229,7 @@ public static class TrajectoryExport
                 };
             })
         };
-        return JsonSerializer.Serialize(obj, new JsonSerializerOptions
-        {
-            WriteIndented = true,
-            DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
-        });
+        return JsonSerializer.Serialize(obj, jsonOptions);
     }
 
     public static string ToCsv(Trajectory trajectory, bool retime = false) =>
