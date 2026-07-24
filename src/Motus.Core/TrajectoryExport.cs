@@ -87,15 +87,20 @@ public static class TrajectoryExport
         var toolCapabilities = options.ToolCapabilities;
         var diagnostics = options.Diagnostics;
         var provenance = options.Provenance;
+        var stewart = Units.IsStewart(traj.Robot.Preset);
+        var jointUnit = stewart ? "meters" : "radians";
         var obj = new
         {
             exportVersion = PlanBundleContract.ExportVersion,
             contractVersion = PlanBundleContract.ContractVersion,
             robot = traj.Robot.DisplayName,
+            family = traj.Robot.Preset.Family,
             jointNames,
             units = new
             {
-                jointAngles = "radians",
+                jointCoordinates = jointUnit,
+                jointAngles = stewart ? null : "radians",
+                legLengths = stewart ? "meters" : null,
                 time = "seconds",
                 distance = "meters"
             },
@@ -142,7 +147,8 @@ public static class TrajectoryExport
                 return new
                 {
                     timeSeconds = p.TimeSeconds,
-                    jointsRadians = p.JointState.Positions,
+                    jointsRadians = stewart ? null : p.JointState.Positions,
+                    jointCoordinates = p.JointState.Positions,
                     joints,
                     motionType = p.MotionType?.ToString().ToLowerInvariant(),
                     segmentIndex = p.SegmentIndex,
@@ -166,11 +172,13 @@ public static class TrajectoryExport
         options ??= new TrajectoryExportOptions();
         var traj = Prepare(trajectory, options);
         var n = traj.Robot.Preset.AxisCount;
+        var stewart = Units.IsStewart(traj.Robot.Preset);
+        var jointSuffix = stewart ? "_m" : "_rad";
         var hasMotionMetadata = traj.Points.Any(p => p.MotionType is not null || p.SegmentIndex is not null || p.BlendRadiusMeters is not null);
         var hasToolState = traj.Points.Any(p => p.ToolState is not null);
         var sb = new StringBuilder();
         sb.Append("time_seconds");
-        for (var i = 1; i <= n; i++) sb.Append($",joint_{i}_rad");
+        for (var i = 1; i <= n; i++) sb.Append($",joint_{i}{jointSuffix}");
         if (hasMotionMetadata) sb.Append(",motion_type,segment_index,blend_radius_m");
         if (hasToolState) sb.Append(",tool_state_json");
         sb.AppendLine();

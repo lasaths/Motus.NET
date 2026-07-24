@@ -35,7 +35,13 @@ See [rhino-host.md](rhino-host.md) for Windows/macOS deployment (managed-first).
 
 ## Units
 
-Internal units: **radians**, **seconds**, **meters**. Conversion helpers live in `Units`.
+Internal units: **radians** (revolute joints), **meters** (prismatic joints / distance), **seconds** (time). Conversion helpers live in `Units`. `JointLimit` carries `JointCoordinateUnit` (`Radians` or `Meters`); legacy `MinRadians`/`MaxRadians` aliases return the same numeric bounds.
+
+Stewart/Gough platforms (`RobotPreset.Family = "stewart"`) use six prismatic leg lengths in **meters**. See Motus.Grasshopper ADR 0003.
+
+## Engineering bar
+
+Strive for NASA-grade kinematics contracts: explicit units, structured IK/FK failure reasons (no silent NaN), deterministic solvers with documented tolerances, verified FK↔IK round-trips, and docs/ADR before shipping a new mechanism family.
 
 ## Native (`motus_native`)
 

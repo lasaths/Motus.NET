@@ -6,6 +6,9 @@ public static class KinematicsResolver
 {
     public static IFkSolver CreateFkSolver(RobotPreset preset, SerialJointChain? serialChain = null)
     {
+        if (Units.IsStewart(preset))
+            throw new InvalidOperationException(
+                "Stewart platforms use StewartForwardKinematics, not serial IFkSolver. Pass StewartPlatform.");
         if (serialChain is not null)
             return new SerialForwardKinematics(serialChain);
         if (KinematicsProfiles.TryGet(preset, out var dh))
@@ -18,6 +21,9 @@ public static class KinematicsResolver
 
     public static IInverseKinematics CreateInverseKinematics(RobotPreset preset, SerialJointChain? serialChain = null)
     {
+        if (Units.IsStewart(preset))
+            throw new InvalidOperationException(
+                "Stewart platforms use StewartInverseKinematics(StewartPlatform), not serial IK factories.");
         // Analytic UR IK is 6R only — N-DOF / rail / serial trees use numerical IK.
         if (serialChain is not null
             && KinematicsProfiles.IsUniversalRobots(preset)
@@ -32,5 +38,5 @@ public static class KinematicsResolver
     }
 
     public static bool SupportsModel(RobotPreset preset, SerialJointChain? serialChain = null) =>
-        serialChain is not null || KinematicsProfiles.TryGet(preset, out _);
+        Units.IsStewart(preset) || serialChain is not null || KinematicsProfiles.TryGet(preset, out _);
 }

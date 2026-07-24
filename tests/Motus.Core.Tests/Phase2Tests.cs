@@ -61,8 +61,8 @@ public class BottleneckRetimerTests
   {
     var limits = new List<JointLimit>
     {
-      new(-3.14, 3.14, maxVelocityRadiansPerSecond: 0.5),
-      new(-3.14, 3.14, maxVelocityRadiansPerSecond: 3.0)
+      new(-3.14, 3.14, maxVelocity: 0.5),
+      new(-3.14, 3.14, maxVelocity: 3.0)
     };
     var robot = new RobotModel(new RobotPreset
     {

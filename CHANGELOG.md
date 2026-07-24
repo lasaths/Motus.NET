@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-07-24
+
+### Added
+
+- Stewart/Gough parallel platform stack (`Family=stewart`): `StewartPlatform`, `StewartRobot`, `StewartInverseKinematics`, `StewartForwardKinematics`, `StewartCartesianPathPlanner`, `StewartPlatformLoader`
+- `KinematicsSolveResult` / `KinematicsReason` structured IK/FK outcomes (stroke, singular, FK diverge, ΔL jump)
+- `JointCoordinateUnit` (`Radians` / `Meters`) on `JointLimit`; factories `JointLimit.Radians` / `JointLimit.Meters`
+
+### Changed
+
+- `JointLimit` exposes `Min`/`Max`/`Unit`/`MaxVelocity`/`MaxAcceleration`; legacy `MinRadians` aliases retained
+- `ICollisionChecker.SegmentCollisionFree` parameter renamed to `configurationStep` (unit matches joint coordinates)
+- `TrajectoryExport` labels Stewart joints as meters; serial keeps radians
+- `KinematicsResolver` rejects serial FK/IK factories for `Family=stewart` (use Stewart APIs)
+
 ## [0.8.0] - 2026-07-22
 
 ### Added

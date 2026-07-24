@@ -29,7 +29,10 @@ public sealed class JointState
             for (var i = 0; i < Positions.Length; i++)
             {
                 if (!limits[i].Contains(Positions[i]))
-                    errors.Add($"Joint {i + 1} value {Positions[i]:F4} rad is outside [{limits[i].MinRadians:F4}, {limits[i].MaxRadians:F4}].");
+                {
+                    var u = limits[i].UnitLabel;
+                    errors.Add($"Joint {i + 1} value {Positions[i]:F4} {u} is outside [{limits[i].Min:F4}, {limits[i].Max:F4}] {u}.");
+                }
             }
         }
         return errors.Count == 0 ? ValidationResult.Ok() : ValidationResult.Fail(errors);

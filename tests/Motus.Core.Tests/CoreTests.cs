@@ -125,7 +125,7 @@ public class JointLinearPlannerTests
   [Fact]
   public void VelocityTimingRespectsMaxJointVelocity()
   {
-    var limits = Enumerable.Repeat(new JointLimit(-6.28, 6.28, maxVelocityRadiansPerSecond: 3.14), 6).ToList();
+    var limits = Enumerable.Repeat(new JointLimit(-6.28, 6.28, maxVelocity: 3.14), 6).ToList();
     var robot = new RobotModel(new RobotPreset
     {
       Manufacturer = RobotManufacturer.UniversalRobots,

@@ -219,7 +219,7 @@ public class TrajectoryRetimerTests
             Manufacturer = RobotManufacturer.UniversalRobots,
             ModelName = "UR5e",
             AxisCount = 6,
-            JointLimits = Enumerable.Range(0, 6).Select(_ => new JointLimit(-6.28, 6.28, maxVelocityRadiansPerSecond: 0.5)).ToList()
+            JointLimits = Enumerable.Range(0, 6).Select(_ => new JointLimit(-6.28, 6.28, maxVelocity: 0.5)).ToList()
         });
         var geo = new Trajectory(robot, new[]
         {
@@ -240,7 +240,7 @@ public class TrajectoryRetimerTests
             Manufacturer = RobotManufacturer.UniversalRobots,
             ModelName = "UR5e",
             AxisCount = 6,
-            JointLimits = Enumerable.Range(0, 6).Select(_ => new JointLimit(-6.28, 6.28, maxVelocityRadiansPerSecond: 0.8)).ToList()
+            JointLimits = Enumerable.Range(0, 6).Select(_ => new JointLimit(-6.28, 6.28, maxVelocity: 0.8)).ToList()
         });
         var geo = new Trajectory(robot, new[]
         {
