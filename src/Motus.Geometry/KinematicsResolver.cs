@@ -31,7 +31,8 @@ public static class KinematicsResolver
             && serialChain.Joints.Length == 6)
             return new UrdfUniversalRobotsKinematics(preset, serialChain);
         if (serialChain is not null)
-            return new NumericalInverseKinematics(CreateFkSolver(preset, serialChain), preset);
+            return new NumericalInverseKinematics(
+                CreateFkSolver(preset, serialChain), preset, serialChain);
         if (KinematicsProfiles.IsUniversalRobots(preset) && preset.AxisCount == 6)
             return new UrInverseKinematics(preset);
         return new NumericalInverseKinematics(CreateFkSolver(preset), preset);

@@ -405,6 +405,105 @@ public class LeggedGaitTests
         Assert.False(LegIk3R.TrySolve(hip, nanTarget, coxa, femur, tibia, out _, out _, out _));
     }
 
+    [Fact]
+    public void StaticStability_Triangle_ComInside_PositiveMargin()
+    {
+        var contacts = new[]
+        {
+            new Vec3(0, 0, 0),
+            new Vec3(1, 0, 0),
+            new Vec3(0.5, 0.8, 0),
+        };
+        var r = StaticStability.Evaluate(contacts, new Vec3(0.5, 0.25, 0));
+        Assert.True(r.IsStable, r.Failure);
+        Assert.True(r.MarginMeters > 0);
+    }
+
+    [Fact]
+    public void StaticStability_ComOutside_NegativeMargin()
+    {
+        var contacts = new[]
+        {
+            new Vec3(0, 0, 0),
+            new Vec3(1, 0, 0),
+            new Vec3(0.5, 0.8, 0),
+        };
+        var r = StaticStability.Evaluate(contacts, new Vec3(2, 2, 0));
+        Assert.False(r.IsStable);
+        Assert.True(r.MarginMeters < 0);
+    }
+
+    [Fact]
+    public void HexGait_Exposes_MethodProvenance_WithDois()
+    {
+        var layout = LeggedLayout.HexMithi(0.12, 0.06, 0.17, 0.19, 0.12);
+        var limits = Enumerable.Range(0, 18).Select(_ => new JointLimit(-Math.PI, Math.PI, Math.PI, Math.PI * 2)).ToList();
+        var model = new RobotModel(layout.ToPreset("hex", 18, limits));
+        var path = new[] { new Vec3(0, 0, 0), new Vec3(0.3, 0, 0) };
+        Assert.True(LeggedGait.TryBuild(
+            layout, path, 0.08, 0.06, 0.025,
+            7.5 * Deg, 30 * Deg, -30 * Deg,
+            model, out var result, out var err), err);
+        Assert.Contains(LeggedMethodRefs.LynchPark2017Doi, result!.MethodProvenance);
+        Assert.Contains(LeggedMethodRefs.McGheeFrank1968Doi, result.MethodProvenance);
+        Assert.Contains(LeggedMethodRefs.SongWaldron1987Doi, result.MethodProvenance);
+        Assert.Contains(LeggedMethodRefs.AristidouLasenby2011FabrikDoi, result.MethodProvenance);
+        Assert.True(double.IsFinite(result.MinStaticStabilityMarginMeters));
+    }
+
+    [Fact]
+    public void HexGait_StanceFeet_DoNotDragFarBehindNominal()
+    {
+        var layout = LeggedLayout.HexMithi(0.12, 0.06, 0.17, 0.19, 0.12);
+        var limits = Enumerable.Range(0, 18).Select(_ => new JointLimit(-Math.PI, Math.PI, Math.PI, Math.PI * 2)).ToList();
+        var model = new RobotModel(layout.ToPreset("hex", 18, limits));
+        const double step = 0.06;
+        var path = new[] { new Vec3(0, 0, 0), new Vec3(0.5, 0, 0) };
+
+        Assert.True(LeggedGait.TryBuild(
+            layout, path, 0.08, step, 0.025,
+            7.5 * Deg, 30 * Deg, -30 * Deg,
+            model, out var result, out var err), err);
+
+        var stanceQ = LeggedGait.BuildStanceQ(layout, 7.5 * Deg, 30 * Deg, -30 * Deg);
+        var nominalBody = new Vec3[6];
+        for (var leg = 0; leg < 6; leg++)
+        {
+            var yaw = layout.HipYawsRad[leg];
+            var hip = new Vec3(layout.BodyR * Math.Cos(yaw), layout.BodyR * Math.Sin(yaw), layout.BodyZ);
+            var foot = LegIk3R.FootPosition(hip, layout.Coxa, layout.Femur, layout.Tibia,
+                stanceQ[leg * 3], stanceQ[leg * 3 + 1], stanceQ[leg * 3 + 2]);
+            nominalBody[leg] = new Vec3(foot.X, foot.Y, 0);
+        }
+
+        var maxDrift = 0.0;
+        for (var i = 0; i < result!.Trajectory.Points.Count; i++)
+        {
+            var q = result.Trajectory.Points[i].JointState.Positions;
+            var bf = result.BasePath[i];
+            var yaw = 2.0 * Math.Atan2(bf.Qz, bf.Qw);
+            var c = Math.Cos(-yaw);
+            var s = Math.Sin(-yaw);
+            for (var leg = 0; leg < 6; leg++)
+            {
+                var hy = layout.HipYawsRad[leg];
+                var hip = new Vec3(layout.BodyR * Math.Cos(hy), layout.BodyR * Math.Sin(hy), layout.BodyZ);
+                var footBody = LegIk3R.FootPosition(hip, layout.Coxa, layout.Femur, layout.Tibia,
+                    q[leg * 3], q[leg * 3 + 1], q[leg * 3 + 2]);
+                // Skip clear swing (lifted)
+                if (footBody.Z > 0.015) continue;
+                var dx = footBody.X - nominalBody[leg].X;
+                var dy = footBody.Y - nominalBody[leg].Y;
+                var drift = Math.Sqrt(dx * dx + dy * dy);
+                if (drift > maxDrift) maxDrift = drift;
+            }
+        }
+
+        // Duty + drift replant should keep planted feet near nominal (not body-length drag).
+        Assert.True(maxDrift < 1.35 * step,
+            $"Planted foot drifted {maxDrift:F3} m from nominal (step={step}); back legs likely dragging.");
+    }
+
     // --- Helper ---
 
     private static void AssertVec3Near(Vec3 actual, Vec3 expected, double tol, string msg = "")

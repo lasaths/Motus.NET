@@ -4,8 +4,13 @@ namespace Motus.Geometry;
 
 /// <summary>
 /// N×3R insectoid layout: hip mount yaws, swing-group partition, tip-path leg.
-/// Flat-ground preview gait — Motus.NET owns math; GH is thin wiring.
+/// Flat-ground preview gait — Motus.NET owns math; Grasshopper is thin Rhino wiring only.
 /// </summary>
+/// <remarks>
+/// SwingGroups encode a periodic support schedule (Song &amp; Waldron gait phasing concepts,
+/// DOI <see cref="LeggedMethodRefs.SongWaldron1987Doi"/>). A specific hex tripod index set is a
+/// design choice, not a uniquely validated biological gait.
+/// </remarks>
 public sealed class LeggedLayout
 {
     public IReadOnlyList<string> LegNames { get; }
@@ -44,7 +49,11 @@ public sealed class LeggedLayout
     public int DriverCount => LegCount * 3;
     public string TipLinkName => $"{TipLegName}_tibia";
 
-    /// <summary>Mithi-style hex: 6 legs @ π/3, tripod groups RF/LM/LB then RM/LF/RB.</summary>
+    /// <summary>
+    /// Hex layout: 6 hips @ π/3, two alternating swing groups (tripod duty schedule).
+    /// Grouping is a design choice for creeping/preview locomotion (McGhee–Frank style support
+    /// alternation, DOI <see cref="LeggedMethodRefs.McGheeFrank1968Doi"/>), not a biology claim.
+    /// </summary>
     public static LeggedLayout HexMithi(
         double bodyR, double coxa, double femur, double tibia, double bodyZ)
     {

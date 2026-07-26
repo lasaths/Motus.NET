@@ -3,9 +3,26 @@ using Motus.Core;
 namespace Motus.Geometry;
 
 /// <summary>
-/// Duty-cycle foot-target gait with planted feet + per-leg analytic IK (preview only — not Motus Plan).
-/// Path is a planar polyline (Z ignored); samples along arc length at the given speed (m/s).
+/// Flat-ground foot-target gait: duty-factor swing groups, planted stance contacts, per-leg <see cref="LegIk3R"/>.
+/// Preview / TreeFK only — not Motus Plan. Path is a planar polyline (Z ignored); arc-length samples at speed (m/s).
 /// </summary>
+/// <remarks>
+/// <para><b>Gait timing (Established concepts):</b> duty factor and periodic swing phasing follow the
+/// analytical gait framework of Song &amp; Waldron, “An Analytical Approach for Gait Study and Its
+/// Applications on Wave Gaits,” <i>IJRR</i> 6(2):60–71, 1987,
+/// DOI <see cref="LeggedMethodRefs.SongWaldron1987Doi"/>. Swing-group partition is a design choice
+/// (tripod for hex); not claimed as uniquely biological.</para>
+/// <para><b>Stance plants (Established creeping-gait idea):</b> stance feet held fixed in the world
+/// while the body moves — McGhee &amp; Frank creeping-gait contact model,
+/// DOI <see cref="LeggedMethodRefs.McGheeFrank1968Doi"/>. Quasi-static support-polygon SSM is evaluated
+/// per sample via <see cref="StaticStability"/> (same DOI); body XY stands in for CoM projection
+/// (heuristic geometric CoM — labeled in Status).</para>
+/// <para><b>IK:</b> <see cref="LegIk3R"/> analytic (Lynch &amp; Park DOI
+/// <see cref="LeggedMethodRefs.LynchPark2017Doi"/>), not FABRIK.</para>
+/// <para><b>Engineering adaptations (Heuristic — not theorems):</b> sinusoidal swing lift
+/// <c>h = H·sin(πs)</c>; forward land bias along heading; drift-based replant threshold vs step length;
+/// event-driven stretch swing when plant drifts from nominal.</para>
+/// </remarks>
 public static class LeggedGait
 {
     public sealed class Result
@@ -13,12 +30,23 @@ public static class LeggedGait
         public Trajectory Trajectory { get; }
         public IReadOnlyList<Frame> BasePath { get; }
         public string? Warning { get; }
+        /// <summary>Minimum McGhee–Frank SSM over samples (m); negative ⇒ CoM left polygon at some sample.</summary>
+        public double MinStaticStabilityMarginMeters { get; }
+        /// <summary>DOI-backed method stack string for Status / logs.</summary>
+        public string MethodProvenance { get; }
 
-        public Result(Trajectory trajectory, IReadOnlyList<Frame> basePath, string? warning)
+        public Result(
+            Trajectory trajectory,
+            IReadOnlyList<Frame> basePath,
+            string? warning,
+            double minStaticStabilityMarginMeters,
+            string methodProvenance)
         {
             Trajectory = trajectory;
             BasePath = basePath;
             Warning = warning;
+            MinStaticStabilityMarginMeters = minStaticStabilityMarginMeters;
+            MethodProvenance = methodProvenance;
         }
     }
 
@@ -111,10 +139,16 @@ public static class LeggedGait
             return false;
         }
 
-        // ponytail: horizontal stretch cap before forced re-plant; full FABRIK if gaits need more
-        var maxStanceReach = 0.85 * (layout.Coxa + layout.Femur + layout.Tibia);
+        // Planar hip–foot over-reach (foot on Z=0): coxa + sqrt((femur+tibia)² − BodyZ²).
+        // Using sum-of-links ignored BodyZ and falsely marked every stance leg as stretched.
+        var distal = layout.Femur + layout.Tibia;
+        var maxHoriz = layout.Coxa + Math.Sqrt(Math.Max(0, distal * distal - layout.BodyZ * layout.BodyZ));
+        var maxStanceReach = 1.05 * maxHoriz;
+        var driftReplant = Math.Max(0.02, 0.55 * stepLength);
         var groupCount = layout.SwingGroups.Count;
         var swingPeriodSec = duration / (cyclesPerPath * groupCount);
+        // Land a bit ahead of nominal along heading so stance doesn't start already aft.
+        var landBias = 0.30 * stepLength;
 
         var qPrev = (double[])stanceQ.Clone();
         var legSwingPhase = new double[n];
@@ -122,7 +156,8 @@ public static class LeggedGait
         var swingFrom = new Vec3[n];
         var swingTo = new Vec3[n];
         var ikFailSamples = 0;
-        string? ikWarning = null;
+        var minSsm = double.PositiveInfinity;
+        var unstableSamples = 0;
 
         for (var i = 0; i < sampleCount; i++)
         {
@@ -134,13 +169,23 @@ public static class LeggedGait
             var pathPhase = duration > 1e-9 ? tSec / duration : 0;
             var cyclePhase = (pathPhase * cyclesPerPath) % 1.0;
             var q = (double[])qPrev.Clone();
+            var headingX = Math.Cos(yaw);
+            var headingY = Math.Sin(yaw);
+            var stanceContacts = new List<Vec3>(n);
 
             for (var leg = 0; leg < n; leg++)
             {
                 var (phaseSwinging, phaseLocal) = LegSwingPhase(layout, leg, cyclePhase);
                 var hipWorld = HipWorld(layout, leg, baseFrame);
                 var nominalLand = NominalFootWorld(leg, nominalFootBody, baseFrame);
-                var stretched = HorizontalDistance(hipWorld, plants[leg]) > maxStanceReach;
+                // Chase current body — frozen swing-start targets leave aft legs dragging.
+                var landTarget = new Vec3(
+                    nominalLand.X + headingX * landBias,
+                    nominalLand.Y + headingY * landBias,
+                    0);
+                var drifted = HorizontalDistance(plants[leg], landTarget) > driftReplant;
+                var overReach = HorizontalDistance(hipWorld, plants[leg]) > maxStanceReach;
+                var stretched = drifted || overReach;
                 var shouldSwing = phaseSwinging || stretched;
                 Vec3 footWorld;
 
@@ -148,30 +193,31 @@ public static class LeggedGait
                 {
                     footWorld = new Vec3(plants[leg].X, plants[leg].Y, 0);
                     legSwingPhase[leg] = -1.0;
+                    stanceContacts.Add(footWorld);
                 }
                 else
                 {
                     if (legSwingPhase[leg] < 0)
                     {
                         swingFrom[leg] = plants[leg];
-                        swingTo[leg] = nominalLand;
+                        swingTo[leg] = landTarget;
                         legSwingPhase[leg] = phaseSwinging ? phaseLocal : 0.0;
-                    }
-                    else if (phaseSwinging)
-                    {
-                        legSwingPhase[leg] = phaseLocal;
                     }
                     else
                     {
-                        legSwingPhase[leg] = Math.Min(1.0, legSwingPhase[leg] + dt / swingPeriodSec);
+                        swingTo[leg] = landTarget;
+                        if (phaseSwinging)
+                            legSwingPhase[leg] = phaseLocal;
+                        else
+                            legSwingPhase[leg] = Math.Min(1.0, legSwingPhase[leg] + dt / swingPeriodSec);
                     }
 
                     var local = legSwingPhase[leg];
                     footWorld = SwingFoot(swingFrom[leg], swingTo[leg], local, stepHeight);
                     if (local >= 0.999)
                     {
-                        plants[leg] = swingTo[leg];
-                        if (!phaseSwinging && !stretched)
+                        plants[leg] = new Vec3(swingTo[leg].X, swingTo[leg].Y, 0);
+                        if (!phaseSwinging)
                             legSwingPhase[leg] = -1.0;
                     }
                 }
@@ -194,6 +240,17 @@ public static class LeggedGait
                 }
             }
 
+            // McGhee–Frank SSM when ≥3 stance contacts (skip all-swing / degenerate samples).
+            // CoM stand-in = body origin XY (heuristic geometric CoM — labeled in Status).
+            if (stanceContacts.Count >= 3)
+            {
+                var ssm = StaticStability.Evaluate(stanceContacts, new Vec3(px, py, 0));
+                if (double.IsFinite(ssm.MarginMeters) && ssm.MarginMeters < minSsm)
+                    minSsm = ssm.MarginMeters;
+                if (!ssm.IsStable)
+                    unstableSamples++;
+            }
+
             if (!AllFinite(q))
             {
                 error = "Gait sample produced non-finite joint values (NaN/Inf).";
@@ -205,13 +262,23 @@ public static class LeggedGait
             basePath.Add(baseFrame);
         }
 
+        if (double.IsPositiveInfinity(minSsm))
+            minSsm = double.NaN;
+
+        var warnParts = new List<string>();
         if (ikFailSamples > 0)
-            ikWarning = $"Foot-target IK failed on {ikFailSamples} leg×sample(s); held previous q (rad).";
+            warnParts.Add($"Foot-target IK failed on {ikFailSamples} leg×sample(s); held previous q (rad).");
+        if (unstableSamples > 0)
+            warnParts.Add($"McGhee–Frank SSM unstable on {unstableSamples}/{sampleCount} samples (min margin {minSsm:F4} m; CoM≈body XY heuristic).");
+        warnParts.Add("Preview gait only — Trajectory → Preview; not Motus Plan.");
+        warnParts.Add(LeggedMethodRefs.DescribeStack());
 
         result = new Result(
             new Trajectory(model, points),
             basePath,
-            ikWarning ?? "Foot-target duty gait (preview only — wire Trajectory → Preview; not Motus Plan).");
+            string.Join(" ", warnParts),
+            minSsm,
+            LeggedMethodRefs.DescribeStack());
         return true;
     }
 
@@ -373,15 +440,23 @@ public static class LeggedGait
 
     private static double YawFromFrame(Frame f) => 2.0 * Math.Atan2(f.Qz, f.Qw);
 
+    /// <summary>
+    /// Swing path: linear XY blend + sinusoidal lift (engineering heuristic, not from FABRIK/McGhee).
+    /// </summary>
     private static Vec3 SwingFoot(Vec3 start, Vec3 end, double phase01, double liftMeters)
     {
         var t = Math.Clamp(phase01, 0, 1);
         var x = start.X + (end.X - start.X) * t;
         var y = start.Y + (end.Y - start.Y) * t;
+        // Heuristic clearance: h(s)=H·sin(πs). Not a theorem from gait literature.
         var z = liftMeters > 0 ? liftMeters * Math.Sin(t * Math.PI) : 0;
         return new Vec3(x, y, z);
     }
 
+    /// <summary>
+    /// Periodic swing window for leg's group — Song &amp; Waldron-style duty phasing (DOI in <see cref="LeggedMethodRefs"/>).
+    /// cyclePhase ∈ [0,1); group g of G swings in [g/G,(g+1)/G).
+    /// </summary>
     private static (bool Swinging, double LocalPhase01) LegSwingPhase(
         LeggedLayout layout, int leg, double cyclePhase01)
     {

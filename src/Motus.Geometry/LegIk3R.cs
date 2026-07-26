@@ -1,10 +1,26 @@
 namespace Motus.Geometry;
 
 /// <summary>
-/// Analytic 3-DOF leg IK (coxa yaw + femur/tibia pitch in coxa vertical plane).
-/// q0 = coxa yaw in body XY (includes mount yaw φᵢ).
-/// Femur/tibia pitch uses URDF +Y revolute (positive q → −Z in body frame).
+/// Analytic 3-DOF insectoid leg IK: coxa yaw in body XY, then planar 2R (femur/tibia) in the coxa vertical plane.
 /// </summary>
+/// <remarks>
+/// <para><b>Method (Established / classical analytic IK):</b> after choosing the coxa heading
+/// <c>q0 = atan2(vy, vx)</c>, the distal problem is a planar two-link chain solved with the law of cosines
+/// (reachability annulus <c>|ℓ_f − ℓ_t| ≤ d ≤ ℓ_f + ℓ_t</c>, knee angle from cos⁻¹, femur angle from
+/// polar angle + shoulder offset). Textbook treatment of analytic IK for structured chains:
+/// Lynch &amp; Park, <i>Modern Robotics</i>, Cambridge Univ. Press, 2017,
+/// DOI <see cref="LeggedMethodRefs.LynchPark2017Doi"/> (Ch. 6 analytic IK; planar 2R geometry).</para>
+/// <para><b>Why not FABRIK here:</b> FABRIK (Aristidou &amp; Lasenby, Graphical Models 73(5):243–260, 2011,
+/// DOI <see cref="LeggedMethodRefs.AristidouLasenby2011FabrikDoi"/>) is the peer-reviewed iterative
+/// point-on-line solver for general n-link position IK. For a fixed 3R insect leg the analytic 2R
+/// reduction is O(1), exact on the workspace boundary, and needs no iteration — prefer it for the
+/// actuated model. Survey context: Aristidou et al., CGF 2018,
+/// DOI <see cref="LeggedMethodRefs.AristidouEtAl2018IkSurveyDoi"/>.</para>
+/// <para><b>Units:</b> positions meters; <c>q0,q1,q2</c> radians. Femur/tibia pitch axis = URDF +Y
+/// (positive q lowers the distal link toward −Z in body frame). FK↔IK must round-trip within solver tol.</para>
+/// <para><b>Failure:</b> non-finite input, non-positive lengths, collinear degenerate plane, or
+/// <c>d</c> outside the femur–tibia annulus → returns false (no silent clamp to garbage poses).</para>
+/// </remarks>
 public static class LegIk3R
 {
     public static bool TrySolve(
@@ -30,7 +46,7 @@ public static class LegIk3R
         q0 = Math.Atan2(vy, vx);
         var ux = Math.Cos(q0);
         var uy = Math.Sin(q0);
-        // w = v - u * coxa
+        // Distal planar 2R after subtracting coxa along heading (Lynch & Park planar 2R).
         var wx = vx - ux * coxa;
         var wy = vy - uy * coxa;
         var wz = vz;
@@ -46,6 +62,7 @@ public static class LegIk3R
         if (d > maxReach + 1e-9 || d < minReach - 1e-9)
             return false;
 
+        // Law of cosines — knee interior angle mapped to URDF tibia pitch convention.
         var cosKnee = (femur * femur + tibia * tibia - d2) / (2.0 * femur * tibia);
         cosKnee = Math.Clamp(cosKnee, -1.0, 1.0);
         q2 = Math.Acos(cosKnee) - Math.PI;
@@ -73,7 +90,6 @@ public static class LegIk3R
         var kneeY = hip.Y + cy * coxa;
         var kneeZ = hip.Z;
 
-        // femurDir = coxaDir * cos(q1) - Z * sin(q1); already unit when coxaDir is unit
         var fdx = cx * Math.Cos(q1);
         var fdy = cy * Math.Cos(q1);
         var fdz = -Math.Sin(q1);

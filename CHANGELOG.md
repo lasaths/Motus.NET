@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-07-26
+
+### Added
+
+- **Modern Robotics PoE stack** (Lynch & Park): `ScrewMath` (SO(3)/SE(3) Exp/Log/Adjoint with π and near-identity guards), `ProductOfExponentials` (URDF `SerialJointChain` → space/body screws + home `M`, `FKinSpace`/`FKinBody`), `PoEJacobian` (`JacobianSpace`/`JacobianBody`)
+- `NumericalIkOptions` / `NumericalIkResult` / `NumericalIkFailureReasons` — injectable NR tolerances and named Status (`NoConvergence`, `SingularJacobian`, `InvalidInput`)
+- Serial-URDF numerical IK path uses analytic body Jacobian + `MatrixLog6` body-twist error when PoE screws are available (DH-only stays finite-diff)
+
+### Changed
+
+- `KinematicsResolver.CreateInverseKinematics` wires non-UR serial chains through PoE-backed `NumericalInverseKinematics`
+- Legged gait/IK hardening: method DOI refs (`LeggedMethodRefs`), static-stability helpers, expanded round-trip / plant tests
+
 ## [0.10.0] - 2026-07-26
 
 ### Added
