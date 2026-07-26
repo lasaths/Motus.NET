@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>Motus.Tools.LeggedViewer</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Motus.Geometry\Motus.Geometry.csproj" />
+    <ProjectReference Include="..\..\src\Motus.Core\Motus.Core.csproj" />
+  </ItemGroup>
+</Project>

@@ -3,8 +3,8 @@ using Motus.Core;
 namespace Motus.Geometry;
 
 /// <summary>
-/// Flat-ground foot-target gait: duty-factor swing groups, planted stance contacts, per-leg <see cref="LegIk3R"/>.
-/// Preview / TreeFK only — not Motus Plan. Path is a planar polyline (Z ignored); arc-length samples at speed (m/s).
+/// Foot-target gait: duty-factor swing groups, planted stance contacts, per-leg <see cref="LegIk3R"/>.
+/// Preview / TreeFK only — not Motus Plan. Path is a polyline in XY (arc-length); optional terrain height at (x,y).
 /// </summary>
 /// <remarks>
 /// <para><b>Gait timing (Established concepts):</b> duty factor and periodic swing phasing follow the
@@ -20,11 +20,15 @@ namespace Motus.Geometry;
 /// <para><b>IK:</b> <see cref="LegIk3R"/> analytic (Lynch &amp; Park DOI
 /// <see cref="LeggedMethodRefs.LynchPark2017Doi"/>), not FABRIK.</para>
 /// <para><b>Engineering adaptations (Heuristic — not theorems):</b> sinusoidal swing lift
-/// <c>h = H·sin(πs)</c>; forward land bias along heading; drift-based replant threshold vs step length;
-/// event-driven stretch swing when plant drifts from nominal.</para>
+/// <c>h = H·sin(πs)</c> above lerped terrain; forward land bias along heading; drift-based replant
+/// threshold vs step length; event-driven stretch swing when plant drifts from nominal;
+/// body Z = terrain(x,y) + BodyZ clearance (mean-stance body height heuristic).</para>
 /// </remarks>
 public static class LeggedGait
 {
+    /// <summary>World ground height (m) at horizontal (x, y). Flat ground = always 0.</summary>
+    public delegate double TerrainHeight(double x, double y);
+
     public sealed class Result
     {
         public Trajectory Trajectory { get; }
@@ -61,10 +65,13 @@ public static class LeggedGait
         double tibiaStance,
         RobotModel model,
         out Result? result,
-        out string error)
+        out string error,
+        TerrainHeight? terrain = null)
     {
         result = null;
         error = "";
+        // ponytail: null terrain = flat Z=0 (same as pre-terrain contract).
+        terrain ??= static (_, _) => 0;
 
         if (layout.Validate() is { } layoutErr)
         {
@@ -92,7 +99,7 @@ public static class LeggedGait
 
         if (pathXy is null || pathXy.Count < 2)
         {
-            error = "Path empty — need ≥ 2 polyline points (m, Z ignored).";
+            error = "Path empty — need ≥ 2 polyline points (m, XY used for arc-length).";
             return false;
         }
 
@@ -130,16 +137,18 @@ public static class LeggedGait
         var basePath = new List<Frame>(sampleCount);
 
         SampleAt(pathXy, cumLen, pathLength, 0, out var startX, out var startY, out var startYaw);
-        var startFrame = new MobilityModel.HolonomicSE2(startX, startY, startYaw).BaseFrame;
+        if (!TryHeight(terrain, startX, startY, out var startZ, out error))
+            return false;
+        var startFrame = new MobilityModel.HolonomicSE2(startX, startY, startYaw, startZ).BaseFrame;
 
-        var plants = InitializePlants(layout, startFrame, stanceQ, out var nominalFootBody, out var initErr);
+        var plants = InitializePlants(layout, startFrame, stanceQ, terrain, out var nominalFootBody, out var initErr);
         if (plants is null)
         {
             error = initErr;
             return false;
         }
 
-        // Planar hip–foot over-reach (foot on Z=0): coxa + sqrt((femur+tibia)² − BodyZ²).
+        // Planar hip–foot over-reach (foot near body floor): coxa + sqrt((femur+tibia)² − BodyZ²).
         // Using sum-of-links ignored BodyZ and falsely marked every stance leg as stretched.
         var distal = layout.Femur + layout.Tibia;
         var maxHoriz = layout.Coxa + Math.Sqrt(Math.Max(0, distal * distal - layout.BodyZ * layout.BodyZ));
@@ -164,7 +173,9 @@ public static class LeggedGait
             var tSec = Math.Min(duration, i * dt);
             var arcLen = speed * tSec;
             SampleAt(pathXy, cumLen, pathLength, arcLen, out var px, out var py, out var yaw);
-            var baseFrame = new MobilityModel.HolonomicSE2(px, py, yaw).BaseFrame;
+            if (!TryHeight(terrain, px, py, out var bodyGroundZ, out error))
+                return false;
+            var baseFrame = new MobilityModel.HolonomicSE2(px, py, yaw, bodyGroundZ).BaseFrame;
 
             var pathPhase = duration > 1e-9 ? tSec / duration : 0;
             var cyclePhase = (pathPhase * cyclesPerPath) % 1.0;
@@ -177,12 +188,14 @@ public static class LeggedGait
             {
                 var (phaseSwinging, phaseLocal) = LegSwingPhase(layout, leg, cyclePhase);
                 var hipWorld = HipWorld(layout, leg, baseFrame);
-                var nominalLand = NominalFootWorld(leg, nominalFootBody, baseFrame);
+                if (!TryNominalFootWorld(leg, nominalFootBody, baseFrame, terrain, out var nominalLand, out error))
+                    return false;
                 // Chase current body — frozen swing-start targets leave aft legs dragging.
-                var landTarget = new Vec3(
-                    nominalLand.X + headingX * landBias,
-                    nominalLand.Y + headingY * landBias,
-                    0);
+                var landX = nominalLand.X + headingX * landBias;
+                var landY = nominalLand.Y + headingY * landBias;
+                if (!TryHeight(terrain, landX, landY, out var landZ, out error))
+                    return false;
+                var landTarget = new Vec3(landX, landY, landZ);
                 var drifted = HorizontalDistance(plants[leg], landTarget) > driftReplant;
                 var overReach = HorizontalDistance(hipWorld, plants[leg]) > maxStanceReach;
                 var stretched = drifted || overReach;
@@ -191,7 +204,7 @@ public static class LeggedGait
 
                 if (!shouldSwing)
                 {
-                    footWorld = new Vec3(plants[leg].X, plants[leg].Y, 0);
+                    footWorld = plants[leg];
                     legSwingPhase[leg] = -1.0;
                     stanceContacts.Add(footWorld);
                 }
@@ -216,7 +229,7 @@ public static class LeggedGait
                     footWorld = SwingFoot(swingFrom[leg], swingTo[leg], local, stepHeight);
                     if (local >= 0.999)
                     {
-                        plants[leg] = new Vec3(swingTo[leg].X, swingTo[leg].Y, 0);
+                        plants[leg] = swingTo[leg];
                         if (!phaseSwinging)
                             legSwingPhase[leg] = -1.0;
                     }
@@ -242,9 +255,10 @@ public static class LeggedGait
 
             // McGhee–Frank SSM when ≥3 stance contacts (skip all-swing / degenerate samples).
             // CoM stand-in = body origin XY (heuristic geometric CoM — labeled in Status).
+            // Projection ignores non-coplanar contacts (classic SSM limit — labeled).
             if (stanceContacts.Count >= 3)
             {
-                var ssm = StaticStability.Evaluate(stanceContacts, new Vec3(px, py, 0));
+                var ssm = StaticStability.Evaluate(stanceContacts, new Vec3(px, py, bodyGroundZ));
                 if (double.IsFinite(ssm.MarginMeters) && ssm.MarginMeters < minSsm)
                     minSsm = ssm.MarginMeters;
                 if (!ssm.IsStable)
@@ -293,9 +307,9 @@ public static class LeggedGait
         var n = layout.LegCount;
         var q = new double[n * 3];
         var distal = layout.Femur + layout.Tibia;
-        // Horizontal reach beyond coxa for a comfortable mid-workspace plant at BodyZ.
+        // Mid-workspace plant reach (horizontal). Elbow-up IK keeps the knee high.
         var planar = Math.Sqrt(Math.Max(0.0, distal * distal - layout.BodyZ * layout.BodyZ));
-        var plantFromHip = layout.Coxa + 0.55 * planar;
+        var plantFromHip = layout.Coxa + 0.70 * planar;
 
         for (var leg = 0; leg < n; leg++)
         {
@@ -398,6 +412,7 @@ public static class LeggedGait
         LeggedLayout layout,
         Frame startBase,
         double[] stanceQ,
+        TerrainHeight terrain,
         out Vec3[] nominalFootBody,
         out string error)
     {
@@ -411,16 +426,20 @@ public static class LeggedGait
             var footBody = LegIk3R.FootPosition(
                 hipBody, layout.Coxa, layout.Femur, layout.Tibia,
                 stanceQ[leg * 3 + 0], stanceQ[leg * 3 + 1], stanceQ[leg * 3 + 2]);
+            // Body-floor plant (Z=0 relative); world Z comes from terrain under that XY.
             var footTargetBody = new Vec3(footBody.X, footBody.Y, 0);
             nominalFootBody[leg] = footTargetBody;
 
             if (!LegIk3R.TrySolve(hipBody, footTargetBody, layout.Coxa, layout.Femur, layout.Tibia, out _, out _, out _))
             {
-                error = $"Leg {layout.LegNames[leg]}: stance foot at Z=0 unreachable (BodyZ={layout.BodyZ:F3} m too low or geometry infeasible).";
+                error = $"Leg {layout.LegNames[leg]}: stance foot unreachable (BodyZ={layout.BodyZ:F3} m too low or geometry infeasible).";
                 return null;
             }
 
-            plants[leg] = BodyToWorld(footTargetBody, startBase);
+            var xy = BodyToWorld(footTargetBody, startBase);
+            if (!TryHeight(terrain, xy.X, xy.Y, out var gz, out error))
+                return null;
+            plants[leg] = new Vec3(xy.X, xy.Y, gz);
         }
 
         return plants;
@@ -429,10 +448,30 @@ public static class LeggedGait
     private static Vec3 HipWorld(LeggedLayout layout, int leg, Frame baseFrame) =>
         BodyToWorld(HipBody(layout, leg), baseFrame);
 
-    private static Vec3 NominalFootWorld(int leg, Vec3[] nominalFootBody, Frame baseFrame)
+    private static bool TryNominalFootWorld(
+        int leg, Vec3[] nominalFootBody, Frame baseFrame, TerrainHeight terrain,
+        out Vec3 world, out string error)
     {
         var w = BodyToWorld(nominalFootBody[leg], baseFrame);
-        return new Vec3(w.X, w.Y, 0);
+        if (!TryHeight(terrain, w.X, w.Y, out var gz, out error))
+        {
+            world = default;
+            return false;
+        }
+        world = new Vec3(w.X, w.Y, gz);
+        return true;
+    }
+
+    private static bool TryHeight(TerrainHeight terrain, double x, double y, out double z, out string error)
+    {
+        z = terrain(x, y);
+        if (!double.IsFinite(z))
+        {
+            error = $"Terrain height non-finite at ({x:F3}, {y:F3}) m.";
+            return false;
+        }
+        error = "";
+        return true;
     }
 
     private static double HorizontalDistance(Vec3 a, Vec3 b)
@@ -455,7 +494,7 @@ public static class LeggedGait
         var dy = world.Y - baseFrame.Y;
         var c = Math.Cos(-yaw);
         var s = Math.Sin(-yaw);
-        return new Vec3(c * dx - s * dy, s * dx + c * dy, world.Z);
+        return new Vec3(c * dx - s * dy, s * dx + c * dy, world.Z - baseFrame.Z);
     }
 
     private static Vec3 BodyToWorld(Vec3 body, Frame baseFrame)
@@ -466,7 +505,7 @@ public static class LeggedGait
         return new Vec3(
             baseFrame.X + c * body.X - s * body.Y,
             baseFrame.Y + s * body.X + c * body.Y,
-            body.Z);
+            baseFrame.Z + body.Z);
     }
 
     private static double YawFromFrame(Frame f) => 2.0 * Math.Atan2(f.Qz, f.Qw);
@@ -479,8 +518,9 @@ public static class LeggedGait
         var t = Math.Clamp(phase01, 0, 1);
         var x = start.X + (end.X - start.X) * t;
         var y = start.Y + (end.Y - start.Y) * t;
-        // Heuristic clearance: h(s)=H·sin(πs). Not a theorem from gait literature.
-        var z = liftMeters > 0 ? liftMeters * Math.Sin(t * Math.PI) : 0;
+        // Heuristic clearance above lerped terrain: z = lerp + H·sin(πs).
+        var zGround = start.Z + (end.Z - start.Z) * t;
+        var z = zGround + (liftMeters > 0 ? liftMeters * Math.Sin(t * Math.PI) : 0);
         return new Vec3(x, y, z);
     }
 

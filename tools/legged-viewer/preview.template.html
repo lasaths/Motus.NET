@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Motus legged gait preview</title>
+  <style>
+    html, body { margin: 0; height: 100%; background: #1a1f22; color: #e8ecef; font: 13px/1.4 system-ui, sans-serif; }
+    #c { display: block; width: 100%; height: 100%; }
+    #hud {
+      position: absolute; left: 12px; top: 12px; z-index: 2;
+      background: rgba(10, 20, 24, 0.82); padding: 10px 12px; border-radius: 8px;
+      max-width: 320px; border: 1px solid #2a3a40;
+    }
+    #hud code { color: #7dffa0; }
+    input[type=range] { width: 220px; }
+  </style>
+</head>
+<body>
+  <div id="hud">
+    <div><b>Legged gait</b> (no Rhino)</div>
+    <div id="meta"></div>
+    <label>Frame <input id="scrub" type="range" min="0" max="1" value="0" step="1" /></label>
+    <div id="t"></div>
+  </div>
+  <canvas id="c"></canvas>
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://unpkg.com/three@0.175.0/build/three.module.js",
+      "three/addons/": "https://unpkg.com/three@0.175.0/examples/jsm/"
+    }
+  }
+  </script>
+  <script type="module">
+    import * as THREE from 'three';
+    import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+    const GAIT = /*__GAIT_JSON__*/null;
+    if (!GAIT) throw new Error('Run: dotnet run --project tools/legged-viewer');
+
+    const meta = document.getElementById('meta');
+    meta.innerHTML = `${GAIT.note}<br/>legs=${GAIT.frames[0].legs.length} · frames=${GAIT.frames.length}`
+      + (GAIT.minSsm != null ? `<br/>min SSM <code>${GAIT.minSsm.toFixed(4)}</code> m` : '');
+
+    const canvas = document.getElementById('c');
+    const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+    renderer.setPixelRatio(devicePixelRatio);
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x1a1f22);
+    const camera = new THREE.PerspectiveCamera(45, 1, 0.01, 20);
+    camera.position.set(0.55, -0.55, 0.45);
+    camera.up.set(0, 0, 1);
+    const controls = new OrbitControls(camera, canvas);
+    controls.target.set(0.22, 0, 0.05);
+    controls.update();
+
+    scene.add(new THREE.AmbientLight(0xffffff, 0.55));
+    const sun = new THREE.DirectionalLight(0xffffff, 0.85);
+    sun.position.set(0.4, -0.6, 1);
+    scene.add(sun);
+    // Three GridHelper is XZ (Y-up). Rotate onto XY so floor is Z=0 like Rhino / AxesHelper blue.
+    const grid = new THREE.GridHelper(1.2, 24, 0x3a4a50, 0x2a3438);
+    grid.rotation.x = Math.PI / 2;
+    scene.add(grid);
+    scene.add(new THREE.AxesHelper(0.15));
+
+    // Terrain heightfield → shaded mesh (or point cloud fallback).
+    if (GAIT.terrain?.points?.length) {
+      const pts = GAIT.terrain.points;
+      const nx = GAIT.terrain.nx ?? 0;
+      const ny = GAIT.terrain.ny ?? 0;
+      if (nx > 0 && ny > 0 && pts.length === (nx + 1) * (ny + 1)) {
+        const pos = new Float32Array(pts.length * 3);
+        for (let i = 0; i < pts.length; i++) {
+          pos[i * 3] = pts[i][0];
+          pos[i * 3 + 1] = pts[i][1];
+          pos[i * 3 + 2] = pts[i][2];
+        }
+        const idx = [];
+        for (let ix = 0; ix < nx; ix++) {
+          for (let iy = 0; iy < ny; iy++) {
+            const a = ix * (ny + 1) + iy;
+            const b = a + 1;
+            const c = a + (ny + 1);
+            const d = c + 1;
+            idx.push(a, b, d, a, d, c);
+          }
+        }
+        const geo = new THREE.BufferGeometry();
+        geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+        geo.setIndex(idx);
+        geo.computeVertexNormals();
+        scene.add(new THREE.Mesh(geo, new THREE.MeshStandardMaterial({
+          color: 0x3d6b52, metalness: 0.05, roughness: 0.85, side: THREE.DoubleSide,
+        })));
+        scene.add(new THREE.Mesh(geo, new THREE.MeshBasicMaterial({
+          color: 0x6a9a7a, wireframe: true, transparent: true, opacity: 0.25,
+        })));
+      } else {
+        const geo = new THREE.BufferGeometry();
+        const pos = new Float32Array(pts.length * 3);
+        for (let i = 0; i < pts.length; i++) {
+          pos[i * 3] = pts[i][0];
+          pos[i * 3 + 1] = pts[i][1];
+          pos[i * 3 + 2] = pts[i][2];
+        }
+        geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+        scene.add(new THREE.Points(geo, new THREE.PointsMaterial({ color: 0x5a8a70, size: 0.008 })));
+      }
+    }
+
+    const bodyMat = new THREE.MeshStandardMaterial({ color: 0xff69b4, metalness: 0.1, roughness: 0.55 });
+    const legMat = new THREE.MeshStandardMaterial({ color: 0xff8c28, metalness: 0.05, roughness: 0.6 });
+    const footMat = new THREE.MeshStandardMaterial({ color: 0x50c878 });
+    const body = new THREE.Mesh(new THREE.CylinderGeometry(GAIT.layout.bodyR, GAIT.layout.bodyR, 0.02, 6), bodyMat);
+    body.rotation.x = Math.PI / 2;
+    scene.add(body);
+
+    const legLines = [];
+    const feet = [];
+    for (let i = 0; i < GAIT.frames[0].legs.length; i++) {
+      const lg = new THREE.BufferGeometry();
+      lg.setAttribute('position', new THREE.BufferAttribute(new Float32Array(12), 3));
+      const line = new THREE.Line(lg, new THREE.LineBasicMaterial({ color: 0xff8c28 }));
+      scene.add(line);
+      legLines.push(line);
+      const f = new THREE.Mesh(new THREE.SphereGeometry(0.008, 10, 8), footMat);
+      scene.add(f);
+      feet.push(f);
+    }
+
+    function setFrame(fi) {
+      const fr = GAIT.frames[fi];
+      const [bx, by, bz, yaw] = fr.basePose;
+      body.position.set(bx, by, bz + GAIT.layout.bodyZ);
+      body.rotation.z = yaw;
+      for (let i = 0; i < fr.legs.length; i++) {
+        const L = fr.legs[i];
+        const arr = legLines[i].geometry.attributes.position.array;
+        const pts = [L.hip, L.knee, L.ankle, L.foot];
+        for (let k = 0; k < 4; k++) {
+          arr[k * 3] = pts[k][0];
+          arr[k * 3 + 1] = pts[k][1];
+          arr[k * 3 + 2] = pts[k][2];
+        }
+        legLines[i].geometry.attributes.position.needsUpdate = true;
+        feet[i].position.set(L.foot[0], L.foot[1], L.foot[2]);
+      }
+      document.getElementById('t').textContent = `t = ${fr.t.toFixed(3)} s · base Z = ${bz.toFixed(3)} m`;
+    }
+
+    const scrub = document.getElementById('scrub');
+    scrub.max = String(GAIT.frames.length - 1);
+    scrub.oninput = () => setFrame(+scrub.value);
+    setFrame(0);
+
+    function resize() {
+      const w = innerWidth, h = innerHeight;
+      renderer.setSize(w, h, false);
+      camera.aspect = w / h;
+      camera.updateProjectionMatrix();
+    }
+    addEventListener('resize', resize);
+    resize();
+
+    (function tick() {
+      controls.update();
+      renderer.render(scene, camera);
+      requestAnimationFrame(tick);
+    })();
+  </script>
+</body>
+</html>

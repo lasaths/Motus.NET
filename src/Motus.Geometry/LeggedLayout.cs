@@ -4,7 +4,7 @@ namespace Motus.Geometry;
 
 /// <summary>
 /// N×3R insectoid layout: hip mount yaws, swing-group partition, tip-path leg.
-/// Flat-ground preview gait — Motus.NET owns math; Grasshopper is thin Rhino wiring only.
+/// Legged N×3R layout + optional terrain height gait — Motus.NET owns math; GH is thin Rhino wiring.
 /// </summary>
 /// <remarks>
 /// SwingGroups encode a periodic support schedule (Song &amp; Waldron gait phasing concepts,

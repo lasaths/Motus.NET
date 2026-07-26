@@ -17,7 +17,8 @@ namespace Motus.Geometry;
 /// actuated model. Survey context: Aristidou et al., CGF 2018,
 /// DOI <see cref="LeggedMethodRefs.AristidouEtAl2018IkSurveyDoi"/>.</para>
 /// <para><b>Units:</b> positions meters; <c>q0,q1,q2</c> radians. Femur/tibia pitch axis = URDF +Y
-/// (positive q lowers the distal link toward −Z in body frame). FK↔IK must round-trip within solver tol.</para>
+/// (positive q1 lowers the femur toward −Z). Default IK branch is <b>elbow-up</b> (knee high):
+/// <c>q1=γ−α</c>, <c>q2=π−acos(·)</c> — elbow-down puts the femur tip through the ground on stance plants.</para>
 /// <para><b>Failure:</b> non-finite input, non-positive lengths, collinear degenerate plane, or
 /// <c>d</c> outside the femur–tibia annulus → returns false (no silent clamp to garbage poses).</para>
 /// </remarks>
@@ -62,15 +63,17 @@ public static class LegIk3R
         if (d > maxReach + 1e-9 || d < minReach - 1e-9)
             return false;
 
-        // Law of cosines — knee interior angle mapped to URDF tibia pitch convention.
+        // Law of cosines — two planar 2R solutions; pick elbow-up (knee high) for insectoid stance.
+        // Elbow-down (q1=γ+α, q2=acos−π) drives the femur tip through the ground → zigzag sticks.
         var cosKnee = (femur * femur + tibia * tibia - d2) / (2.0 * femur * tibia);
         cosKnee = Math.Clamp(cosKnee, -1.0, 1.0);
-        q2 = Math.Acos(cosKnee) - Math.PI;
-
         var cosFemur = (femur * femur + d2 - tibia * tibia) / (2.0 * femur * d);
         cosFemur = Math.Clamp(cosFemur, -1.0, 1.0);
-        // FK: femurDir = coxaDir*cos(q1) - Z*sin(q1) ⇒ q1 = γ + α (not γ − α).
-        q1 = Math.Atan2(zDown, x) + Math.Acos(cosFemur);
+        var gamma = Math.Atan2(zDown, x);
+        var alpha = Math.Acos(cosFemur);
+        // Elbow-up: q1 = γ − α, q2 = π − acos(·). FK: femurDir = coxaDir·cos(q1) − Z·sin(q1).
+        q1 = gamma - alpha;
+        q2 = Math.PI - Math.Acos(cosKnee);
 
         return double.IsFinite(q0) && double.IsFinite(q1) && double.IsFinite(q2);
     }

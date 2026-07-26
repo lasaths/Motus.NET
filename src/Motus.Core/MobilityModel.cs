@@ -9,17 +9,19 @@ public abstract class MobilityModel
     /// <summary>World pose of the kinematic tree root / robot base.</summary>
     public abstract Frame BaseFrame { get; }
 
-    /// <summary>Holonomic planar base: (x, y, yaw) → Motus <see cref="Frame"/>.</summary>
+    /// <summary>Holonomic planar base: (x, y, yaw[, z]) → Motus <see cref="Frame"/>. Z elevates for terrain.</summary>
     public sealed class HolonomicSE2 : MobilityModel
     {
         public double X { get; }
         public double Y { get; }
+        public double Z { get; }
         public double YawRadians { get; }
 
-        public HolonomicSE2(double x, double y, double yawRadians)
+        public HolonomicSE2(double x, double y, double yawRadians, double z = 0)
         {
             X = x;
             Y = y;
+            Z = z;
             YawRadians = yawRadians;
         }
 
@@ -30,7 +32,7 @@ public abstract class MobilityModel
                 var half = YawRadians * 0.5;
                 var qw = Math.Cos(half);
                 var qz = Math.Sin(half);
-                return new Frame(X, Y, 0, qw, 0, 0, qz);
+                return new Frame(X, Y, Z, qw, 0, 0, qz);
             }
         }
     }

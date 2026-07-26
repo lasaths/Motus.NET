@@ -17,9 +17,8 @@ public class LeggedGaitTests
     {
         var hip = new Vec3(0.12, 0, 0.12);
         const double coxa = 0.06, femur = 0.17, tibia = 0.19;
-        var q0 = 0.15;
-        var q1 = 30.0 * Deg;
-        var q2 = -30.0 * Deg;
+        // Seed the preferred elbow-up branch (IK recovers same q only on that branch).
+        Assert.True(LegIk3R.TrySolve(hip, new Vec3(0.30, 0, 0), coxa, femur, tibia, out var q0, out var q1, out var q2));
         var foot = LegIk3R.FootPosition(hip, coxa, femur, tibia, q0, q1, q2);
         Assert.True(LegIk3R.TrySolve(hip, foot, coxa, femur, tibia, out var s0, out var s1, out var s2));
         var back = LegIk3R.FootPosition(hip, coxa, femur, tibia, s0, s1, s2);
@@ -347,26 +346,24 @@ public class LeggedGaitTests
         Assert.Contains("BodyR", err);
     }
 
-    // --- Elbow Branch Regression (q1 = γ+α, not γ−α) ---
+    // --- Elbow Branch: elbow-up (knee high) for insectoid stance ---
 
     [Fact]
-    public void LegIk3R_ElbowBranch_GammaPlusAlpha_NotMinus()
+    public void LegIk3R_ElbowBranch_PrefersKneeHigh()
     {
-        // Regression test: IK must return γ+α for femur angle (elbow-down config)
-        // The bug was q1 = atan2(z,-x) - acos(...) instead of + acos(...)
         var hip = new Vec3(0.12, 0, 0.12);
         const double coxa = 0.06, femur = 0.17, tibia = 0.19;
 
-        // Target below hip (typical stance)
         var target = new Vec3(0.30, 0, 0);
         Assert.True(LegIk3R.TrySolve(hip, target, coxa, femur, tibia, out var q0, out var q1, out var q2));
 
-        // FK back must match target
         var computed = LegIk3R.FootPosition(hip, coxa, femur, tibia, q0, q1, q2);
-        AssertVec3Near(computed, target, CoarseTol, "Elbow branch FK↔IK mismatch");
+        AssertVec3Near(computed, target, CoarseTol, "Elbow-up FK↔IK mismatch");
 
-        // q1 should be positive (femur pitched forward/down in elbow-down config)
-        Assert.True(q1 > 0, $"q1={q1:F4} should be positive for elbow-down config (γ+α bug)");
+        var ankle = LegIk3R.KneePosition(hip, coxa, femur, q0, q1);
+        Assert.True(ankle.Z > target.Z + 0.03,
+            $"Elbow-up ankle Z={ankle.Z:F3} should sit above foot Z={target.Z:F3} (not through floor).");
+        Assert.True(q2 > 0, $"Elbow-up tibia pitch q2={q2:F3} should be > 0.");
     }
 
     [Fact]
@@ -521,6 +518,104 @@ public class LeggedGaitTests
         // Duty + drift replant should keep planted feet near nominal (not body-length drag).
         Assert.True(maxDrift < 1.35 * step,
             $"Planted foot drifted {maxDrift:F3} m from nominal (step={step}); back legs likely dragging.");
+    }
+
+    /// <summary>
+    /// Logic of Motus.Grasshopper <c>examples/09_walking_hexapod.ghx</c>
+    /// (<c>scripts/generate-examples.mjs</c> <c>graph09</c>) — no Rhino/GH solve.
+    /// Compact WalkHex defaults + 9-pt arc + constant terrain Z=0.02 (Center Box top).
+    /// </summary>
+    [Fact]
+    public void Example09_WalkingHexapod_ArcAndBoxTerrain()
+    {
+        var layout = LeggedLayout.HexMithi(0.06, 0.035, 0.08, 0.10, 0.07);
+        var limits = Enumerable.Range(0, 18).Select(_ => new JointLimit(-Math.PI, Math.PI, Math.PI, Math.PI * 2)).ToList();
+        var model = new RobotModel(layout.ToPreset("hex", 18, limits));
+
+        var path = new List<Vec3>();
+        const int arcN = 9;
+        for (var i = 0; i < arcN; i++)
+        {
+            var a = Math.PI - i / (arcN - 1.0) * Math.PI;
+            path.Add(new Vec3(0.22 + 0.18 * Math.Cos(a), 0.18 * Math.Sin(a), 0));
+        }
+
+        // graph09 Center Box half-height 0.02 → top face at Z=0.02 m.
+        const double groundZ = 0.02;
+        LeggedGait.TerrainHeight terrain = static (_, _) => groundZ;
+
+        Assert.True(LeggedGait.TryBuild(
+            layout, path, 0.06, 0.04, 0.02,
+            7.5 * Deg, 30 * Deg, -30 * Deg,
+            model, out var result, out var err, terrain), err);
+
+        Assert.Equal(18, result!.Trajectory.Points[0].JointState.AxisCount);
+        Assert.Equal(result.Trajectory.Points.Count, result.BasePath.Count);
+        Assert.True(result.BasePath.Count >= 10);
+        Assert.InRange(result.BasePath[0].Z, groundZ - 1e-9, groundZ + 1e-9);
+        Assert.True(Math.Abs(result.BasePath[^1].Y) > 0.05 || Math.Abs(result.BasePath[^1].X - 0.22) > 0.05,
+            "Body should move along the example arc.");
+
+        var mid = result.Trajectory.Points.Count / 2;
+        var q = result.Trajectory.Points[mid].JointState.Positions;
+        var bf = result.BasePath[mid];
+        Assert.InRange(bf.Z, groundZ - 1e-9, groundZ + 1e-9);
+        var planted = 0;
+        for (var leg = 0; leg < 6; leg++)
+        {
+            var hy = layout.HipYawsRad[leg];
+            var hip = new Vec3(layout.BodyR * Math.Cos(hy), layout.BodyR * Math.Sin(hy), layout.BodyZ);
+            var footBody = LegIk3R.FootPosition(hip, layout.Coxa, layout.Femur, layout.Tibia,
+                q[leg * 3], q[leg * 3 + 1], q[leg * 3 + 2]);
+            if (footBody.Z > 0.012) continue;
+            var yaw = 2.0 * Math.Atan2(bf.Qz, bf.Qw);
+            var c = Math.Cos(yaw);
+            var s = Math.Sin(yaw);
+            var fz = bf.Z + footBody.Z;
+            Assert.InRange(fz - groundZ, -0.015, 0.015);
+            planted++;
+        }
+        Assert.True(planted >= 3, $"Example 09 mid-gait expected ≥3 plants on box top Z={groundZ}, got {planted}");
+    }
+
+    [Fact]
+    public void HexGait_RampTerrain_PlantsFollowHeightfield()
+    {
+        var layout = LeggedLayout.HexMithi(0.06, 0.035, 0.08, 0.10, 0.07);
+        var limits = Enumerable.Range(0, 18).Select(_ => new JointLimit(-Math.PI, Math.PI, Math.PI, Math.PI * 2)).ToList();
+        var model = new RobotModel(layout.ToPreset("hex", 18, limits));
+        var path = new[] { new Vec3(0, 0, 0), new Vec3(0.35, 0, 0) };
+        // Gentle ramp: z = 0.12 * x (≈4° — stay in 3R workspace).
+        LeggedGait.TerrainHeight ramp = (x, _) => 0.12 * x;
+
+        Assert.True(LeggedGait.TryBuild(
+            layout, path, 0.06, 0.04, 0.02,
+            7.5 * Deg, 30 * Deg, -30 * Deg,
+            model, out var result, out var err, ramp), err);
+
+        Assert.True(result!.BasePath[^1].Z > 0.03, "Body base should rise on ramp.");
+        var mid = result.Trajectory.Points.Count / 2;
+        var q = result.Trajectory.Points[mid].JointState.Positions;
+        var bf = result.BasePath[mid];
+        var plantedNearTerrain = 0;
+        for (var leg = 0; leg < 6; leg++)
+        {
+            var hy = layout.HipYawsRad[leg];
+            var hip = new Vec3(layout.BodyR * Math.Cos(hy), layout.BodyR * Math.Sin(hy), layout.BodyZ);
+            var footBody = LegIk3R.FootPosition(hip, layout.Coxa, layout.Femur, layout.Tibia,
+                q[leg * 3], q[leg * 3 + 1], q[leg * 3 + 2]);
+            if (footBody.Z > 0.012) continue; // swing
+            var yaw = 2.0 * Math.Atan2(bf.Qz, bf.Qw);
+            var c = Math.Cos(yaw);
+            var s = Math.Sin(yaw);
+            var fx = bf.X + c * footBody.X - s * footBody.Y;
+            var fy = bf.Y + s * footBody.X + c * footBody.Y;
+            var fz = bf.Z + footBody.Z;
+            var expect = ramp(fx, fy);
+            Assert.InRange(fz - expect, -0.015, 0.015);
+            plantedNearTerrain++;
+        }
+        Assert.True(plantedNearTerrain >= 3, "Expected ≥3 stance feet near ramp surface.");
     }
 
     // --- Helper ---

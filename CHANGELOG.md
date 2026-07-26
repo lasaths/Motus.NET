@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `LeggedGait.TerrainHeight` callback — plant/land on uneven ground; body Z = terrain(x,y) + BodyZ clearance (null = flat Z=0)
+- `MobilityModel.HolonomicSE2` optional Z for terrain-following base frames
+
+### Fixed
+
+- `LegIk3R` default branch is elbow-up (knee high); elbow-down drove femur tips through the ground on stance plants (zigzag sticks)
+
 ## [0.11.0] - 2026-07-26
 
 ### Added
