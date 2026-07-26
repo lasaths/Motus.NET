@@ -1,0 +1,419 @@
+using Motus.Core;
+using Motus.Geometry;
+using Xunit;
+
+namespace Motus.Core.Tests;
+
+public class LeggedGaitTests
+{
+    private const double Tol = 1e-9;
+    private const double CoarseTol = 1e-6;
+    private static readonly double Deg = Math.PI / 180.0;
+
+    // --- FK↔IK Round-Trip Tests ---
+
+    [Fact]
+    public void LegIk3R_RoundTripNearStance()
+    {
+        var hip = new Vec3(0.12, 0, 0.12);
+        const double coxa = 0.06, femur = 0.17, tibia = 0.19;
+        var q0 = 0.15;
+        var q1 = 30.0 * Deg;
+        var q2 = -30.0 * Deg;
+        var foot = LegIk3R.FootPosition(hip, coxa, femur, tibia, q0, q1, q2);
+        Assert.True(LegIk3R.TrySolve(hip, foot, coxa, femur, tibia, out var s0, out var s1, out var s2));
+        var back = LegIk3R.FootPosition(hip, coxa, femur, tibia, s0, s1, s2);
+        Assert.InRange(back.X - foot.X, -CoarseTol, CoarseTol);
+        Assert.InRange(back.Y - foot.Y, -CoarseTol, CoarseTol);
+        Assert.InRange(back.Z - foot.Z, -CoarseTol, CoarseTol);
+        Assert.InRange(s0 - q0, -CoarseTol, CoarseTol);
+        Assert.InRange(s1 - q1, -CoarseTol, CoarseTol);
+        Assert.InRange(s2 - q2, -CoarseTol, CoarseTol);
+    }
+
+    [Theory]
+    [InlineData(0.0)]
+    [InlineData(60.0)]
+    [InlineData(120.0)]
+    [InlineData(180.0)]
+    [InlineData(240.0)]
+    [InlineData(300.0)]
+    public void LegIk3R_RoundTrip_HexStanceYaws(double yawDeg)
+    {
+        // Hex hip positions at different yaw angles
+        var yaw = yawDeg * Deg;
+        const double bodyR = 0.12, bodyZ = 0.12;
+        const double coxa = 0.06, femur = 0.17, tibia = 0.19;
+        var hip = new Vec3(bodyR * Math.Cos(yaw), bodyR * Math.Sin(yaw), bodyZ);
+
+        // Stance angles
+        var q0 = yaw + 7.5 * Deg; // coxa yaw with stance offset
+        var q1 = 30.0 * Deg;
+        var q2 = -30.0 * Deg;
+
+        var foot = LegIk3R.FootPosition(hip, coxa, femur, tibia, q0, q1, q2);
+        Assert.True(LegIk3R.TrySolve(hip, foot, coxa, femur, tibia, out var s0, out var s1, out var s2),
+            $"IK solve failed for yaw={yawDeg}°");
+        var back = LegIk3R.FootPosition(hip, coxa, femur, tibia, s0, s1, s2);
+
+        AssertVec3Near(back, foot, CoarseTol, $"FK→IK→FK mismatch at yaw={yawDeg}°");
+    }
+
+    [Fact]
+    public void LegIk3R_RoundTrip_SeededRandomReachableFeet()
+    {
+        // Seeded PRNG for reproducible "random" tests
+        var rng = new Random(42);
+        const double bodyR = 0.12, bodyZ = 0.12;
+        const double coxa = 0.06, femur = 0.17, tibia = 0.19;
+        var maxReach = coxa + femur + tibia;
+        var minReach = 0.3 * maxReach; // stay within reachable annulus
+
+        for (var i = 0; i < 20; i++)
+        {
+            var yaw = rng.NextDouble() * 2 * Math.PI;
+            var hip = new Vec3(bodyR * Math.Cos(yaw), bodyR * Math.Sin(yaw), bodyZ);
+
+            // Generate random q in reasonable range
+            var q0 = yaw + (rng.NextDouble() - 0.5) * 60 * Deg;
+            var q1 = (20 + rng.NextDouble() * 40) * Deg;
+            var q2 = (-50 + rng.NextDouble() * 30) * Deg;
+
+            var foot = LegIk3R.FootPosition(hip, coxa, femur, tibia, q0, q1, q2);
+            if (!LegIk3R.TrySolve(hip, foot, coxa, femur, tibia, out var s0, out var s1, out var s2))
+                continue; // skip unreachable (edge case from random)
+
+            var back = LegIk3R.FootPosition(hip, coxa, femur, tibia, s0, s1, s2);
+            AssertVec3Near(back, foot, CoarseTol, $"FK→IK→FK mismatch on seeded sample {i}");
+        }
+    }
+
+    // --- Z=0 Plant Target Tests ---
+
+    [Fact]
+    public void LegIk3R_ZeroPlant_FootPositionZNearZero()
+    {
+        const double bodyR = 0.12, bodyZ = 0.12;
+        const double coxa = 0.06, femur = 0.17, tibia = 0.19;
+
+        for (var legIdx = 0; legIdx < 6; legIdx++)
+        {
+            var yaw = legIdx * (Math.PI / 3.0);
+            var hip = new Vec3(bodyR * Math.Cos(yaw), bodyR * Math.Sin(yaw), bodyZ);
+
+            // Stance foot projected to Z=0
+            var q0 = yaw + 7.5 * Deg;
+            var q1 = 30.0 * Deg;
+            var q2 = -30.0 * Deg;
+            var stanceFoot = LegIk3R.FootPosition(hip, coxa, femur, tibia, q0, q1, q2);
+            var targetZ0 = new Vec3(stanceFoot.X, stanceFoot.Y, 0);
+
+            Assert.True(LegIk3R.TrySolve(hip, targetZ0, coxa, femur, tibia, out var s0, out var s1, out var s2),
+                $"IK to Z=0 failed for leg {legIdx}");
+
+            var solvedFoot = LegIk3R.FootPosition(hip, coxa, femur, tibia, s0, s1, s2);
+            Assert.InRange(solvedFoot.Z, -1e-6, 1e-6);
+        }
+    }
+
+    // --- Layout Validation Tests ---
+
+    [Fact]
+    public void HexLayout_Validates_And_FamilyIsLegged()
+    {
+        var layout = LeggedLayout.HexMithi(0.12, 0.06, 0.17, 0.19, 0.12);
+        Assert.Null(layout.Validate());
+        Assert.Equal(6, layout.LegCount);
+        Assert.Equal(18, layout.DriverCount);
+        var limits = Enumerable.Range(0, 18).Select(_ => new JointLimit(-Math.PI, Math.PI, Math.PI, Math.PI * 2)).ToList();
+        var preset = layout.ToPreset("hex", 18, limits);
+        Assert.True(Units.IsLegged(preset));
+        Assert.False(Units.IsStewart(preset));
+    }
+
+    [Fact]
+    public void LeggedLayout_RejectsInvalidLayouts()
+    {
+        // Zero body radius
+        var bad1 = new LeggedLayout(
+            ["leg0", "leg1"], [0.0, Math.PI], [[0], [1]],
+            bodyR: 0, coxa: 0.06, femur: 0.17, tibia: 0.19, bodyZ: 0.12, tipLegName: "leg0");
+        Assert.NotNull(bad1.Validate());
+        Assert.Contains("BodyR", bad1.Validate());
+
+        // Empty swing group
+        var bad2 = new LeggedLayout(
+            ["leg0", "leg1"], [0.0, Math.PI], [[], [0, 1]],
+            bodyR: 0.12, coxa: 0.06, femur: 0.17, tibia: 0.19, bodyZ: 0.12, tipLegName: "leg0");
+        Assert.NotNull(bad2.Validate());
+        Assert.Contains("empty", bad2.Validate()!.ToLower());
+
+        // Missing leg in swing groups
+        var bad3 = new LeggedLayout(
+            ["leg0", "leg1", "leg2"], [0.0, Math.PI / 2, Math.PI], [[0], [1]],
+            bodyR: 0.12, coxa: 0.06, femur: 0.17, tibia: 0.19, bodyZ: 0.12, tipLegName: "leg0");
+        Assert.NotNull(bad3.Validate());
+        Assert.Contains("partition", bad3.Validate()!.ToLower());
+
+        // Invalid tip leg name
+        var bad4 = new LeggedLayout(
+            ["leg0", "leg1"], [0.0, Math.PI], [[0], [1]],
+            bodyR: 0.12, coxa: 0.06, femur: 0.17, tibia: 0.19, bodyZ: 0.12, tipLegName: "nonexistent");
+        Assert.NotNull(bad4.Validate());
+        Assert.Contains("TipLegName", bad4.Validate());
+    }
+
+    // --- Hex Gait Tests ---
+
+    [Fact]
+    public void HexGait_Builds_18Dof_Trajectory_BasePathLengthMatches()
+    {
+        var layout = LeggedLayout.HexMithi(0.12, 0.06, 0.17, 0.19, 0.12);
+        var limits = Enumerable.Range(0, 18).Select(_ => new JointLimit(-Math.PI, Math.PI, Math.PI, Math.PI * 2)).ToList();
+        var model = new RobotModel(layout.ToPreset("hex", 18, limits));
+        var path = new[] { new Vec3(0, 0, 0), new Vec3(0.5, 0, 0) };
+
+        Assert.True(LeggedGait.TryBuild(
+            layout, path, 0.08, 0.08, 0.025,
+            7.5 * Deg, 30 * Deg, -30 * Deg,
+            model, out var result, out var err), err);
+
+        Assert.NotNull(result);
+        Assert.Equal(18, result!.Trajectory.Points[0].JointState.AxisCount);
+        Assert.Equal(result.Trajectory.Points.Count, result.BasePath.Count);
+        Assert.True(result.BasePath.Count >= 10, $"BasePath too short: {result.BasePath.Count}");
+    }
+
+    [Fact]
+    public void HexGait_MidSample_StanceFeetNearZ0()
+    {
+        var layout = LeggedLayout.HexMithi(0.12, 0.06, 0.17, 0.19, 0.12);
+        var limits = Enumerable.Range(0, 18).Select(_ => new JointLimit(-Math.PI, Math.PI, Math.PI, Math.PI * 2)).ToList();
+        var model = new RobotModel(layout.ToPreset("hex", 18, limits));
+        var path = new[] { new Vec3(0, 0, 0), new Vec3(0.4, 0, 0) };
+
+        Assert.True(LeggedGait.TryBuild(
+            layout, path, 0.08, 0.08, 0.025,
+            7.5 * Deg, 30 * Deg, -30 * Deg,
+            model, out var result, out var err), err);
+
+        // Check mid-sample feet positions using FK
+        var midIdx = result!.Trajectory.Points.Count / 2;
+        var midQ = result.Trajectory.Points[midIdx].JointState.Positions;
+
+        // Count how many legs have feet near Z=0 (stance)
+        var nearGround = 0;
+        for (var leg = 0; leg < 6; leg++)
+        {
+            var yaw = leg * (Math.PI / 3.0);
+            var hip = new Vec3(0.12 * Math.Cos(yaw), 0.12 * Math.Sin(yaw), 0.12);
+            var foot = LegIk3R.FootPosition(hip, 0.06, 0.17, 0.19,
+                midQ[leg * 3 + 0], midQ[leg * 3 + 1], midQ[leg * 3 + 2]);
+            if (Math.Abs(foot.Z) < 0.03) // within 3cm of ground = stance
+                nearGround++;
+        }
+
+        // Tripod gait: at least 3 legs should be near ground at any time
+        Assert.True(nearGround >= 3, $"Only {nearGround} legs near ground at mid-sample (expected ≥3 for tripod)");
+    }
+
+    // --- Quad Gait Tests ---
+
+    [Fact]
+    public void QuadGait_Builds_12Dof_Trajectory()
+    {
+        var layout = LeggedLayout.QuadSmoke(0.10, 0.06, 0.17, 0.19, 0.12);
+        Assert.Null(layout.Validate());
+        var limits = Enumerable.Range(0, 12).Select(_ => new JointLimit(-Math.PI, Math.PI, Math.PI, Math.PI * 2)).ToList();
+        var model = new RobotModel(layout.ToPreset("quad", 12, limits));
+        var path = new[] { new Vec3(0, 0, 0), new Vec3(0.4, 0, 0) };
+        Assert.True(LeggedGait.TryBuild(
+            layout, path, 0.08, 0.08, 0.025,
+            7.5 * Deg, 30 * Deg, -30 * Deg,
+            model, out var result, out var err), err);
+        Assert.NotNull(result);
+        Assert.Equal(12, result!.Trajectory.Points[0].JointState.AxisCount);
+        Assert.True(result.BasePath.Count >= 5);
+        Assert.Equal(result.Trajectory.Points.Count, result.BasePath.Count);
+    }
+
+    [Fact]
+    public void Step_Changes_MidGait_Joints()
+    {
+        var layout = LeggedLayout.HexMithi(0.12, 0.06, 0.17, 0.19, 0.12);
+        var limits = Enumerable.Range(0, 18).Select(_ => new JointLimit(-Math.PI, Math.PI, Math.PI, Math.PI * 2)).ToList();
+        var model = new RobotModel(layout.ToPreset("hex", 18, limits));
+        // Arc-ish polyline
+        var path = new List<Vec3>();
+        for (var i = 0; i <= 32; i++)
+        {
+            var a = Math.PI * i / 32.0;
+            path.Add(new Vec3(0.05 + 0.45 * Math.Cos(a), 0.45 * Math.Sin(a), 0));
+        }
+
+        Assert.True(LeggedGait.TryBuild(
+            layout, path, 0.08, 0.06, 0.03,
+            7.5 * Deg, 30 * Deg, -30 * Deg,
+            model, out var fine, out var e1), e1);
+        Assert.True(LeggedGait.TryBuild(
+            layout, path, 0.08, 0.20, 0.03,
+            7.5 * Deg, 30 * Deg, -30 * Deg,
+            model, out var coarse, out var e2), e2);
+
+        var aQ = fine!.Trajectory.Points[fine.Trajectory.Points.Count / 2].JointState.Positions;
+        var bQ = coarse!.Trajectory.Points[coarse.Trajectory.Points.Count / 2].JointState.Positions;
+        var diff = 0.0;
+        for (var i = 0; i < aQ.Length; i++)
+            diff += Math.Abs(aQ[i] - bQ[i]);
+        Assert.True(diff > 1e-3, $"Step should change mid-gait q (diff={diff})");
+    }
+
+    // --- Rejection Tests ---
+
+    [Fact]
+    public void LeggedGait_RejectsTooShortPath()
+    {
+        var layout = LeggedLayout.HexMithi(0.12, 0.06, 0.17, 0.19, 0.12);
+        var limits = Enumerable.Range(0, 18).Select(_ => new JointLimit(-Math.PI, Math.PI, Math.PI, Math.PI * 2)).ToList();
+        var model = new RobotModel(layout.ToPreset("hex", 18, limits));
+        var tooShort = new[] { new Vec3(0, 0, 0), new Vec3(0.01, 0, 0) }; // 1cm path
+
+        Assert.False(LeggedGait.TryBuild(
+            layout, tooShort, 0.08, 0.08, 0.025,
+            7.5 * Deg, 30 * Deg, -30 * Deg,
+            model, out _, out var err));
+        Assert.Contains("short", err.ToLower());
+    }
+
+    [Fact]
+    public void LeggedGait_RejectsAxisCountMismatch()
+    {
+        var layout = LeggedLayout.HexMithi(0.12, 0.06, 0.17, 0.19, 0.12); // 18 DOF
+        var wrongLimits = Enumerable.Range(0, 12).Select(_ => new JointLimit(-Math.PI, Math.PI, Math.PI, Math.PI * 2)).ToList();
+        var wrongModel = new RobotModel(layout.ToPreset("hex", 12, wrongLimits)); // 12 DOF mismatch
+        var path = new[] { new Vec3(0, 0, 0), new Vec3(0.4, 0, 0) };
+
+        Assert.False(LeggedGait.TryBuild(
+            layout, path, 0.08, 0.08, 0.025,
+            7.5 * Deg, 30 * Deg, -30 * Deg,
+            wrongModel, out _, out var err));
+        Assert.Contains("AxisCount", err);
+    }
+
+    [Fact]
+    public void LeggedGait_RejectsEmptyPath()
+    {
+        var layout = LeggedLayout.HexMithi(0.12, 0.06, 0.17, 0.19, 0.12);
+        var limits = Enumerable.Range(0, 18).Select(_ => new JointLimit(-Math.PI, Math.PI, Math.PI, Math.PI * 2)).ToList();
+        var model = new RobotModel(layout.ToPreset("hex", 18, limits));
+        var empty = Array.Empty<Vec3>();
+
+        Assert.False(LeggedGait.TryBuild(
+            layout, empty, 0.08, 0.08, 0.025,
+            7.5 * Deg, 30 * Deg, -30 * Deg,
+            model, out _, out var err));
+        Assert.Contains("empty", err.ToLower());
+    }
+
+    [Fact]
+    public void LeggedGait_RejectsInvalidSpeed()
+    {
+        var layout = LeggedLayout.HexMithi(0.12, 0.06, 0.17, 0.19, 0.12);
+        var limits = Enumerable.Range(0, 18).Select(_ => new JointLimit(-Math.PI, Math.PI, Math.PI, Math.PI * 2)).ToList();
+        var model = new RobotModel(layout.ToPreset("hex", 18, limits));
+        var path = new[] { new Vec3(0, 0, 0), new Vec3(0.4, 0, 0) };
+
+        Assert.False(LeggedGait.TryBuild(
+            layout, path, speed: -0.1, 0.08, 0.025,
+            7.5 * Deg, 30 * Deg, -30 * Deg,
+            model, out _, out var err));
+        Assert.Contains("Speed", err);
+    }
+
+    [Fact]
+    public void LeggedGait_RejectsInvalidLayout()
+    {
+        var badLayout = new LeggedLayout(
+            ["leg0", "leg1"], [0.0, Math.PI], [[0], [1]],
+            bodyR: 0, coxa: 0.06, femur: 0.17, tibia: 0.19, bodyZ: 0.12, tipLegName: "leg0");
+        var limits = Enumerable.Range(0, 6).Select(_ => new JointLimit(-Math.PI, Math.PI, Math.PI, Math.PI * 2)).ToList();
+        var model = new RobotModel(badLayout.ToPreset("bad", 6, limits));
+        var path = new[] { new Vec3(0, 0, 0), new Vec3(0.4, 0, 0) };
+
+        Assert.False(LeggedGait.TryBuild(
+            badLayout, path, 0.08, 0.08, 0.025,
+            7.5 * Deg, 30 * Deg, -30 * Deg,
+            model, out _, out var err));
+        Assert.Contains("BodyR", err);
+    }
+
+    // --- Elbow Branch Regression (q1 = γ+α, not γ−α) ---
+
+    [Fact]
+    public void LegIk3R_ElbowBranch_GammaPlusAlpha_NotMinus()
+    {
+        // Regression test: IK must return γ+α for femur angle (elbow-down config)
+        // The bug was q1 = atan2(z,-x) - acos(...) instead of + acos(...)
+        var hip = new Vec3(0.12, 0, 0.12);
+        const double coxa = 0.06, femur = 0.17, tibia = 0.19;
+
+        // Target below hip (typical stance)
+        var target = new Vec3(0.30, 0, 0);
+        Assert.True(LegIk3R.TrySolve(hip, target, coxa, femur, tibia, out var q0, out var q1, out var q2));
+
+        // FK back must match target
+        var computed = LegIk3R.FootPosition(hip, coxa, femur, tibia, q0, q1, q2);
+        AssertVec3Near(computed, target, CoarseTol, "Elbow branch FK↔IK mismatch");
+
+        // q1 should be positive (femur pitched forward/down in elbow-down config)
+        Assert.True(q1 > 0, $"q1={q1:F4} should be positive for elbow-down config (γ+α bug)");
+    }
+
+    [Fact]
+    public void LegIk3R_AllFiniteOutputs()
+    {
+        var hip = new Vec3(0.12, 0, 0.12);
+        const double coxa = 0.06, femur = 0.17, tibia = 0.19;
+
+        // Reachable target
+        var target = new Vec3(0.28, 0.05, 0);
+        Assert.True(LegIk3R.TrySolve(hip, target, coxa, femur, tibia, out var q0, out var q1, out var q2));
+        Assert.True(double.IsFinite(q0), "q0 must be finite");
+        Assert.True(double.IsFinite(q1), "q1 must be finite");
+        Assert.True(double.IsFinite(q2), "q2 must be finite");
+    }
+
+    [Fact]
+    public void LegIk3R_RejectsUnreachable()
+    {
+        var hip = new Vec3(0.12, 0, 0.12);
+        const double coxa = 0.06, femur = 0.17, tibia = 0.19;
+        var maxReach = coxa + femur + tibia;
+
+        // Way out of reach
+        var tooFar = new Vec3(hip.X + maxReach + 0.5, 0, 0);
+        Assert.False(LegIk3R.TrySolve(hip, tooFar, coxa, femur, tibia, out _, out _, out _));
+    }
+
+    [Fact]
+    public void LegIk3R_RejectsNaNInput()
+    {
+        var hip = new Vec3(0.12, 0, 0.12);
+        const double coxa = 0.06, femur = 0.17, tibia = 0.19;
+        var nanTarget = new Vec3(double.NaN, 0, 0);
+
+        Assert.False(LegIk3R.TrySolve(hip, nanTarget, coxa, femur, tibia, out _, out _, out _));
+    }
+
+    // --- Helper ---
+
+    private static void AssertVec3Near(Vec3 actual, Vec3 expected, double tol, string msg = "")
+    {
+        var dx = Math.Abs(actual.X - expected.X);
+        var dy = Math.Abs(actual.Y - expected.Y);
+        var dz = Math.Abs(actual.Z - expected.Z);
+        Assert.True(dx < tol && dy < tol && dz < tol,
+            $"{msg} Vec3 mismatch: got ({actual.X:F6},{actual.Y:F6},{actual.Z:F6}), " +
+            $"expected ({expected.X:F6},{expected.Y:F6},{expected.Z:F6}), tol={tol}");
+    }
+}

@@ -3,13 +3,18 @@ namespace Motus.Core;
 /// <summary>
 /// Motus uses radians for revolute joints, meters for prismatic joints / distance, seconds for time.
 /// Stewart leg lengths are meters (<see cref="JointCoordinateUnit.Meters"/>).
+/// Legged Family joints are radians (coxa/femur/tibia); not Stewart meters.
 /// </summary>
 public static class Units
 {
     public const string StewartFamily = "stewart";
+    public const string LeggedFamily = "legged";
 
     public static bool IsStewart(RobotPreset preset) =>
         string.Equals(preset.Family, StewartFamily, StringComparison.OrdinalIgnoreCase);
+
+    public static bool IsLegged(RobotPreset preset) =>
+        string.Equals(preset.Family, LeggedFamily, StringComparison.OrdinalIgnoreCase);
 
     public const double DegreesToRadians = Math.PI / 180.0;
     public const double RadiansToDegrees = 180.0 / Math.PI;

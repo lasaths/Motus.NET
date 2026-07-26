@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-07-26
+
+### Added
+
+- **Legged kinematics** (`Family=legged`): `LegIk3R` analytic 3-DOF leg IK (coxa yaw + femur/tibia pitch), `LeggedLayout` N×3R insectoid layouts (`HexMithi`, `QuadSmoke`), `LeggedGait` duty-cycle foot-target gait preview (flat-ground, planted feet, tripod/biped swing groups)
+- `Units.LeggedFamily` / `Units.IsLegged(RobotPreset)` — legged family marker; joints are radians (not Stewart meters)
+- Rigorous legged kinematics tests: FK↔IK round-trips, Z=0 plant targets, hex/quad gait builds, elbow-branch regression (`q1=γ+α`), rejection of invalid layouts/paths/axis mismatches
+
 ## [0.9.1] - 2026-07-24
 
 ### Fixed
@@ -366,7 +374,13 @@ Initial public release.
 - **Motus.Presets** — JSON preset loader with bundled UR and KUKA defaults
   (approximate public datasheet values for planning/visualization only).
 
-[Unreleased]: https://github.com/lasaths/Motus.NET/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/lasaths/Motus.NET/compare/v0.10.0...HEAD
+[0.10.0]: https://github.com/lasaths/Motus.NET/compare/v0.9.1...v0.10.0
+[0.9.1]: https://github.com/lasaths/Motus.NET/compare/v0.9.0...v0.9.1
+[0.9.0]: https://github.com/lasaths/Motus.NET/compare/v0.8.0...v0.9.0
+[0.8.0]: https://github.com/lasaths/Motus.NET/compare/v0.7.2...v0.8.0
+[0.7.2]: https://github.com/lasaths/Motus.NET/compare/v0.7.1...v0.7.2
+[0.7.1]: https://github.com/lasaths/Motus.NET/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/lasaths/Motus.NET/compare/v0.6.9...v0.7.0
 [0.6.9]: https://github.com/lasaths/Motus.NET/compare/v0.6.8...v0.6.9
 [0.6.8]: https://github.com/lasaths/Motus.NET/compare/v0.6.7...v0.6.8
