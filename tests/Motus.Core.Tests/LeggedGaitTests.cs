@@ -452,6 +452,25 @@ public class LeggedGaitTests
     }
 
     [Fact]
+    public void BuildStanceQ_PlantsFeetNearGround()
+    {
+        var layout = LeggedLayout.HexMithi(0.12, 0.06, 0.17, 0.19, 0.12);
+        var q = LeggedGait.BuildStanceQ(layout, 7.5 * Deg, 30 * Deg, -30 * Deg);
+        for (var leg = 0; leg < 6; leg++)
+        {
+            var yaw = layout.HipYawsRad[leg];
+            var hip = new Vec3(layout.BodyR * Math.Cos(yaw), layout.BodyR * Math.Sin(yaw), layout.BodyZ);
+            var foot = LegIk3R.FootPosition(
+                hip, layout.Coxa, layout.Femur, layout.Tibia,
+                q[leg * 3], q[leg * 3 + 1], q[leg * 3 + 2]);
+            Assert.InRange(foot.Z, -1e-4, 1e-4);
+            // Old fixed 30°/−30° stance floated at Z≈0.035 — planted stance must differ.
+            Assert.True(Math.Abs(q[leg * 3 + 1] - 30 * Deg) > 0.2,
+                "Expected plant IK femur angle, not the floating 30° fallback.");
+        }
+    }
+
+    [Fact]
     public void HexGait_StanceFeet_DoNotDragFarBehindNominal()
     {
         var layout = LeggedLayout.HexMithi(0.12, 0.06, 0.17, 0.19, 0.12);

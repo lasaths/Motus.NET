@@ -282,17 +282,48 @@ public static class LeggedGait
         return true;
     }
 
-    public static double[] BuildStanceQ(LeggedLayout layout, double hip, double femur, double tibia)
+    /// <summary>
+    /// Stance joint vector: coxa heading = hip yaw ± <paramref name="hipStance"/>,
+    /// femur/tibia from analytic plant IK at Z=0 (meters). Fixed <paramref name="femurStance"/> /
+    /// <paramref name="tibiaStance"/> are fallbacks only if plant IK fails.
+    /// </summary>
+    public static double[] BuildStanceQ(
+        LeggedLayout layout, double hipStance, double femurStance, double tibiaStance)
     {
         var n = layout.LegCount;
         var q = new double[n * 3];
+        var distal = layout.Femur + layout.Tibia;
+        // Horizontal reach beyond coxa for a comfortable mid-workspace plant at BodyZ.
+        var planar = Math.Sqrt(Math.Max(0.0, distal * distal - layout.BodyZ * layout.BodyZ));
+        var plantFromHip = layout.Coxa + 0.55 * planar;
+
         for (var leg = 0; leg < n; leg++)
         {
             var side = layout.LegIsLeft(leg) ? 1.0 : -1.0;
-            q[leg * 3 + 0] = layout.HipYawsRad[leg] + side * hip;
-            q[leg * 3 + 1] = femur;
-            q[leg * 3 + 2] = tibia;
+            var heading = layout.HipYawsRad[leg] + side * hipStance;
+            var hip = HipBody(layout, leg);
+            var foot = new Vec3(
+                hip.X + plantFromHip * Math.Cos(heading),
+                hip.Y + plantFromHip * Math.Sin(heading),
+                0);
+
+            if (LegIk3R.TrySolve(
+                    hip, foot, layout.Coxa, layout.Femur, layout.Tibia,
+                    out var q0, out var q1, out var q2))
+            {
+                q[leg * 3 + 0] = q0;
+                q[leg * 3 + 1] = q1;
+                q[leg * 3 + 2] = q2;
+            }
+            else
+            {
+                // ponytail: fixed angles only if plant IK fails (e.g. BodyZ > femur+tibia).
+                q[leg * 3 + 0] = heading;
+                q[leg * 3 + 1] = femurStance;
+                q[leg * 3 + 2] = tibiaStance;
+            }
         }
+
         return q;
     }
 
