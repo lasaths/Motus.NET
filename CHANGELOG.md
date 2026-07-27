@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.1] - 2026-07-27
+
+### Fixed
+
+- Stewart `CreateClassic` now crosses leg pairs within each 120° sector (b0→p1, b1→p0). Non-crossed pairing made the home pose Jacobian singular, so Plan start FK failed with `Jacobian ill-conditioned` on example 08.
+- Stewart numerical FK dropped the mixed-unit FD condition gate (false singular ~1e10); seed guess uses mid-stroke height.
+
 ## [0.13.0] - 2026-07-27
 
 ### Added
@@ -423,7 +430,8 @@ Initial public release.
 - **Motus.Presets** — JSON preset loader with bundled UR and KUKA defaults
   (approximate public datasheet values for planning/visualization only).
 
-[Unreleased]: https://github.com/lasaths/Motus.NET/compare/v0.13.0...HEAD
+[Unreleased]: https://github.com/lasaths/Motus.NET/compare/v0.13.1...HEAD
+[0.13.1]: https://github.com/lasaths/Motus.NET/compare/v0.13.0...v0.13.1
 [0.13.0]: https://github.com/lasaths/Motus.NET/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/lasaths/Motus.NET/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/lasaths/Motus.NET/compare/v0.10.0...v0.11.0

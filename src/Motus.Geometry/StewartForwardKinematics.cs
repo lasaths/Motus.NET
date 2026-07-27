@@ -49,14 +49,8 @@ public sealed class StewartForwardKinematics
             }
 
             FillJacobianFiniteDiff(x, lengths.Positions, jacobian);
-            var cond = EstimateCondition(jacobian);
-            if (!double.IsFinite(cond) || cond > _opts.JacobianConditionLimit)
-            {
-                return KinematicsSolveResult.Fail(
-                    KinematicsReason.Singular,
-                    $"Jacobian ill-conditioned (cond≈{cond:E2}) at FK iteration {iter}.");
-            }
-
+            // Mixed-unit FD Jacobian (m vs rad) makes ‖J‖∞·‖J⁻¹‖∞ huge (~1e10) even when
+            // Newton is healthy — do not gate on EstimateCondition; trust the linear solve.
             if (!TrySolveLinear6(jacobian, residual, delta))
             {
                 return KinematicsSolveResult.Fail(
@@ -84,8 +78,10 @@ public sealed class StewartForwardKinematics
         for (var i = 0; i < StewartPlatform.LegCount; i++)
             avg += lengths.Positions[i];
         avg /= StewartPlatform.LegCount;
-        // Rough height ≈ average length for near-vertical legs.
-        return new Frame(0, 0, avg);
+        // Height ≈ mid-stroke for classic hex (avg L is radial-biased high, not Z).
+        var mid = 0.5 * (_platform.StrokeLimits[0].Min + _platform.StrokeLimits[0].Max);
+        var z = mid > 0 ? mid : avg;
+        return new Frame(0, 0, z);
     }
 
     private void FillResidual(double[] state, double[] L, double[] residual)
@@ -200,30 +196,4 @@ public sealed class StewartForwardKinematics
         return true;
     }
 
-    /// <summary>Rough ∞-norm condition estimate: ‖A‖∞ · ‖A⁻¹‖∞ via solving for basis.</summary>
-    private static double EstimateCondition(double[] a)
-    {
-        var normA = 0.0;
-        for (var row = 0; row < 6; row++)
-        {
-            var rowSum = 0.0;
-            for (var col = 0; col < 6; col++)
-                rowSum += Math.Abs(a[row * 6 + col]);
-            normA = Math.Max(normA, rowSum);
-        }
-        var invNorm = 0.0;
-        var rhs = new double[6];
-        var invCol = new double[6];
-        for (var j = 0; j < 6; j++)
-        {
-            Array.Clear(rhs);
-            rhs[j] = 1;
-            if (!TrySolveLinear6(a, rhs, invCol))
-                return double.PositiveInfinity;
-            var s = 0.0;
-            for (var i = 0; i < 6; i++) s += Math.Abs(invCol[i]);
-            invNorm = Math.Max(invNorm, s);
-        }
-        return normA * invNorm;
-    }
 }

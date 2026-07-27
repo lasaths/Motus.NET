@@ -110,6 +110,43 @@ public class VerifiedStewartKinematicsTests
     }
 
     [Fact]
+    public void Fk_Unseeded_HomeLengths_Succeeds()
+    {
+        // Plan / GH call TrySolve(lengths) with no seed — must not false-singular on home.
+        var robot = Classic();
+        var lengths = robot.Platform.HomeLengths();
+        var fk = robot.ForwardKinematics.TrySolve(lengths);
+        Assert.True(fk.Success, $"Unseeded FK failed: {fk}");
+        Assert.NotNull(fk.Pose);
+        Assert.True(fk.Pose!.Tcp.Z > 0.1);
+    }
+
+    [Fact]
+    public void Fk_Unseeded_TranslatedPose_Succeeds()
+    {
+        var robot = Classic();
+        var mid = 0.5 * (robot.Platform.StrokeLimits[0].Min + robot.Platform.StrokeLimits[0].Max);
+        var target = new CartesianPose(new Frame(0.01, 0, mid));
+        var ik = robot.InverseKinematics.TrySolveDetailed(target);
+        Assert.True(ik.Success, ik.ToString());
+        var fk = robot.ForwardKinematics.TrySolve(ik.JointState!);
+        Assert.True(fk.Success, $"Unseeded FK failed: {fk}");
+    }
+
+    [Fact]
+    public void CreateClassic_HomePose_JacobianIsNonsingular()
+    {
+        // Non-crossed pairing was singular at identity/mid — Plan start FK died at iter 0.
+        var robot = Classic();
+        var mid = 0.5 * (robot.Platform.StrokeLimits[0].Min + robot.Platform.StrokeLimits[0].Max);
+        var home = new CartesianPose(new Frame(0, 0, mid));
+        var goal = new CartesianPose(new Frame(0.01, 0, mid));
+        var lengths = robot.InverseKinematics.TrySolveDetailed(goal).JointState!;
+        var fk = robot.ForwardKinematics.TrySolve(lengths, seedPose: home);
+        Assert.True(fk.Success, $"FK from home seed to translated lengths: {fk}");
+    }
+
+    [Fact]
     public void IkFk_RoundTrip_Translate()
     {
         var robot = Classic();

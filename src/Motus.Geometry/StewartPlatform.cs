@@ -74,14 +74,15 @@ public sealed class StewartPlatform
             var center = i * (2.0 * Math.PI / 3.0);
             var b0 = center - basePairSeparationRadians * 0.5;
             var b1 = center + basePairSeparationRadians * 0.5;
-            // Platform pairs rotated by 60° so legs cross between base pairs.
+            // Platform pairs rotated by 60°; cross within each sector (b0→p1, b1→p0)
+            // so legs are not nearly parallel — non-crossed pairing is singular at home.
             var pCenter = center + Math.PI / 3.0;
             var p0 = pCenter - platformPairSeparationRadians * 0.5;
             var p1 = pCenter + platformPairSeparationRadians * 0.5;
             baseAnchors[2 * i] = OnCircle(baseRadiusMeters, b0);
             baseAnchors[2 * i + 1] = OnCircle(baseRadiusMeters, b1);
-            platformAnchors[2 * i] = OnCircle(platformRadiusMeters, p0);
-            platformAnchors[2 * i + 1] = OnCircle(platformRadiusMeters, p1);
+            platformAnchors[2 * i] = OnCircle(platformRadiusMeters, p1);
+            platformAnchors[2 * i + 1] = OnCircle(platformRadiusMeters, p0);
         }
 
         var limits = Enumerable.Range(0, LegCount)
@@ -207,7 +208,8 @@ public sealed class StewartSolverOptions
     public double FkPositionTolMeters { get; init; } = 1e-6;
     public double FkOrientationTolRadians { get; init; } = 1e-6;
     public int FkMaxIterations { get; init; } = 40;
-    public double JacobianConditionLimit { get; init; } = 1e8;
+    /// <summary>Reserved; FK no longer gates on ‖J‖∞·‖J⁻¹‖∞ (mixed m/rad FD inflated it).</summary>
+    public double JacobianConditionLimit { get; init; } = 1e12;
     public double MaxLegDeltaPerStepMeters { get; init; } = 0.05;
     public double FiniteDiffStepMeters { get; init; } = 1e-7;
     public double FiniteDiffStepRadians { get; init; } = 1e-7;
