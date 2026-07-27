@@ -1,8 +1,15 @@
 # Motus.NET
 
-.NET 8 host-agnostic motion-planning core: models, FK/IK, collision, sampling/Cartesian planners, retiming, and export. No UI, no vendor runtime, no live robot I/O. Algorithm catalog: [docs/METHODS.md](docs/METHODS.md) · citations: [docs/REFERENCES.bib](docs/REFERENCES.bib).
+.NET 8 **host-agnostic** motion-planning core: models, FK/IK, collision, sampling/Cartesian planners, retiming, and export.
 
-Use it from [Motus.Grasshopper](https://github.com/lasaths/Motus.Grasshopper) or any .NET host. Bundled presets (UR family) and **URDF / xacro** loaders; analytic IK for Universal Robots, numerical IK for generic chains.
+| Motus.NET | [Motus.Grasshopper](https://github.com/lasaths/Motus.Grasshopper) |
+|-----------|-------------------------------------------------------------------|
+| Libraries on [nuget.org](https://www.nuget.org/profiles/lasaths) (`0.12.0`) | Rhino/GH UI that calls these APIs |
+| Owns math, units, Status contracts, method DOIs | Thin components + examples |
+
+No UI, no vendor runtime, no live robot I/O. Algorithm catalog: [docs/METHODS.md](docs/METHODS.md) · citations: [docs/REFERENCES.bib](docs/REFERENCES.bib).
+
+Bundled presets (UR family) and **URDF / xacro** loaders; analytic IK for Universal Robots, numerical IK for generic chains. Parallel **Stewart** (`Family=stewart`, leg lengths in meters) and **legged** gait preview (`Family=legged`, radians) are first-class siblings of serial tip chains.
 
 Licensed under [MIT](LICENSE).
 
@@ -23,7 +30,7 @@ dotnet add package Motus.Presets
 | `Motus.Presets` | JSON presets + `UrdfRobotLoader` / xacro |
 | `Motus.Native` | Optional P/Invoke to `motus_native` (OMPL + FCL) |
 
-**Rhino / desktop:** managed planning and C# mesh collision are the default — no Linux `.so` required. See [docs/rhino-host.md](docs/rhino-host.md).
+**Rhino / desktop:** managed planning and C# mesh collision are the default — no Linux `.so` required. See [docs/rhino-host.md](docs/rhino-host.md). Stub/NuGet builds often expose only `RrtConnect` in the planner registry; extra OMPL IDs need a full native build. Check `MotusCapabilities.Describe()`.
 
 ## Quick start
 
@@ -66,7 +73,7 @@ var fk = KinematicsResolver.CreateFkSolver(robot.Preset, robot.Chain);
 |---------|-------------|
 | `JointLinearPlanner` | Free-space joint interpolation |
 | `CartesianLinearPathPlanner` | True TCP-linear (LIN) after IK |
-| `SamplingPlanner` | Obstacles — RRT-Connect / RRT* / … via registry |
+| `SamplingPlanner` | Obstacles — RRT-Connect / PRM* / … via registry |
 | `IndustrialMotionPlanner` | Mixed PTP / LIN / CIRC programs |
 
 Prefer `SamplingPlanner` + `CollisionCheckerFactory.Create` (or `GetOrCreate` for session reuse) over the obsolete `RrtConnectPlanner` wrapper.
@@ -93,11 +100,11 @@ var result = SamplingPlanner.Create(checker).Plan(
     new PlanningRequest(robot, start, goal, ctx.ToPlanningOptions()));
 ```
 
-Non-group joints stay locked at the start configuration. `MotusCapabilities.Describe()` reports managed vs native OMPL/FCL.
+Non-group joints stay locked at the start configuration.
 
 ## Units & export
 
-Internal units: **radians**, **seconds**, **meters** (`Motus.Core.Units` for °↔rad).
+Internal units: **radians**, **seconds**, **meters** (`Motus.Core.Units` for °↔rad). Stewart configurations are **meters** (leg stroke); legged joints are **radians**.
 
 `TrajectoryExport.ToJson` emits the **PlanBundle** contract for Grasshopper and control adapters:
 
@@ -131,9 +138,7 @@ Benchmarks: `benchmarks/Motus.Benchmarks` (BenchmarkDotNet).
 
 Tag `vX.Y.Z` → [release workflow](.github/workflows/release.yml) builds, tests, packs, publishes to [nuget.org](https://www.nuget.org/profiles/lasaths), and creates a GitHub Release.
 
-One-time nuget.org trusted publisher: GitHub owner `lasaths`, repo `Motus.NET`, workflow `release.yml`.
-
-Changelog: [CHANGELOG.md](CHANGELOG.md).
+Changelog: [CHANGELOG.md](CHANGELOG.md). Current pin for Grasshopper: **0.12.0**.
 
 ## Safety
 
