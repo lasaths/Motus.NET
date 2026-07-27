@@ -13,6 +13,19 @@ Bundled presets (UR family) and **URDF / xacro** loaders; analytic IK for Univer
 
 Licensed under [MIT](LICENSE).
 
+## Contents
+
+- [Packages](#packages)
+- [Quick start](#quick-start)
+- [Planners](#planners)
+- [Algorithms and references](#algorithms-and-references)
+- [Context: attach, groups, SRDF](#context-attach-groups-srdf)
+- [Units and export](#units--export)
+- [Build and test](#build--test)
+- [Releases](#releases)
+- [Safety](#safety)
+- [Attribution](#attribution)
+
 ## Packages
 
 ```bash
@@ -87,6 +100,31 @@ var result = planner.Plan(new MotionProgramRequest(robot, start, new MotionSegme
     new CircSegment(via, circGoal, arcSamples: 12)
 }));
 ```
+
+## Algorithms and references
+
+Canonical detail (API, units, failure codes): [docs/METHODS.md](docs/METHODS.md). BibTeX: [docs/REFERENCES.bib](docs/REFERENCES.bib).
+
+<details>
+<summary><strong>Method catalog</strong> — area, behavior, citations (click to expand)</summary>
+
+| Area | What Motus does | References |
+|------|-----------------|------------|
+| URDF / xacro | In-process xacro subset → kinematic tree (`LoadTreeXacro`) | [docs/urdf-import.md](docs/urdf-import.md) |
+| Joint LIN | Free-space joint interpolation + optional collision | Deterministic managed |
+| Cartesian LIN | TCP-linear path, IK per sample | Deterministic managed |
+| PoE FK / numerical IK | Modern Robotics screws + body Jacobian for URDF serial | Lynch & Park, *Modern Robotics* |
+| TOTG retime | Managed TOPP-RA-style retiming (`RetimerAlgorithm.Totg`) | Pham & Pham 2018, DOI [10.1109/TRO.2018.2819195](https://doi.org/10.1109/TRO.2018.2819195) |
+| Path constraints | MoveIt-shaped position/orientation checks | Sucan et al. 2012, DOI [10.1109/MRA.2012.2205651](https://doi.org/10.1109/MRA.2012.2205651) |
+| RRT-Connect | Default sampling (managed; native OMPL optional) | Kuffner & LaValle, ICRA 2000; [OMPL](https://ompl.kavrakilab.org/) |
+| PRM* | Managed roadmap sampling | Karaman & Frazzoli 2011, DOI [10.1177/0278364911406761](https://doi.org/10.1177/0278364911406761) |
+| CHOMP-lite | Post-process smoother | Zucker et al. 2013, DOI [10.1177/0278364913488805](https://doi.org/10.1177/0278364913488805) |
+| Stewart / Gough | Leg-length IK/FK, stroke-space collision/RRT (`Family=stewart`, **meters**) | Merlet; Dasgupta & Mruthyunjaya — see METHODS |
+| Group / tree planning | `PlanningGroup` / `GroupMap` over named drivers | Kinematic-tree ADRs / METHODS |
+| Holonomic SE(2) | Base x/y/yaw appended to sampling | LaValle, *Planning Algorithms* (2006) |
+| Legged gait | Duty-cycle gait + SSM validation (`Family=legged`, **radians**) | Lynch & Park; Song & Waldron; McGhee & Frank — see METHODS |
+
+</details>
 
 ## Context: attach, groups, SRDF
 
