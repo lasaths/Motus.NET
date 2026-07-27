@@ -22,7 +22,8 @@ namespace Motus.Geometry;
 /// <para><b>Engineering adaptations (Heuristic — not theorems):</b> sinusoidal swing lift
 /// <c>h = H·sin(πs)</c> above lerped terrain; forward land bias along heading; drift-based replant
 /// threshold vs step length; event-driven stretch swing when plant drifts from nominal;
-/// body Z = terrain(x,y) + BodyZ clearance (mean-stance body height heuristic).</para>
+/// body rides a <b>smoothed</b> support plane from terrain under all nominal feet (not the
+/// instantaneous stance set — that jumps when legs lift and looks like 2-leg climbing).</para>
 /// </remarks>
 public static class LeggedGait
 {
@@ -120,7 +121,21 @@ public static class LeggedGait
             return false;
         }
 
+        SampleAt(pathXy, cumLen, pathLength, 0, out var startX, out var startY, out var startYaw);
         var stanceQ = BuildStanceQ(layout, hipStance, femurStance, tibiaStance);
+        if (!TryNominalFeetBody(layout, stanceQ, out var nominalFootBody, out error))
+            return false;
+        if (!TryFrameFromNominalTerrain(
+                layout, nominalFootBody, startX, startY, startYaw, terrain, out var startFrame, out error))
+            return false;
+
+        var plants = InitializePlants(layout, startFrame, nominalFootBody, terrain, out var initErr);
+        if (plants is null)
+        {
+            error = initErr;
+            return false;
+        }
+
         var duration = pathLength / speed;
         const double sampleHz = 30.0;
         var dt = 1.0 / sampleHz;
@@ -136,50 +151,46 @@ public static class LeggedGait
         var points = new List<TrajectoryPoint>(sampleCount);
         var basePath = new List<Frame>(sampleCount);
 
-        SampleAt(pathXy, cumLen, pathLength, 0, out var startX, out var startY, out var startYaw);
-        if (!TryHeight(terrain, startX, startY, out var startZ, out error))
-            return false;
-        var startFrame = new MobilityModel.HolonomicSE2(startX, startY, startYaw, startZ).BaseFrame;
-
-        var plants = InitializePlants(layout, startFrame, stanceQ, terrain, out var nominalFootBody, out var initErr);
-        if (plants is null)
-        {
-            error = initErr;
-            return false;
-        }
-
         // Planar hip–foot over-reach (foot near body floor): coxa + sqrt((femur+tibia)² − BodyZ²).
-        // Using sum-of-links ignored BodyZ and falsely marked every stance leg as stretched.
         var distal = layout.Femur + layout.Tibia;
         var maxHoriz = layout.Coxa + Math.Sqrt(Math.Max(0, distal * distal - layout.BodyZ * layout.BodyZ));
-        var maxStanceReach = 1.05 * maxHoriz;
+        // Loose enough that hills don't cascade stretch-swings; tight enough that plants still replant.
+        var maxStanceReach = 1.12 * maxHoriz;
         var driftReplant = Math.Max(0.02, 0.55 * stepLength);
         var groupCount = layout.SwingGroups.Count;
         var swingPeriodSec = duration / (cyclesPerPath * groupCount);
-        // Land a bit ahead of nominal along heading so stance doesn't start already aft.
         var landBias = 0.30 * stepLength;
+        // Body slew: ~0.25 m/s vertical + soft slerp — kills stance-set discontinuities.
+        var maxDzPerSample = Math.Max(0.004, 0.25 * dt);
+        const double bodyBlend = 0.28;
 
         var qPrev = (double[])stanceQ.Clone();
         var legSwingPhase = new double[n];
         Array.Fill(legSwingPhase, -1.0);
         var swingFrom = new Vec3[n];
         var swingTo = new Vec3[n];
+        var footWorld = new Vec3[n];
         var ikFailSamples = 0;
         var minSsm = double.PositiveInfinity;
         var unstableSamples = 0;
+        var prevBase = startFrame;
 
         for (var i = 0; i < sampleCount; i++)
         {
             var tSec = Math.Min(duration, i * dt);
             var arcLen = speed * tSec;
             SampleAt(pathXy, cumLen, pathLength, arcLen, out var px, out var py, out var yaw);
-            if (!TryHeight(terrain, px, py, out var bodyGroundZ, out error))
+
+            // Continuous desired pose from all 6 nominal feet on terrain (stable as legs swing).
+            if (!TryFrameFromNominalTerrain(
+                    layout, nominalFootBody, px, py, yaw, terrain, out var desiredBase, out error))
                 return false;
-            var baseFrame = new MobilityModel.HolonomicSE2(px, py, yaw, bodyGroundZ).BaseFrame;
+            var baseFrame = i == 0
+                ? desiredBase
+                : SmoothBodyToward(prevBase, desiredBase, px, py, yaw, bodyBlend, maxDzPerSample);
 
             var pathPhase = duration > 1e-9 ? tSec / duration : 0;
             var cyclePhase = (pathPhase * cyclesPerPath) % 1.0;
-            var q = (double[])qPrev.Clone();
             var headingX = Math.Cos(yaw);
             var headingY = Math.Sin(yaw);
             var stanceContacts = new List<Vec3>(n);
@@ -190,23 +201,22 @@ public static class LeggedGait
                 var hipWorld = HipWorld(layout, leg, baseFrame);
                 if (!TryNominalFootWorld(leg, nominalFootBody, baseFrame, terrain, out var nominalLand, out error))
                     return false;
-                // Chase current body — frozen swing-start targets leave aft legs dragging.
                 var landX = nominalLand.X + headingX * landBias;
                 var landY = nominalLand.Y + headingY * landBias;
                 if (!TryHeight(terrain, landX, landY, out var landZ, out error))
                     return false;
                 var landTarget = new Vec3(landX, landY, landZ);
+                var hipDist = HorizontalDistance(hipWorld, plants[leg]);
                 var drifted = HorizontalDistance(plants[leg], landTarget) > driftReplant;
-                var overReach = HorizontalDistance(hipWorld, plants[leg]) > maxStanceReach;
+                var overReach = hipDist > maxStanceReach;
                 var stretched = drifted || overReach;
                 var shouldSwing = phaseSwinging || stretched;
-                Vec3 footWorld;
 
                 if (!shouldSwing)
                 {
-                    footWorld = plants[leg];
+                    footWorld[leg] = plants[leg];
                     legSwingPhase[leg] = -1.0;
-                    stanceContacts.Add(footWorld);
+                    stanceContacts.Add(footWorld[leg]);
                 }
                 else
                 {
@@ -226,7 +236,7 @@ public static class LeggedGait
                     }
 
                     var local = legSwingPhase[leg];
-                    footWorld = SwingFoot(swingFrom[leg], swingTo[leg], local, stepHeight);
+                    footWorld[leg] = SwingFoot(swingFrom[leg], swingTo[leg], local, stepHeight);
                     if (local >= 0.999)
                     {
                         plants[leg] = swingTo[leg];
@@ -234,8 +244,12 @@ public static class LeggedGait
                             legSwingPhase[leg] = -1.0;
                     }
                 }
+            }
 
-                var footBody = WorldToBody(footWorld, baseFrame);
+            var q = (double[])qPrev.Clone();
+            for (var leg = 0; leg < n; leg++)
+            {
+                var footBody = WorldToBody(footWorld[leg], baseFrame);
                 var hipBody = HipBody(layout, leg);
 
                 if (LegIk3R.TrySolve(hipBody, footBody, layout.Coxa, layout.Femur, layout.Tibia, out var q0, out var q1, out var q2))
@@ -253,12 +267,9 @@ public static class LeggedGait
                 }
             }
 
-            // McGhee–Frank SSM when ≥3 stance contacts (skip all-swing / degenerate samples).
-            // CoM stand-in = body origin XY (heuristic geometric CoM — labeled in Status).
-            // Projection ignores non-coplanar contacts (classic SSM limit — labeled).
             if (stanceContacts.Count >= 3)
             {
-                var ssm = StaticStability.Evaluate(stanceContacts, new Vec3(px, py, bodyGroundZ));
+                var ssm = StaticStability.Evaluate(stanceContacts, new Vec3(px, py, baseFrame.Z));
                 if (double.IsFinite(ssm.MarginMeters) && ssm.MarginMeters < minSsm)
                     minSsm = ssm.MarginMeters;
                 if (!ssm.IsStable)
@@ -272,6 +283,7 @@ public static class LeggedGait
             }
 
             qPrev = q;
+            prevBase = baseFrame;
             points.Add(new TrajectoryPoint(tSec, new JointState(q)));
             basePath.Add(baseFrame);
         }
@@ -470,18 +482,15 @@ public static class LeggedGait
         yaw = Math.Atan2(ty, tx);
     }
 
-    private static Vec3[]? InitializePlants(
+    private static bool TryNominalFeetBody(
         LeggedLayout layout,
-        Frame startBase,
         double[] stanceQ,
-        TerrainHeight terrain,
         out Vec3[] nominalFootBody,
         out string error)
     {
         error = "";
         var n = layout.LegCount;
         nominalFootBody = new Vec3[n];
-        var plants = new Vec3[n];
         for (var leg = 0; leg < n; leg++)
         {
             var hipBody = HipBody(layout, leg);
@@ -490,21 +499,293 @@ public static class LeggedGait
                 stanceQ[leg * 3 + 0], stanceQ[leg * 3 + 1], stanceQ[leg * 3 + 2]);
             // Body-floor plant (Z=0 relative); world Z comes from terrain under that XY.
             var footTargetBody = new Vec3(footBody.X, footBody.Y, 0);
-            nominalFootBody[leg] = footTargetBody;
-
             if (!LegIk3R.TrySolve(hipBody, footTargetBody, layout.Coxa, layout.Femur, layout.Tibia, out _, out _, out _))
             {
                 error = $"Leg {layout.LegNames[leg]}: stance foot unreachable (BodyZ={layout.BodyZ:F3} m too low or geometry infeasible).";
-                return null;
+                return false;
             }
+            nominalFootBody[leg] = footTargetBody;
+        }
+        return true;
+    }
 
-            var xy = BodyToWorld(footTargetBody, startBase);
+    /// <summary>
+    /// Vertical projection of the walk pose onto terrain: body base Z = mean ground under nominal feet.
+    /// Keeps relative foot Z near body-floor so LegIk3R stays in workspace on slopes / Amp hills.
+    /// </summary>
+    private static bool TrySupportPlaneZ(
+        LeggedLayout layout,
+        Vec3[] nominalFootBody,
+        double px,
+        double py,
+        double yaw,
+        TerrainHeight terrain,
+        out double bodyGroundZ,
+        out string error)
+    {
+        bodyGroundZ = 0;
+        var flat = new MobilityModel.HolonomicSE2(px, py, yaw, 0).BaseFrame;
+        var sum = 0.0;
+        var n = layout.LegCount;
+        for (var leg = 0; leg < n; leg++)
+        {
+            var w = BodyToWorld(nominalFootBody[leg], flat);
+            if (!TryHeight(terrain, w.X, w.Y, out var gz, out error))
+                return false;
+            sum += gz;
+        }
+        bodyGroundZ = sum / n;
+        error = "";
+        return true;
+    }
+
+    private static Vec3[]? InitializePlants(
+        LeggedLayout layout,
+        Frame startBase,
+        Vec3[] nominalFootBody,
+        TerrainHeight terrain,
+        out string error)
+    {
+        error = "";
+        var n = layout.LegCount;
+        var plants = new Vec3[n];
+        for (var leg = 0; leg < n; leg++)
+        {
+            var xy = BodyToWorld(nominalFootBody[leg], startBase);
             if (!TryHeight(terrain, xy.X, xy.Y, out var gz, out error))
                 return null;
             plants[leg] = new Vec3(xy.X, xy.Y, gz);
         }
 
         return plants;
+    }
+
+    /// <summary>
+    /// Continuous body pose: plane through terrain under all nominal feet (stable while tripod swings).
+    /// </summary>
+    private static bool TryFrameFromNominalTerrain(
+        LeggedLayout layout,
+        Vec3[] nominalFootBody,
+        double px,
+        double py,
+        double pathYaw,
+        TerrainHeight terrain,
+        out Frame frame,
+        out string error)
+    {
+        frame = default;
+        var flat = new MobilityModel.HolonomicSE2(px, py, pathYaw, 0).BaseFrame;
+        var n = layout.LegCount;
+        var pts = new Vec3[n];
+        for (var leg = 0; leg < n; leg++)
+        {
+            var w = BodyToWorld(nominalFootBody[leg], flat);
+            if (!TryHeight(terrain, w.X, w.Y, out var gz, out error))
+                return false;
+            pts[leg] = new Vec3(w.X, w.Y, gz);
+        }
+
+        frame = FrameFromSupportPoints(px, py, pathYaw, pts);
+        error = "";
+        return true;
+    }
+
+    private static Frame FrameFromSupportPoints(
+        double px, double py, double pathYaw, IReadOnlyList<Vec3> pts)
+    {
+        if (pts.Count < 3 || !TryFitHeightPlane(pts, out var a, out var b, out var c))
+        {
+            var z = 0.0;
+            for (var i = 0; i < pts.Count; i++)
+                z += pts[i].Z;
+            z = pts.Count > 0 ? z / pts.Count : 0;
+            return new MobilityModel.HolonomicSE2(px, py, pathYaw, z).BaseFrame;
+        }
+
+        var zBody = a * px + b * py + c;
+        if (!double.IsFinite(zBody))
+            return new MobilityModel.HolonomicSE2(px, py, pathYaw, pts[0].Z).BaseFrame;
+
+        var nx = -a;
+        var ny = -b;
+        var nz = 1.0;
+        var nLen = Math.Sqrt(nx * nx + ny * ny + nz * nz);
+        nx /= nLen;
+        ny /= nLen;
+        nz /= nLen;
+        if (nz < 0.45)
+            return new MobilityModel.HolonomicSE2(px, py, pathYaw, zBody).BaseFrame;
+
+        var hx = Math.Cos(pathYaw);
+        var hy = Math.Sin(pathYaw);
+        var hd = hx * nx + hy * ny;
+        var xx = hx - nx * hd;
+        var xy = hy - ny * hd;
+        var xz = -nz * hd;
+        var xLen = Math.Sqrt(xx * xx + xy * xy + xz * xz);
+        if (xLen < 1e-9)
+            return new MobilityModel.HolonomicSE2(px, py, pathYaw, zBody).BaseFrame;
+        xx /= xLen;
+        xy /= xLen;
+        xz /= xLen;
+
+        var yx = ny * xz - nz * xy;
+        var yy = nz * xx - nx * xz;
+        var yz = nx * xy - ny * xx;
+
+        return Transforms.ToFrame(
+        [
+            xx, yx, nx, px,
+            xy, yy, ny, py,
+            xz, yz, nz, zBody,
+            0, 0, 0, 1
+        ]);
+    }
+
+    /// <summary>EMA + vertical slew toward desired support pose (path yaw forced).</summary>
+    private static Frame SmoothBodyToward(
+        Frame prev, Frame desired, double px, double py, double pathYaw,
+        double blend, double maxDz)
+    {
+        var z = prev.Z + Math.Clamp(desired.Z - prev.Z, -maxDz, maxDz);
+        z += blend * (desired.Z - z);
+
+        // Soft-slerp orientation, then rebuild with path yaw projected onto blended normal.
+        var t = Math.Clamp(blend, 0, 1);
+        SlerpQuat(
+            prev.Qw, prev.Qx, prev.Qy, prev.Qz,
+            desired.Qw, desired.Qx, desired.Qy, desired.Qz,
+            t,
+            out var qw, out var qx, out var qy, out var qz);
+        var blended = new Frame(px, py, z, qw, qx, qy, qz);
+
+        // Re-apply path yaw on the blended Z-up so heading stays on the walk path.
+        var m = Transforms.FromFrame(blended);
+        var nx = m[2];
+        var ny = m[6];
+        var nz = m[10];
+        var nLen = Math.Sqrt(nx * nx + ny * ny + nz * nz);
+        if (nLen < 1e-9 || nz / nLen < 0.45)
+            return new MobilityModel.HolonomicSE2(px, py, pathYaw, z).BaseFrame;
+        nx /= nLen;
+        ny /= nLen;
+        nz /= nLen;
+
+        var hx = Math.Cos(pathYaw);
+        var hy = Math.Sin(pathYaw);
+        var hd = hx * nx + hy * ny;
+        var xx = hx - nx * hd;
+        var xy = hy - ny * hd;
+        var xz = -nz * hd;
+        var xLen = Math.Sqrt(xx * xx + xy * xy + xz * xz);
+        if (xLen < 1e-9)
+            return new MobilityModel.HolonomicSE2(px, py, pathYaw, z).BaseFrame;
+        xx /= xLen;
+        xy /= xLen;
+        xz /= xLen;
+        var yx = ny * xz - nz * xy;
+        var yy = nz * xx - nx * xz;
+        var yz = nx * xy - ny * xx;
+        return Transforms.ToFrame(
+        [
+            xx, yx, nx, px,
+            xy, yy, ny, py,
+            xz, yz, nz, z,
+            0, 0, 0, 1
+        ]);
+    }
+
+    private static void SlerpQuat(
+        double aw, double ax, double ay, double az,
+        double bw, double bx, double by, double bz,
+        double t,
+        out double w, out double x, out double y, out double z)
+    {
+        var dot = aw * bw + ax * bx + ay * by + az * bz;
+        if (dot < 0)
+        {
+            bw = -bw; bx = -bx; by = -by; bz = -bz;
+            dot = -dot;
+        }
+
+        if (dot > 0.9995)
+        {
+            w = aw + t * (bw - aw);
+            x = ax + t * (bx - ax);
+            y = ay + t * (by - ay);
+            z = az + t * (bz - az);
+            var n = Math.Sqrt(w * w + x * x + y * y + z * z);
+            if (n < 1e-15) { w = 1; x = y = z = 0; return; }
+            w /= n; x /= n; y /= n; z /= n;
+            return;
+        }
+
+        var theta0 = Math.Acos(Math.Clamp(dot, -1, 1));
+        var theta = theta0 * t;
+        var s0 = Math.Sin(theta0);
+        var s1 = Math.Sin(theta0 - theta) / s0;
+        var s2 = Math.Sin(theta) / s0;
+        w = s1 * aw + s2 * bw;
+        x = s1 * ax + s2 * bx;
+        y = s1 * ay + s2 * by;
+        z = s1 * az + s2 * bz;
+    }
+
+    /// <summary>Least-squares plane z = a x + b y + c through support points.</summary>
+    private static bool TryFitHeightPlane(IReadOnlyList<Vec3> pts, out double a, out double b, out double c)
+    {
+        a = b = c = 0;
+        var n = pts.Count;
+        if (n < 3)
+            return false;
+
+        double sx = 0, sy = 0, sz = 0, sxx = 0, syy = 0, sxy = 0, sxz = 0, syz = 0;
+        for (var i = 0; i < n; i++)
+        {
+            var p = pts[i];
+            sx += p.X;
+            sy += p.Y;
+            sz += p.Z;
+            sxx += p.X * p.X;
+            syy += p.Y * p.Y;
+            sxy += p.X * p.Y;
+            sxz += p.X * p.Z;
+            syz += p.Y * p.Z;
+        }
+
+        var m00 = sxx;
+        var m01 = sxy;
+        var m02 = sx;
+        var m10 = sxy;
+        var m11 = syy;
+        var m12 = sy;
+        var m20 = sx;
+        var m21 = sy;
+        var m22 = n;
+        var d0 = sxz;
+        var d1 = syz;
+        var d2 = sz;
+
+        var det =
+            m00 * (m11 * m22 - m12 * m21) -
+            m01 * (m10 * m22 - m12 * m20) +
+            m02 * (m10 * m21 - m11 * m20);
+        if (Math.Abs(det) < 1e-14)
+            return false;
+
+        a = (
+            d0 * (m11 * m22 - m12 * m21) -
+            m01 * (d1 * m22 - m12 * d2) +
+            m02 * (d1 * m21 - m11 * d2)) / det;
+        b = (
+            m00 * (d1 * m22 - m12 * d2) -
+            d0 * (m10 * m22 - m12 * m20) +
+            m02 * (m10 * d2 - d1 * m20)) / det;
+        c = (
+            m00 * (m11 * d2 - d1 * m21) -
+            m01 * (m10 * d2 - d1 * m20) +
+            d0 * (m10 * m21 - m11 * m20)) / det;
+        return double.IsFinite(a) && double.IsFinite(b) && double.IsFinite(c);
     }
 
     private static Vec3 HipWorld(LeggedLayout layout, int leg, Frame baseFrame) =>
@@ -551,26 +832,18 @@ public static class LeggedGait
 
     private static Vec3 WorldToBody(Vec3 world, Frame baseFrame)
     {
-        var yaw = YawFromFrame(baseFrame);
-        var dx = world.X - baseFrame.X;
-        var dy = world.Y - baseFrame.Y;
-        var c = Math.Cos(-yaw);
-        var s = Math.Sin(-yaw);
-        return new Vec3(c * dx - s * dy, s * dx + c * dy, world.Z - baseFrame.Z);
+        var m = Transforms.FromFrame(baseFrame);
+        var inv = Transforms.Inverse(m);
+        Transforms.TransformPointInto(inv, world.X, world.Y, world.Z, out var x, out var y, out var z);
+        return new Vec3(x, y, z);
     }
 
     private static Vec3 BodyToWorld(Vec3 body, Frame baseFrame)
     {
-        var yaw = YawFromFrame(baseFrame);
-        var c = Math.Cos(yaw);
-        var s = Math.Sin(yaw);
-        return new Vec3(
-            baseFrame.X + c * body.X - s * body.Y,
-            baseFrame.Y + s * body.X + c * body.Y,
-            baseFrame.Z + body.Z);
+        var m = Transforms.FromFrame(baseFrame);
+        Transforms.TransformPointInto(m, body.X, body.Y, body.Z, out var x, out var y, out var z);
+        return new Vec3(x, y, z);
     }
-
-    private static double YawFromFrame(Frame f) => 2.0 * Math.Atan2(f.Qz, f.Qw);
 
     /// <summary>
     /// Swing path: linear XY blend + sinusoidal lift (engineering heuristic, not from FABRIK/McGhee).

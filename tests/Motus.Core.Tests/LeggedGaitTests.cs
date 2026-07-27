@@ -641,13 +641,10 @@ public class LeggedGaitTests
             var hip = new Vec3(layout.BodyR * Math.Cos(hy), layout.BodyR * Math.Sin(hy), layout.BodyZ);
             var footBody = LegIk3R.FootPosition(hip, layout.Coxa, layout.Femur, layout.Tibia,
                 q[leg * 3], q[leg * 3 + 1], q[leg * 3 + 2]);
-            if (footBody.Z > 0.012) continue; // swing
-            var yaw = 2.0 * Math.Atan2(bf.Qz, bf.Qw);
-            var c = Math.Cos(yaw);
-            var s = Math.Sin(yaw);
-            var fx = bf.X + c * footBody.X - s * footBody.Y;
-            var fy = bf.Y + s * footBody.X + c * footBody.Y;
-            var fz = bf.Z + footBody.Z;
+            if (footBody.Z > 0.012) continue; // swing (body-floor relative)
+            // Full SE3 body (stance support plane may pitch on ramp).
+            var m = Transforms.FromFrame(bf);
+            Transforms.TransformPointInto(m, footBody.X, footBody.Y, footBody.Z, out var fx, out var fy, out var fz);
             var expect = ramp(fx, fy);
             Assert.InRange(fz - expect, -0.015, 0.015);
             plantedNearTerrain++;
