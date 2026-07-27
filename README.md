@@ -4,7 +4,7 @@
 
 | Motus.NET | [Motus.Grasshopper](https://github.com/lasaths/Motus.Grasshopper) |
 |-----------|-------------------------------------------------------------------|
-| Libraries on [nuget.org](https://www.nuget.org/profiles/lasaths) (`0.12.0`) | Rhino/GH UI that calls these APIs |
+| Libraries on [nuget.org](https://www.nuget.org/profiles/lasaths) (`0.13.0`) | Rhino/GH UI that calls these APIs |
 | Owns math, units, Status contracts, method DOIs | Thin components + examples |
 
 No UI, no vendor runtime, no live robot I/O. Algorithm catalog: [docs/METHODS.md](docs/METHODS.md) · citations: [docs/REFERENCES.bib](docs/REFERENCES.bib).
@@ -176,7 +176,7 @@ Benchmarks: `benchmarks/Motus.Benchmarks` (BenchmarkDotNet).
 
 Tag `vX.Y.Z` → [release workflow](.github/workflows/release.yml) builds, tests, packs, publishes to [nuget.org](https://www.nuget.org/profiles/lasaths), and creates a GitHub Release.
 
-Changelog: [CHANGELOG.md](CHANGELOG.md). Current pin for Grasshopper: **0.12.0**.
+Changelog: [CHANGELOG.md](CHANGELOG.md). Current pin for Grasshopper: **0.13.0**.
 
 ## Safety
 

@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-07-27
+
+### Added
+
+- **N-leg Walk stack:** `LeggedMechanism` / `LegDefinition`, `GaitSchedule` (Song–Waldron duty factor β + phase offsets), `ILegIkSolver` (`LegIk3RSolver`, `NumericalLegIkSolver` seed-only), `IBodyPoseSolver` (`PathFollowBodyPose`, `TerrainSupportBodyPose` with session factory)
+- `LeggedGait.TryBuild(LeggedMechanism, IBodyPoseSolver?, …)` — `DriverOffsets` packing, IK-fail legs excluded from support, degenerate SSM counted
+- `LeggedMechanism.ValidateAndCalibrate` — assemble + FK↔IK residual gate before Walk
+- `GaitSchedule.Auto` — `G = max(2, ⌈N/(N−3)⌉)`; hex tripod `[[0,2,4],[1,3,5]]`; N=4 crawl; N≤3 rejected unless `AllowDynamicGait`
+- `LeggedLayout.ToMechanism()` adapter; HexMithi/QuadSmoke remain NET factories (`QuadSmoke` sets `AllowDynamicGait`)
+
+### Changed
+
+- HexMithi swing groups corrected from degenerate `[[1,3,4],[0,2,5]]` to alternating tripod `[[0,2,4],[1,3,5]]`
+- `LeggedMethodRefs.DescribeStack` / `docs/METHODS.md` document `GaitSchedule` and mechanism Walk
+
 ## [0.12.0] - 2026-07-27
 
 ### Added
@@ -408,7 +423,10 @@ Initial public release.
 - **Motus.Presets** — JSON preset loader with bundled UR and KUKA defaults
   (approximate public datasheet values for planning/visualization only).
 
-[Unreleased]: https://github.com/lasaths/Motus.NET/compare/v0.10.0...HEAD
+[Unreleased]: https://github.com/lasaths/Motus.NET/compare/v0.13.0...HEAD
+[0.13.0]: https://github.com/lasaths/Motus.NET/compare/v0.12.0...v0.13.0
+[0.12.0]: https://github.com/lasaths/Motus.NET/compare/v0.11.0...v0.12.0
+[0.11.0]: https://github.com/lasaths/Motus.NET/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/lasaths/Motus.NET/compare/v0.9.1...v0.10.0
 [0.9.1]: https://github.com/lasaths/Motus.NET/compare/v0.9.0...v0.9.1
 [0.9.0]: https://github.com/lasaths/Motus.NET/compare/v0.8.0...v0.9.0

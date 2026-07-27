@@ -652,6 +652,116 @@ public class LeggedGaitTests
         Assert.True(plantedNearTerrain >= 3, "Expected ≥3 stance feet near ramp surface.");
     }
 
+    // --- General N-leg / GaitSchedule / Mechanism ---
+
+    [Fact]
+    public void GaitSchedule_Auto_N3_RejectedForStatic()
+    {
+        var g = GaitSchedule.Auto(3);
+        Assert.NotNull(g.Validate(3, allowDynamicGait: false));
+        Assert.Contains("N=3", g.Validate(3)!);
+        Assert.Null(g.Validate(3, allowDynamicGait: true));
+    }
+
+    [Fact]
+    public void GaitSchedule_Auto_Hex_IsCorrectTripod()
+    {
+        var yaws = Enumerable.Range(0, 6).Select(i => i * (Math.PI / 3.0)).ToArray();
+        var g = GaitSchedule.Auto(6, yaws);
+        Assert.Null(g.Validate(6));
+        Assert.Equal(2, g.SwingGroups!.Count);
+        Assert.Equal(new[] { 0, 2, 4 }, g.SwingGroups[0]);
+        Assert.Equal(new[] { 1, 3, 5 }, g.SwingGroups[1]);
+        Assert.Equal(3, g.MinStanceCount);
+    }
+
+    [Fact]
+    public void HexMithi_Layout_UsesCorrectTripodGroups()
+    {
+        var layout = LeggedLayout.HexMithi(0.12, 0.06, 0.17, 0.19, 0.12);
+        Assert.Equal(new[] { 0, 2, 4 }, layout.SwingGroups[0]);
+        Assert.Equal(new[] { 1, 3, 5 }, layout.SwingGroups[1]);
+    }
+
+    [Fact]
+    public void N4_Crawl_SsmPositive()
+    {
+        var mech = LeggedMechanism.FromHomogeneous3RRadial(
+            4, 0.10, 0.06, 0.17, 0.19, 0.12,
+            names: ["front-right", "front-left", "rear-left", "rear-right"],
+            hipYawsRad: Enumerable.Range(0, 4).Select(i => i * (Math.PI / 2.0) + Math.PI / 4.0).ToArray(),
+            gait: GaitSchedule.Crawl(4),
+            tipLegName: "front-right");
+        Assert.Null(mech.Validate());
+        Assert.Equal(3, mech.Gait.MinStanceCount); // N=4 crawl: one swing → 3 stance
+        var limits = Enumerable.Range(0, 12).Select(_ => new JointLimit(-Math.PI, Math.PI, Math.PI, Math.PI * 2)).ToList();
+        var model = new RobotModel(mech.ToPreset(limits: limits));
+        var path = new[] { new Vec3(0, 0, 0), new Vec3(0.4, 0, 0) };
+        Assert.True(LeggedGait.TryBuild(
+            mech, null, path, 0.06, 0.06, 0.02,
+            hipStance: 0, 30 * Deg, -30 * Deg,
+            model, out var result, out var err), err);
+        Assert.True(result!.MinStaticStabilityMarginMeters > 0,
+            $"Crawl SSM should be > 0, got {result.MinStaticStabilityMarginMeters}");
+    }
+
+    [Fact]
+    public void Hex_SsmRoughlyAboveApothemHeuristic()
+    {
+        // Regular hexagon of hip radius R: apothem of opposite-tripod support is ~ R * cos(30°) * something;
+        // with feet outside hips, min SSM at body should be clearly positive and order ~ BodyR/2.
+        var layout = LeggedLayout.HexMithi(0.12, 0.06, 0.17, 0.19, 0.12);
+        var limits = Enumerable.Range(0, 18).Select(_ => new JointLimit(-Math.PI, Math.PI, Math.PI, Math.PI * 2)).ToList();
+        var model = new RobotModel(layout.ToPreset("hex", 18, limits));
+        var path = new[] { new Vec3(0, 0, 0), new Vec3(0.35, 0, 0) };
+        Assert.True(LeggedGait.TryBuild(
+            layout, path, 0.06, 0.06, 0.02,
+            7.5 * Deg, 30 * Deg, -30 * Deg,
+            model, out var result, out var err), err);
+        var apothem = layout.BodyR * Math.Cos(Math.PI / 6.0); // ~0.104
+        Assert.True(result!.MinStaticStabilityMarginMeters > 0.02,
+            $"Hex tripod SSM {result.MinStaticStabilityMarginMeters:F4} should be clearly > 0 (apothem≈{apothem:F3}).");
+    }
+
+    [Fact]
+    public void QuadSmoke_RequiresAllowDynamicGait_AndBuilds()
+    {
+        var mech = LeggedMechanism.QuadSmoke(0.10, 0.06, 0.17, 0.19, 0.12);
+        Assert.True(mech.AllowDynamicGait);
+        Assert.Null(mech.Validate());
+        Assert.Equal(2, mech.Gait.MinStanceCount);
+        var without = new LeggedMechanism(
+            mech.Legs, mech.Gait, mech.TipLegName, mech.NominalBodyClearance,
+            allowDynamicGait: false);
+        Assert.NotNull(without.Validate());
+
+        var limits = Enumerable.Range(0, 12).Select(_ => new JointLimit(-Math.PI, Math.PI, Math.PI, Math.PI * 2)).ToList();
+        var model = new RobotModel(mech.ToPreset(limits: limits));
+        var path = new[] { new Vec3(0, 0, 0), new Vec3(0.35, 0, 0) };
+        Assert.True(LeggedGait.TryBuild(
+            mech, null, path, 0.08, 0.08, 0.025,
+            7.5 * Deg, 30 * Deg, -30 * Deg,
+            model, out var result, out var err), err);
+        Assert.Contains("AllowDynamicGait", result!.Warning!);
+    }
+
+    [Fact]
+    public void Layout_ToMechanism_RoundTrip()
+    {
+        var layout = LeggedLayout.HexMithi(0.12, 0.06, 0.17, 0.19, 0.12);
+        var mech = layout.ToMechanism();
+        Assert.Null(mech.Validate());
+        Assert.Equal(6, mech.LegCount);
+        Assert.Equal(18, mech.DriverCount);
+        Assert.Equal(layout.TipLegName, mech.TipLegName);
+        Assert.Equal(new[] { 0, 3, 6, 9, 12, 15 }, mech.DriverOffsets.ToArray());
+        Assert.Equal(new[] { 0, 2, 4 }, mech.Gait.SwingGroups![0]);
+        var tree = mech.Assemble();
+        Assert.Equal(18, tree.DriverCount);
+        Assert.Contains("right-middle/tibia", tree.Links.Select(l => l.Name));
+        Assert.Equal("right-middle/tibia", mech.TipLinkName);
+    }
+
     // --- Helper ---
 
     private static void AssertVec3Near(Vec3 actual, Vec3 expected, double tol, string msg = "")

@@ -36,7 +36,7 @@ public static class LeggedMethodRefs
     public static string DescribeStack() =>
         "LegIk3R=analytic planar 2R after coxa (Lynch&Park doi:" + LynchPark2017Doi +
         "); not FABRIK (Aristidou&Lasenby doi:" + AristidouLasenby2011FabrikDoi +
-        "). Gait=duty-factor swing groups (Song&Waldron doi:" + SongWaldron1987Doi +
+        "). Gait=GaitSchedule duty factor β + phase offsets (Song&Waldron doi:" + SongWaldron1987Doi +
         ") + creeping stance plants (McGhee&Frank doi:" + McGheeFrank1968Doi +
         "). SSM=support-polygon CoM test (McGhee&Frank); dynamic/wrench limits → Bretl&Lall doi:" +
         BretlLall2008Doi + ".";

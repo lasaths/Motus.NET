@@ -4,7 +4,7 @@ namespace Motus.Geometry;
 
 /// <summary>
 /// N×3R insectoid layout: hip mount yaws, swing-group partition, tip-path leg.
-/// Legged N×3R layout + optional terrain height gait — Motus.NET owns math; GH is thin Rhino wiring.
+/// Motus.NET test / legacy factory; prefer <see cref="LeggedMechanism"/> for new Walk APIs.
 /// </summary>
 /// <remarks>
 /// SwingGroups encode a periodic support schedule (Song &amp; Waldron gait phasing concepts,
@@ -50,9 +50,7 @@ public sealed class LeggedLayout
     public string TipLinkName => $"{TipLegName}_tibia";
 
     /// <summary>
-    /// Hex layout: 6 hips @ π/3, two alternating swing groups (tripod duty schedule).
-    /// Grouping is a design choice for creeping/preview locomotion (McGhee–Frank style support
-    /// alternation, DOI <see cref="LeggedMethodRefs.McGheeFrank1968Doi"/>), not a biology claim.
+    /// Hex layout: 6 hips @ π/3, alternating tripod [[0,2,4],[1,3,5]].
     /// </summary>
     public static LeggedLayout HexMithi(
         double bodyR, double coxa, double femur, double tibia, double bodyZ)
@@ -67,11 +65,11 @@ public sealed class LeggedLayout
             yaws[i] = i * (Math.PI / 3.0);
 
         return new LeggedLayout(
-            names, yaws, [[1, 3, 4], [0, 2, 5]],
+            names, yaws, [[0, 2, 4], [1, 3, 5]],
             bodyR, coxa, femur, tibia, bodyZ, tipLegName: "right-middle");
     }
 
-    /// <summary>Smoke / reuse fixture: 4 legs @ π/2, alternating biped groups.</summary>
+    /// <summary>Smoke / reuse fixture: 4 legs @ π/2, alternating biped (trot) groups.</summary>
     public static LeggedLayout QuadSmoke(
         double bodyR, double coxa, double femur, double tibia, double bodyZ)
     {
@@ -83,6 +81,27 @@ public sealed class LeggedLayout
         return new LeggedLayout(
             names, yaws, [[0, 2], [1, 3]],
             bodyR, coxa, femur, tibia, bodyZ, tipLegName: "front-right");
+    }
+
+    /// <summary>Convert to <see cref="LeggedMechanism"/> (QuadSmoke sets AllowDynamicGait).</summary>
+    public LeggedMechanism ToMechanism(bool? allowDynamicGait = null)
+    {
+        var dynamic = allowDynamicGait ?? (LegCount <= 3 || MinStanceFromGroups() < 3);
+        var gait = GaitSchedule.FromGroups(SwingGroups, $"Layout({LegCount}leg)");
+        return LeggedMechanism.FromHomogeneous3RRadial(
+            LegCount, BodyR, Coxa, Femur, Tibia, BodyZ,
+            LegNames, HipYawsRad, gait, TipLegName,
+            allowDynamicGait: dynamic,
+            modelName: LegCount == 6 ? "hex_mithi" : LegCount == 4 ? "quad_smoke" : "legged");
+    }
+
+    private int MinStanceFromGroups()
+    {
+        var maxSwing = 0;
+        foreach (var g in SwingGroups)
+            if (g is not null && g.Length > maxSwing)
+                maxSwing = g.Length;
+        return Math.Max(0, LegCount - maxSwing);
     }
 
     public string? Validate()
