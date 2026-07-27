@@ -4,6 +4,7 @@ namespace Motus.Core;
 public static class CollisionBodies
 {
     // PONYTAIL: cache link names — hot loops called IsPairAllowed with $"link:{i}" every check.
+    private static readonly object LinkNameGate = new();
     private static string[] _linkNames = Array.Empty<string>();
 
     public static string RobotLink(int index)
@@ -11,12 +12,23 @@ public static class CollisionBodies
         // ponytail: negative indices are plane-proximal aliases (link:-1), not cache slots
         if (index < 0)
             return $"link:{index}";
-        if ((uint)index >= (uint)_linkNames.Length)
-            GrowLinkNames(index + 1);
-        return _linkNames[index];
+        var names = _linkNames;
+        if ((uint)index < (uint)names.Length)
+            return names[index];
+        return GrowAndGet(index);
     }
 
     public static string Attached(string name) => $"attached:{name}";
+
+    private static string GrowAndGet(int index)
+    {
+        lock (LinkNameGate)
+        {
+            if ((uint)index >= (uint)_linkNames.Length)
+                GrowLinkNames(index + 1);
+            return _linkNames[index];
+        }
+    }
 
     private static void GrowLinkNames(int count)
     {
