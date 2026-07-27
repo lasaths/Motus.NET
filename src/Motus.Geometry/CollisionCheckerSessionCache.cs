@@ -12,15 +12,29 @@ public static class CollisionCheckerSessionCache
         RobotModel robot,
         SerialJointChain? chain,
         IReadOnlyList<AttachedBody>? attached,
-        CollisionScene? scene)
+        CollisionScene? scene) =>
+        GetOrCreate(robot, chain, attached, scene, tree: null, planJointNames: null, treeDriverHome: null);
+
+    public static ICollisionChecker GetOrCreate(
+        RobotModel robot,
+        SerialJointChain? chain,
+        IReadOnlyList<AttachedBody>? attached,
+        CollisionScene? scene,
+        KinematicTree? tree,
+        IReadOnlyList<string>? planJointNames,
+        IReadOnlyList<double>? treeDriverHome)
     {
-        var key = Fingerprint(robot, chain, attached, scene);
+        var key = Fingerprint(robot, chain, attached, scene, tree, planJointNames);
         lock (Gate)
         {
             if (Cache.TryGetValue(key, out var weak) && weak.TryGetTarget(out var existing))
                 return existing;
 
-            var checker = CollisionCheckerFactory.Create(robot, chain, attached);
+            var checker = tree is not null
+                && robot.CollisionModel is { Links.Count: > 0 }
+                && robot.Preset.AxisCount > (chain?.Joints.Length ?? 0)
+                ? CollisionCheckerFactory.Create(robot, tree, chain, planJointNames, treeDriverHome, attached)
+                : CollisionCheckerFactory.Create(robot, chain, attached);
             Cache[key] = new WeakReference<ICollisionChecker>(checker);
             PruneDead();
             return checker;
@@ -42,11 +56,21 @@ public static class CollisionCheckerSessionCache
         RobotModel robot,
         SerialJointChain? chain,
         IReadOnlyList<AttachedBody>? attached,
-        CollisionScene? scene)
+        CollisionScene? scene,
+        KinematicTree? tree = null,
+        IReadOnlyList<string>? planJointNames = null)
     {
         var hash = new HashCode();
         hash.Add(robot.Preset.ModelName, StringComparer.Ordinal);
+        hash.Add(robot.Preset.AxisCount);
         hash.Add(chain?.GetHashCode() ?? 0);
+        hash.Add(tree?.Fingerprint ?? 0);
+        if (planJointNames is not null)
+        {
+            hash.Add(planJointNames.Count);
+            foreach (var n in planJointNames)
+                hash.Add(n, StringComparer.Ordinal);
+        }
         if (attached is not null)
         {
             hash.Add(attached.Count);

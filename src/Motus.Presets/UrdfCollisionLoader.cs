@@ -5,20 +5,49 @@ using Motus.Geometry;
 
 namespace Motus.Presets;
 
-internal static class UrdfCollisionLoader
+public static class UrdfCollisionLoader
 {
     public static RobotCollisionModel? Load(
         XElement robotRoot,
         IReadOnlyList<string> chainLinkNames,
         string urdfDirectory)
     {
+        var indexed = new List<(int Index, string Name)>(chainLinkNames.Count);
+        for (var i = 0; i < chainLinkNames.Count; i++)
+            indexed.Add((i, chainLinkNames[i]));
+        return LoadIndexed(robotRoot, indexed, urdfDirectory);
+    }
+
+    /// <summary>
+    /// Collision for every tree link that declares geometry. LinkIndex = tree link index (TreeFK posing).
+    /// </summary>
+    public static RobotCollisionModel? LoadTree(
+        XElement robotRoot,
+        KinematicTree tree,
+        string urdfDirectory,
+        string? tipLinkForTool = null)
+    {
+        var indexed = new List<(int Index, string Name)>(tree.Links.Count);
+        for (var i = 0; i < tree.Links.Count; i++)
+            indexed.Add((i, tree.Links[i].Name));
+        var model = LoadIndexed(robotRoot, indexed, urdfDirectory);
+        if (string.IsNullOrWhiteSpace(tipLinkForTool))
+            return model;
+        var tool = LoadTipLinkGeometry(robotRoot, tipLinkForTool, urdfDirectory);
+        return WithToolGeometry(model, tool);
+    }
+
+    private static RobotCollisionModel? LoadIndexed(
+        XElement robotRoot,
+        IReadOnlyList<(int Index, string Name)> links,
+        string urdfDirectory)
+    {
         var linksByName = robotRoot.Elements("link")
             .ToDictionary(l => l.Attribute("name")?.Value ?? "", l => l, StringComparer.OrdinalIgnoreCase);
 
         var geometries = new List<LinkCollisionGeometry>();
-        for (var i = 0; i < chainLinkNames.Count; i++)
+        foreach (var (index, linkName) in links)
         {
-            var linkName = chainLinkNames[i];
             if (!linksByName.TryGetValue(linkName, out var linkEl)) continue;
             var collisionIdx = 0;
             foreach (var collision in linkEl.Elements("collision"))
@@ -31,7 +60,7 @@ internal static class UrdfCollisionLoader
                 var objName = $"{linkName}_col{collisionIdx++}";
                 var obj = ParseGeometry(objName, pose, geom, urdfDirectory);
                 if (obj is not null)
-                    geometries.Add(new LinkCollisionGeometry(i, linkName, obj));
+                    geometries.Add(new LinkCollisionGeometry(index, linkName, obj));
             }
         }
 

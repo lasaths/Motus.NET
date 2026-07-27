@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.2] - 2026-07-28
+
+### Added
+
+- `TreeFkCollisionChecker` — scene collision via TreeFK for tip path + side-branch drivers (e.g. UR + DKP). Plan q may be tip-only or tip+branches; unmatched drivers use `treeDriverHome`.
+- `UrdfCollisionLoader.LoadTree` — collision geometry for every tree link (public API).
+- `CollisionCheckerFactory` / session cache overloads for tree-aware checkers.
+
 ## [0.13.1] - 2026-07-27
 
 ### Fixed

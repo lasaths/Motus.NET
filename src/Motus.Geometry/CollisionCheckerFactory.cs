@@ -8,7 +8,17 @@ public static class CollisionCheckerFactory
         RobotModel robot,
         SerialJointChain? chain = null,
         IReadOnlyList<AttachedBody>? attached = null) =>
-        CreateCore(robot, chain, attached);
+        CreateCore(robot, chain, attached, tree: null, planJointNames: null, treeDriverHome: null);
+
+    /// <summary>TreeFK collision when Plan DOF includes side-branch drivers (e.g. DKP beside arm).</summary>
+    public static ICollisionChecker Create(
+        RobotModel robot,
+        KinematicTree tree,
+        SerialJointChain? tipChain,
+        IReadOnlyList<string>? planJointNames,
+        IReadOnlyList<double>? treeDriverHome = null,
+        IReadOnlyList<AttachedBody>? attached = null) =>
+        CreateCore(robot, tipChain, attached, tree, planJointNames, treeDriverHome);
 
     public static ICollisionChecker GetOrCreate(
         RobotModel robot,
@@ -17,11 +27,32 @@ public static class CollisionCheckerFactory
         CollisionScene? scene) =>
         CollisionCheckerSessionCache.GetOrCreate(robot, chain, attached, scene);
 
+    public static ICollisionChecker GetOrCreate(
+        RobotModel robot,
+        KinematicTree tree,
+        SerialJointChain? tipChain,
+        IReadOnlyList<string>? planJointNames,
+        IReadOnlyList<double>? treeDriverHome,
+        IReadOnlyList<AttachedBody>? attached,
+        CollisionScene? scene) =>
+        CollisionCheckerSessionCache.GetOrCreate(robot, tipChain, attached, scene, tree, planJointNames, treeDriverHome);
+
     private static ICollisionChecker CreateCore(
         RobotModel robot,
         SerialJointChain? chain,
-        IReadOnlyList<AttachedBody>? attached)
+        IReadOnlyList<AttachedBody>? attached,
+        KinematicTree? tree,
+        IReadOnlyList<string>? planJointNames,
+        IReadOnlyList<double>? treeDriverHome)
     {
+        var tipN = chain?.Joints.Length ?? 0;
+        var useTree = tree is not null
+            && robot.CollisionModel is { Links.Count: > 0 }
+            && (robot.Preset.AxisCount > tipN || tipN == 0);
+
+        if (useTree)
+            return new TreeFkCollisionChecker(robot, tree!, chain, planJointNames, treeDriverHome, attached);
+
         if (FclCollisionChecker.SupportsFcl(robot, attached))
             return new FclCollisionChecker(robot, chain, attached);
 
