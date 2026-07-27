@@ -449,7 +449,7 @@ public class LeggedGaitTests
     }
 
     [Fact]
-    public void LeggedGait_ValidateForPlan_OkWithMethodProvenance()
+    public void LeggedGait_ValidateForPlan_OkKeepsProvenanceOnGaitResult()
     {
         var layout = LeggedLayout.HexMithi(0.12, 0.06, 0.17, 0.19, 0.12);
         var limits = Enumerable.Range(0, 18).Select(_ => new JointLimit(-Math.PI, Math.PI, Math.PI, Math.PI * 2)).ToList();
@@ -463,7 +463,9 @@ public class LeggedGaitTests
 
         var plan = LeggedGait.ValidateForPlan(gait!, minStaticStabilityMarginMeters: -0.05);
         Assert.True(plan.Success, string.Join("; ", plan.Errors));
-        Assert.Contains(plan.Warnings, w => w.Contains(LeggedMethodRefs.SongWaldron1987Doi, StringComparison.Ordinal));
+        // DOIs stay on Result.MethodProvenance / METHODS.md — not in Status warnings.
+        Assert.DoesNotContain(plan.Warnings, w => w.Contains("doi:", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(LeggedMethodRefs.SongWaldron1987Doi, gait!.MethodProvenance);
     }
 
     [Fact]

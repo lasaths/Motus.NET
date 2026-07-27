@@ -365,16 +365,15 @@ public static class LeggedGait
 
         var warnParts = new List<string>();
         if (mechanism.AllowDynamicGait)
-            warnParts.Add($"AllowDynamicGait: MinStanceCount={gait.MinStanceCount} (dynamic gait; McGhee–Frank SSM may be weak).");
+            warnParts.Add($"AllowDynamicGait: MinStanceCount={gait.MinStanceCount} (dynamic gait; SSM may be weak).");
         if (ikFailSamples > 0)
             warnParts.Add($"Foot-target IK failed on {ikFailSamples} leg×sample(s); held previous q (rad); excluded from support.");
         if (degenerateSupportSamples > 0)
             warnParts.Add($"Degenerate support (<3 stance) on {degenerateSupportSamples}/{sampleCount} samples.");
         if (unstableSamples > 0)
-            warnParts.Add($"McGhee–Frank SSM unstable on {unstableSamples}/{sampleCount} samples (min margin {minSsm:F4} m; CoM≈body XY heuristic).");
+            warnParts.Add($"SSM unstable on {unstableSamples}/{sampleCount} samples (min margin {minSsm:F4} m).");
         warnParts.Add($"Gait β={gait.DutyFactor:F3} MethodId={gait.MethodId}; body={bodyPose.MethodId}.");
         warnParts.Add("Preview gait only — Trajectory → Preview; not Motus Plan.");
-        warnParts.Add(LeggedMethodRefs.DescribeStack());
 
         result = new Result(
             new Trajectory(model, points),
@@ -425,7 +424,7 @@ public static class LeggedGait
                 new PlanningMessage(
                     PlanningMessageCodes.ConstraintViolation,
                     $"Legged SSM below threshold: min={gait.MinStaticStabilityMarginMeters:F4} m, " +
-                    $"required>={minStaticStabilityMarginMeters:F4} m (McGhee&Frank doi:{LeggedMethodRefs.McGheeFrank1968Doi}).",
+                    $"required>={minStaticStabilityMarginMeters:F4} m.",
                     PlanningMessageSeverity.Error)
             });
         }
@@ -441,7 +440,7 @@ public static class LeggedGait
             if (collisionFail is not null) return collisionFail;
         }
 
-        var warnings = new List<string> { gait.MethodProvenance };
+        var warnings = new List<string>();
         if (!string.IsNullOrWhiteSpace(gait.Warning))
             warnings.Add(gait.Warning);
         warnings.Add("LeggedGait.ValidateForPlan: adapter-only validation; gait generation unchanged.");
