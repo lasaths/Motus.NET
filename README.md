@@ -1,6 +1,6 @@
 # Motus.NET
 
-.NET 8 motion-planning library for serial robots: plan, validate, export. No UI, no vendor runtime, no live robot I/O.
+.NET 8 host-agnostic motion-planning core: models, FK/IK, collision, sampling/Cartesian planners, retiming, and export. No UI, no vendor runtime, no live robot I/O. Algorithm catalog: [docs/METHODS.md](docs/METHODS.md) · citations: [docs/REFERENCES.bib](docs/REFERENCES.bib).
 
 Use it from [Motus.Grasshopper](https://github.com/lasaths/Motus.Grasshopper) or any .NET host. Bundled presets (UR family) and **URDF / xacro** loaders; analytic IK for Universal Robots, numerical IK for generic chains.
 
