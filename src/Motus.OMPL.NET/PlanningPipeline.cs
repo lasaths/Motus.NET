@@ -16,6 +16,14 @@ internal static class PlanningPipeline
         public int Dims => Limits.Count;
     }
 
+    internal readonly record struct ConstraintContext(
+        bool Enabled,
+        IFkSolver? Fk,
+        BaseFrame BaseFrame,
+        ToolFrame ToolFrame,
+        IConstraintChecker? PathConstraints,
+        IConstraintChecker? ConstraintChecker);
+
     internal static ICollisionChecker? ResolveChecker(PlanningRequest request, ICollisionChecker? defaultChecker) =>
         request.Options.CollisionChecker
         ?? (request.Options.AttachedBodies is { Count: > 0 }
@@ -44,6 +52,70 @@ internal static class PlanningPipeline
             groupLimits,
             q => map.EmbedGroupState(request.Start, q));
     }
+
+    internal static PlanningResult? TryBuildConstraintContext(
+        PlanningRequest request,
+        SerialJointChain? serialChain,
+        out ConstraintContext context)
+    {
+        context = default;
+        if (request.Options.PathConstraints is null && request.Options.ConstraintChecker is null)
+            return null;
+
+        try
+        {
+            var fk = KinematicsResolver.CreateFkSolver(request.Robot.Preset, serialChain);
+            context = new ConstraintContext(
+                true,
+                fk,
+                request.Robot.Preset.BaseFrame,
+                request.Robot.Preset.ToolFrame,
+                request.Options.PathConstraints,
+                request.Options.ConstraintChecker);
+            return null;
+        }
+        catch (Exception ex) when (ex is NotSupportedException or InvalidOperationException)
+        {
+            return PlanningResult.Failed(new[]
+            {
+                new PlanningMessage(
+                    PlanningMessageCodes.ConstraintViolation,
+                    $"ConstraintViolation: planner cannot evaluate TCP constraints for '{request.Robot.Preset.ModelName}': {ex.Message}",
+                    PlanningMessageSeverity.Error)
+            });
+        }
+    }
+
+    internal static bool TryValidateConstraints(ConstraintContext context, JointState state, out string reason)
+    {
+        if (!context.Enabled)
+        {
+            reason = string.Empty;
+            return true;
+        }
+
+        var tcp = Transforms.ToFrame(context.Fk!.ComputeTcpTransform(
+            state.Positions,
+            context.BaseFrame.Frame,
+            context.ToolFrame.Frame));
+
+        if (context.PathConstraints is not null && !context.PathConstraints.TryValidate(tcp, out reason))
+            return false;
+        if (context.ConstraintChecker is not null && !context.ConstraintChecker.TryValidate(tcp, out reason))
+            return false;
+
+        reason = string.Empty;
+        return true;
+    }
+
+    internal static PlanningResult ConstraintFailure(string label, string reason) =>
+        PlanningResult.Failed(new[]
+        {
+            new PlanningMessage(
+                PlanningMessageCodes.ConstraintViolation,
+                $"{label}: {reason}",
+                PlanningMessageSeverity.Error)
+        });
 
     internal static PlanningResult BuildTrajectory(
         RobotModel robot,

@@ -76,6 +76,8 @@ public sealed class PlanningContext
             CollisionChecker = opts.CollisionChecker,
             RetimeTrajectory = opts.RetimeTrajectory,
             AttachedBodies = Attached,
+            PathConstraints = opts.PathConstraints,
+            ConstraintChecker = opts.ConstraintChecker,
             GroupMap = ActiveGroup is not null ? JointIndexMap.Resolve(Robot, ActiveGroup) : null
         };
     }

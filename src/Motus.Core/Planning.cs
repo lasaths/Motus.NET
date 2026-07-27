@@ -31,6 +31,7 @@ public static class PlanningMessageCodes
     public const string PlannerUnavailable = "planning.planner_unavailable";
     public const string PlannerFallback = "planning.planner_fallback";
     public const string PlannerWarning = "planning.warning";
+    public const string ConstraintViolation = "planning.constraint_violation";
 }
 
 public sealed class PlanningOptions
@@ -41,6 +42,10 @@ public sealed class PlanningOptions
     public CollisionScene? CollisionScene { get; init; }
     public ICollisionChecker? CollisionChecker { get; init; }
     public IReadOnlyList<AttachedBody>? AttachedBodies { get; init; }
+    /// <summary>MoveIt-shaped TCP path constraints; position units are meters, orientation tolerances radians.</summary>
+    public PathConstraints? PathConstraints { get; init; }
+    /// <summary>Optional custom TCP constraint checker. When set, it is evaluated in addition to <see cref="PathConstraints"/>.</summary>
+    public IConstraintChecker? ConstraintChecker { get; init; }
     /// <summary>When set, planners vary only mapped joints; others stay at <see cref="PlanningRequest.Start"/>.</summary>
     public JointIndexMap? GroupMap { get; init; }
     public bool RetimeTrajectory { get; init; }

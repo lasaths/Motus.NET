@@ -10,6 +10,7 @@ internal static class ManagedRrtConnect
         PlanningRequest request,
         SamplingPlannerOptions options,
         ICollisionChecker? defaultChecker,
+        SerialJointChain? serialChain = null,
         string plannerLabel = "RRT-Connect")
     {
         var checker = PlanningPipeline.ResolveChecker(request, defaultChecker);
@@ -23,6 +24,12 @@ internal static class ManagedRrtConnect
         var goalVal = request.Goal.Validate(limits);
         if (!startVal.IsValid) return PlanningResult.Failed(startVal.Errors.Select(e => $"Start: {e}"));
         if (!goalVal.IsValid) return PlanningResult.Failed(goalVal.Errors.Select(e => $"Goal: {e}"));
+        var constraintFail = PlanningPipeline.TryBuildConstraintContext(request, serialChain, out var constraints);
+        if (constraintFail is not null) return constraintFail;
+        if (!PlanningPipeline.TryValidateConstraints(constraints, space.ToFull(space.Start), out var startReason))
+            return PlanningPipeline.ConstraintFailure("start", startReason);
+        if (!PlanningPipeline.TryValidateConstraints(constraints, space.ToFull(space.Goal), out var goalReason))
+            return PlanningPipeline.ConstraintFailure("goal", goalReason);
         var endpointFail = PlanningCollision.ValidateEndpoints(
             space.ToFull(space.Start), space.ToFull(space.Goal), scene, checker,
             request.Options.AttachedBodies is { Count: > 0 });
@@ -57,8 +64,8 @@ internal static class ManagedRrtConnect
                 options.ReportIteration?.Invoke(iter, options.MaxIterations);
 
             var sample = Sample(rng, goal, space.Limits, options.GoalBias);
-            var (extendedA, newIdxA) = Extend(treeA, sample, space.Limits, scene, checker, space.ToFull, options);
-            if (extendedA && Connect(treeB, treeA.Nodes[newIdxA].Q, space.Limits, scene, checker, space.ToFull, options, out var connectIdxB))
+            var (extendedA, newIdxA) = Extend(treeA, sample, space.Limits, scene, checker, constraints, space.ToFull, options);
+            if (extendedA && Connect(treeB, treeA.Nodes[newIdxA].Q, space.Limits, scene, checker, constraints, space.ToFull, options, out var connectIdxB))
             {
                 var pathA = Reconstruct(treeA, newIdxA);
                 var pathB = Reconstruct(treeB, connectIdxB);
@@ -92,19 +99,21 @@ internal static class ManagedRrtConnect
 
     private static (bool extended, int newIndex) Extend(
         RrtTree tree, double[] target, IReadOnlyList<JointLimit> limits, CollisionScene scene,
-        ICollisionChecker? checker, Func<double[], JointState> toFull, SamplingPlannerOptions options)
+        ICollisionChecker? checker, PlanningPipeline.ConstraintContext constraints,
+        Func<double[], JointState> toFull, SamplingPlannerOptions options)
     {
         var nearest = Nearest(tree, target);
         var steered = Steer(tree.Nodes[nearest].Q, target, limits, options.StepRadians);
         if (ConfigurationDistanceSquared(tree.Nodes[nearest].Q, steered) < 1e-24) return (false, nearest);
-        if (!SegmentFree(tree.Nodes[nearest].Q, steered, scene, checker, toFull, options.StepRadians)) return (false, nearest);
+        if (!SegmentValid(tree.Nodes[nearest].Q, steered, scene, checker, constraints, toFull, options.StepRadians)) return (false, nearest);
         tree.Nodes.Add(new RrtNode(steered, nearest));
         return (true, tree.Nodes.Count - 1);
     }
 
     private static bool Connect(
         RrtTree tree, double[] target, IReadOnlyList<JointLimit> limits, CollisionScene scene,
-        ICollisionChecker? checker, Func<double[], JointState> toFull, SamplingPlannerOptions options, out int connectIndex)
+        ICollisionChecker? checker, PlanningPipeline.ConstraintContext constraints,
+        Func<double[], JointState> toFull, SamplingPlannerOptions options, out int connectIndex)
     {
         connectIndex = Nearest(tree, target);
         var thresholdSq = options.ConnectThresholdRadians * options.ConnectThresholdRadians;
@@ -112,11 +121,42 @@ internal static class ManagedRrtConnect
         {
             var steered = Steer(tree.Nodes[connectIndex].Q, target, limits, options.StepRadians);
             if (ConfigurationDistanceSquared(tree.Nodes[connectIndex].Q, steered) < 1e-24) break;
-            if (!SegmentFree(tree.Nodes[connectIndex].Q, steered, scene, checker, toFull, options.StepRadians)) return false;
+            if (!SegmentValid(tree.Nodes[connectIndex].Q, steered, scene, checker, constraints, toFull, options.StepRadians)) return false;
             tree.Nodes.Add(new RrtNode(steered, connectIndex));
             connectIndex = tree.Nodes.Count - 1;
         }
         return ConfigurationDistanceSquared(tree.Nodes[connectIndex].Q, target) <= thresholdSq;
+    }
+
+    internal static bool SegmentValid(
+        double[] from, double[] to, CollisionScene scene, ICollisionChecker? checker,
+        PlanningPipeline.ConstraintContext constraints, Func<double[], JointState> toFull, double stepRadians)
+    {
+        if (!constraints.Enabled && checker is null) return true;
+        if (!constraints.Enabled && checker is SphereCollisionChecker sphere)
+            return sphere.SegmentCollisionFree(from, to, scene, stepRadians);
+
+        if (stepRadians <= 0) stepRadians = 1e-3;
+        var n = from.Length;
+        var maxDelta = 0.0;
+        for (var i = 0; i < n; i++)
+            maxDelta = Math.Max(maxDelta, Math.Abs(to[i] - from[i]));
+        var steps = Math.Max(1, (int)Math.Ceiling(maxDelta / stepRadians));
+
+        for (var s = 0; s <= steps; s++)
+        {
+            var alpha = (double)s / steps;
+            var q = new double[n];
+            for (var i = 0; i < n; i++)
+                q[i] = from[i] + alpha * (to[i] - from[i]);
+            var full = toFull(q);
+            if (checker is not null && !checker.IsCollisionFree(full, scene))
+                return false;
+            if (!PlanningPipeline.TryValidateConstraints(constraints, full, out _))
+                return false;
+        }
+
+        return true;
     }
 
     private static bool SegmentFree(

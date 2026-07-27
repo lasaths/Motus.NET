@@ -18,6 +18,7 @@ internal delegate PlanningResult PlannerDispatch(
     PlanningRequest request,
     SamplingPlannerOptions options,
     ICollisionChecker? defaultChecker,
+    SerialJointChain? serialChain,
     PlannerBackend backend);
 
 internal sealed record PlannerBackend(
@@ -26,7 +27,7 @@ internal sealed record PlannerBackend(
     string ShortName,
     int NativePlannerId,
     PlannerDispatch? CustomDispatch,
-    Func<PlanningRequest, SamplingPlannerOptions, ICollisionChecker?, PlanningResult>? ManagedPlan);
+    Func<PlanningRequest, SamplingPlannerOptions, ICollisionChecker?, SerialJointChain?, PlanningResult>? ManagedPlan);
 
 /// <summary>Drop-in registration for sampling-based motion planners.</summary>
 public static class SamplingPlannerRegistry
@@ -89,6 +90,8 @@ public static class SamplingPlannerRegistry
             "EIT*" or "EitStar" => TrySet(SamplingPlannerId.EitStar, out id),
             "BLIT*" or "BlitStar" => TrySet(SamplingPlannerId.BlitStar, out id),
             "ParallelRace" or "Parallel" => TrySet(SamplingPlannerId.ParallelRace, out id),
+            "PRM*" or "PrmStar" or "PRMStar" => TrySet(SamplingPlannerId.PrmStar, out id),
+            "CHOMP" or "CHOMP-lite" or "ChompLite" or "ChompSmooth" => TrySet(SamplingPlannerId.ChompSmooth, out id),
             _ => false
         };
     }
@@ -102,7 +105,8 @@ public static class SamplingPlannerRegistry
     internal static PlanningResult Dispatch(
         PlanningRequest request,
         SamplingPlannerOptions options,
-        ICollisionChecker? defaultChecker)
+        ICollisionChecker? defaultChecker,
+        SerialJointChain? serialChain)
     {
         EnsureInitialized();
         if (!Backends.TryGetValue(options.PlannerId, out var backend))
@@ -113,10 +117,12 @@ public static class SamplingPlannerRegistry
             return PlanningResult.Failed(new[] { descriptor.UnavailableReason ?? $"Planner {backend.Label} is unavailable." });
 
         if (backend.CustomDispatch is not null)
-            return backend.CustomDispatch(request, options, defaultChecker, backend);
+            return backend.CustomDispatch(request, options, defaultChecker, serialChain, backend);
 
         var preferManaged = options.PreferManaged ||
-            string.Equals(Environment.GetEnvironmentVariable("MOTUS_PREFER_MANAGED_PLANNER"), "1", StringComparison.Ordinal);
+            string.Equals(Environment.GetEnvironmentVariable("MOTUS_PREFER_MANAGED_PLANNER"), "1", StringComparison.Ordinal) ||
+            request.Options.PathConstraints is not null ||
+            request.Options.ConstraintChecker is not null;
 
         if (!preferManaged && descriptor.NativeSupported && backend.NativePlannerId >= 0)
         {
@@ -125,7 +131,16 @@ public static class SamplingPlannerRegistry
         }
 
         if (backend.ManagedPlan is not null)
-            return backend.ManagedPlan(request, options, defaultChecker);
+            return backend.ManagedPlan(request, options, defaultChecker, serialChain);
+
+        if (request.Options.PathConstraints is not null || request.Options.ConstraintChecker is not null)
+            return PlanningResult.Failed(new[]
+            {
+                new PlanningMessage(
+                    PlanningMessageCodes.ConstraintViolation,
+                    $"{backend.Label} has no managed constraint-validity hook.",
+                    PlanningMessageSeverity.Error)
+            });
 
         return PlanningResult.Failed(new[] { $"{backend.Label} requires native OMPL (not available in this build)." });
     }
@@ -186,7 +201,7 @@ public static class SamplingPlannerRegistry
             "RrtConnect",
             NativeBindings.PlannerRrtConnect,
             CustomDispatch: null,
-            ManagedPlan: (req, opts, checker) => ManagedRrtConnect.Plan(req, opts, checker)));
+            ManagedPlan: (req, opts, checker, chain) => ManagedRrtConnect.Plan(req, opts, checker, chain)));
 
         Register(new PlannerBackend(
             SamplingPlannerId.RrtStar,
@@ -241,8 +256,24 @@ public static class SamplingPlannerRegistry
             "Parallel (Connect+AORRTC)",
             "ParallelRace",
             NativePlannerId: -1,
-            CustomDispatch: (req, opts, checker, _) => ParallelRacePlanner.Plan(req, opts, checker),
+            CustomDispatch: (req, opts, checker, chain, _) => ParallelRacePlanner.Plan(req, opts, checker, chain),
             ManagedPlan: null));
+
+        Register(new PlannerBackend(
+            SamplingPlannerId.PrmStar,
+            "PRM*",
+            "PrmStar",
+            NativePlannerId: -1,
+            CustomDispatch: null,
+            ManagedPlan: (req, opts, checker, chain) => ManagedPrmStar.Plan(req, opts, checker, chain)));
+
+        Register(new PlannerBackend(
+            SamplingPlannerId.ChompSmooth,
+            "CHOMP-lite smoother",
+            "ChompSmooth",
+            NativePlannerId: -1,
+            CustomDispatch: null,
+            ManagedPlan: (req, opts, checker, chain) => ManagedChompSmooth.Plan(req, opts, checker, chain)));
     }
 
     internal static void Register(PlannerBackend backend) => Backends[backend.Id] = backend;

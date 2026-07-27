@@ -52,7 +52,7 @@ Host-agnostic library (Grasshopper, CLI, services). MoveIt-shaped seams without 
 
 - [x] URDF revolute + prismatic serial chains
 - [x] URDF collision geometry + `ur5e_collision.urdf` fixture; `docs/urdf-import.md`
-- [ ] xacro preprocessing, tool links, public `ur_description` fixture
+- [x] xacro preprocessing, tool links, public `ur_description` fixture
 - [x] SRDF-lite `disable_collisions` import
 - [x] SRDF `group` / `end_effector` metadata (`SrdfLoader.LoadGroups`)
 

@@ -124,6 +124,13 @@ public static class UrdfRobotLoader
         return LoadTree(doc, options ?? new UrdfLoadOptions(), Path.GetDirectoryName(Path.GetFullPath(urdfPath)) ?? ".");
     }
 
+    /// <summary>Expand a .xacro file then load the full URDF kinematic tree.</summary>
+    public static KinematicTree LoadTreeXacro(string xacroPath, UrdfLoadOptions? options = null, XacroOptions? xacroOptions = null)
+    {
+        var doc = XacroPreprocessor.ExpandDocument(xacroPath, xacroOptions);
+        return LoadTree(doc, options ?? new UrdfLoadOptions(), Path.GetDirectoryName(Path.GetFullPath(xacroPath)) ?? ".");
+    }
+
     public static KinematicTree LoadTree(XDocument doc, UrdfLoadOptions? options = null, string? urdfDirectory = null)
     {
         _ = options;

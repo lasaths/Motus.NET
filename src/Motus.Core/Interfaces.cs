@@ -49,3 +49,9 @@ public interface ICollisionChecker
         return true;
     }
 }
+
+public interface IConstraintChecker
+{
+    /// <summary>Validate a TCP frame. Position units are meters; orientation tolerances are radians.</summary>
+    bool TryValidate(Frame tcp, out string reason);
+}

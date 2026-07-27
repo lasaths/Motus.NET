@@ -11,6 +11,8 @@ public enum SamplingPlannerId
     EitStar = 5,
     BlitStar = 6,
     ParallelRace = 7,
+    PrmStar = 8,
+    ChompSmooth = 9,
 }
 
 /// <summary>Backward-compatible alias; prefer <see cref="SamplingPlannerId"/>.</summary>
