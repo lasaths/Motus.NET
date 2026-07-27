@@ -63,6 +63,52 @@ public class GroupPlanningTests
         var result = planner.Plan(new PlanningRequest(robot, start, goal, opts));
         Assert.True(result.Success, string.Join("; ", result.Errors));
     }
+
+    [Fact]
+    public void GroupMap_PlansSubsetBeyondTipOnlyAxisCount()
+    {
+        var limits = Enumerable.Range(0, 4)
+            .Select(_ => JointLimit.Radians(-1.0, 1.0, maxVelocity: 1.0))
+            .ToList();
+        var robot = new RobotModel(
+            new RobotPreset
+            {
+                Manufacturer = RobotManufacturer.Unknown,
+                ModelName = "arm_with_two_finger_drivers",
+                Family = "tree",
+                AxisCount = 4,
+                JointLimits = limits
+            },
+            jointNames: ["shoulder", "elbow", "left_finger", "right_finger"]);
+
+        var start = new JointState(new[] { 0.2, -0.2, 0.0, 0.0 });
+        var goal = new JointState(new[] { 0.8, 0.8, 0.35, -0.35 });
+        var group = new PlanningGroup("gripper", "tool0", "finger_tip", ["left_finger", "right_finger"]);
+        var opts = new PlanningOptions
+        {
+            GroupMap = JointIndexMap.Resolve(robot, group),
+            MaxJointStepRadians = 0.05
+        };
+
+        var result = new SamplingPlanner(robot.Preset, new SamplingPlannerOptions
+        {
+            PreferManaged = true,
+            MaxIterations = 2000,
+            StepRadians = 0.12,
+            GoalBias = 0.7,
+            RandomSeed = 13
+        }).Plan(new PlanningRequest(robot, start, goal, opts));
+
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+        foreach (var pt in result.Trajectory!.Points)
+        {
+            Assert.Equal(start.Positions[0], pt.JointState.Positions[0], 9);
+            Assert.Equal(start.Positions[1], pt.JointState.Positions[1], 9);
+        }
+        var last = result.Trajectory.Points[^1].JointState.Positions;
+        Assert.Equal(goal.Positions[2], last[2], 6);
+        Assert.Equal(goal.Positions[3], last[3], 6);
+    }
 }
 
 public class ToolCollisionPresetTests

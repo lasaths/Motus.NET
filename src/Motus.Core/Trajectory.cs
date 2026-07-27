@@ -4,6 +4,11 @@ public sealed class TrajectoryPoint
 {
     public double TimeSeconds { get; }
     public JointState JointState { get; }
+    /// <summary>
+    /// Optional world base pose for mobile-base planning samples. Null means use
+    /// <see cref="RobotPreset.BaseFrame"/> from the trajectory robot.
+    /// </summary>
+    public BaseFrame? BaseFrameOverride { get; }
     public MotionPrimitiveType? MotionType { get; }
     public int? SegmentIndex { get; }
     public double? BlendRadiusMeters { get; }
@@ -15,10 +20,12 @@ public sealed class TrajectoryPoint
         MotionPrimitiveType? motionType = null,
         int? segmentIndex = null,
         double? blendRadiusMeters = null,
-        EndEffectorState? toolState = null)
+        EndEffectorState? toolState = null,
+        BaseFrame? baseFrameOverride = null)
     {
         TimeSeconds = timeSeconds;
         JointState = jointState;
+        BaseFrameOverride = baseFrameOverride;
         MotionType = motionType;
         SegmentIndex = segmentIndex;
         BlendRadiusMeters = blendRadiusMeters;

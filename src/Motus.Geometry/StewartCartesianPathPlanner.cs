@@ -26,7 +26,8 @@ public sealed class StewartCartesianPathPlanner
         CartesianPose goalPose,
         JointState? startLengths = null,
         double stepMeters = 0.005,
-        double? maxLegDeltaMeters = null)
+        double? maxLegDeltaMeters = null,
+        PlanningOptions? planningOptions = null)
     {
         var maxDelta = maxLegDeltaMeters ?? _platform.SolverOptions.MaxLegDeltaPerStepMeters;
         if (stepMeters <= 0)
@@ -49,7 +50,10 @@ public sealed class StewartCartesianPathPlanner
         var dz = goalPose.Tcp.Z - startPose.Tcp.Z;
         var distance = Math.Sqrt(dx * dx + dy * dy + dz * dz);
         if (distance < 1e-9)
-            return PlanningResult.Succeeded(new Trajectory(_model, [new TrajectoryPoint(0, current)]));
+        {
+            var single = new Trajectory(_model, [new TrajectoryPoint(0, current)]);
+            return ValidateCollision(single, startIk.JointState, goalIk.JointState, planningOptions, []);
+        }
 
         var steps = Math.Max(1, (int)Math.Ceiling(distance / stepMeters));
         var points = new List<TrajectoryPoint>(steps + 1) { new(0, current) };
@@ -72,14 +76,19 @@ public sealed class StewartCartesianPathPlanner
             points.Add(new TrajectoryPoint(i, current));
         }
 
-        return PlanningResult.Succeeded(new Trajectory(_model, points));
+        var trajectory = new Trajectory(_model, points);
+        return ValidateCollision(trajectory, startIk.JointState, goalIk.JointState, planningOptions, [
+            "StewartCartesianPathPlanner: true TCP-linear platform path.",
+            StewartMethodRefs.DescribeStack()
+        ]);
     }
 
     public PlanningResult PlanToolpath(
         IReadOnlyList<CartesianPose> waypoints,
         JointState? startLengths = null,
         double stepMeters = 0.005,
-        double? maxLegDeltaMeters = null)
+        double? maxLegDeltaMeters = null,
+        PlanningOptions? planningOptions = null)
     {
         if (waypoints is null || waypoints.Count == 0)
             return PlanningResult.Failed(["Stewart toolpath requires at least one waypoint."]);
@@ -89,14 +98,19 @@ public sealed class StewartCartesianPathPlanner
             var ik = _ik.TrySolveDetailed(waypoints[0]);
             if (!ik.Success || ik.JointState is null)
                 return PlanningResult.Failed([$"Stewart toolpath IK failed: {ik}"]);
-            return PlanningResult.Succeeded(new Trajectory(_model, [new TrajectoryPoint(0, ik.JointState)]));
+            return ValidateCollision(
+                new Trajectory(_model, [new TrajectoryPoint(0, ik.JointState)]),
+                ik.JointState,
+                ik.JointState,
+                planningOptions,
+                [StewartMethodRefs.DescribeStack()]);
         }
 
         Trajectory? combined = null;
         var warnings = new List<string>();
         for (var s = 0; s < waypoints.Count - 1; s++)
         {
-            var seg = PlanToResult(waypoints[s], waypoints[s + 1], startLengths: null, stepMeters, maxLegDeltaMeters);
+            var seg = PlanToResult(waypoints[s], waypoints[s + 1], startLengths: null, stepMeters, maxLegDeltaMeters, planningOptions);
             if (!seg.Success || seg.Trajectory is null)
                 return PlanningResult.Failed(seg.Errors.Count > 0 ? seg.Errors : [$"Stewart segment {s}→{s + 1} failed."]);
 
@@ -107,7 +121,36 @@ public sealed class StewartCartesianPathPlanner
             warnings.AddRange(seg.Warnings);
         }
 
+        warnings.Add(StewartMethodRefs.DescribeStack());
         return PlanningResult.Succeeded(combined!, warnings.Count > 0 ? warnings : null);
+    }
+
+    private PlanningResult ValidateCollision(
+        Trajectory trajectory,
+        JointState start,
+        JointState goal,
+        PlanningOptions? planningOptions,
+        IReadOnlyList<string> baseWarnings)
+    {
+        var warnings = new List<string>(baseWarnings);
+        var scene = planningOptions?.CollisionScene;
+        var hasCollision = PlanningCollision.SceneHasObstacles(scene) ||
+                           planningOptions?.AttachedBodies is { Count: > 0 };
+        if (!hasCollision)
+            return PlanningResult.Succeeded(trajectory, warnings.Count > 0 ? warnings : null);
+
+        var checker = planningOptions?.CollisionChecker ?? new StewartCollisionChecker(_platform);
+        scene ??= new CollisionScene();
+        var endpointFail = PlanningCollision.ValidateEndpoints(start, goal, scene, checker);
+        if (endpointFail is not null) return endpointFail;
+
+        var step = planningOptions is not null && planningOptions.MaxJointStepRadians > 0
+            ? planningOptions.MaxJointStepRadians
+            : _platform.SolverOptions.MaxLegDeltaPerStepMeters;
+        var collisionFail = PlanningCollision.ValidateTrajectory(trajectory, scene, checker, step);
+        if (collisionFail is not null) return collisionFail;
+        warnings.Add("StewartCartesianPathPlanner: leg-length path validated against collision scene.");
+        return PlanningResult.Succeeded(trajectory, warnings);
     }
 
     private static Trajectory Concat(Trajectory a, Trajectory b)

@@ -122,7 +122,8 @@ public static class SamplingPlannerRegistry
         var preferManaged = options.PreferManaged ||
             string.Equals(Environment.GetEnvironmentVariable("MOTUS_PREFER_MANAGED_PLANNER"), "1", StringComparison.Ordinal) ||
             request.Options.PathConstraints is not null ||
-            request.Options.ConstraintChecker is not null;
+            request.Options.ConstraintChecker is not null ||
+            request.Options.Mobility is not null;
 
         if (!preferManaged && descriptor.NativeSupported && backend.NativePlannerId >= 0)
         {

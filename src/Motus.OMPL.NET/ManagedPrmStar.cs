@@ -15,7 +15,12 @@ internal static class ManagedPrmStar
         var robot = request.Robot;
         var scene = request.Options.CollisionScene ?? new CollisionScene();
         var rng = new Random(options.RandomSeed);
-        var space = PlanningPipeline.BuildPlanSpace(request);
+        var spaceFail = PlanningPipeline.TryBuildPlanSpace(request, out var space);
+        if (spaceFail is not null) return spaceFail;
+        var checkerAvailabilityFail = PlanningPipeline.ValidateCollisionCheckerAvailability(request.Options, scene, checker);
+        if (checkerAvailabilityFail is not null) return checkerAvailabilityFail;
+        var checkerFail = PlanningPipeline.ValidateMobileBaseChecker(space, checker);
+        if (checkerFail is not null) return checkerFail;
 
         var startVal = request.Start.Validate(robot.Preset.JointLimits);
         var goalVal = request.Goal.Validate(robot.Preset.JointLimits);
@@ -24,14 +29,15 @@ internal static class ManagedPrmStar
 
         var constraintFail = PlanningPipeline.TryBuildConstraintContext(request, serialChain, out var constraints);
         if (constraintFail is not null) return constraintFail;
-        if (!PlanningPipeline.TryValidateConstraints(constraints, space.ToFull(space.Start), out var startReason))
+        if (!PlanningPipeline.TryValidateConstraints(
+                constraints, space.ToFull(space.Start), space.ToBaseFrame(space.Start), out var startReason))
             return PlanningPipeline.ConstraintFailure("start", startReason);
-        if (!PlanningPipeline.TryValidateConstraints(constraints, space.ToFull(space.Goal), out var goalReason))
+        if (!PlanningPipeline.TryValidateConstraints(
+                constraints, space.ToFull(space.Goal), space.ToBaseFrame(space.Goal), out var goalReason))
             return PlanningPipeline.ConstraintFailure("goal", goalReason);
 
-        var endpointFail = PlanningCollision.ValidateEndpoints(
-            space.ToFull(space.Start), space.ToFull(space.Goal), scene, checker,
-            request.Options.AttachedBodies is { Count: > 0 });
+        var endpointFail = PlanningPipeline.ValidateEndpoints(
+            space, scene, checker, request.Options.AttachedBodies is { Count: > 0 });
         if (endpointFail is not null)
             return endpointFail;
 
@@ -59,7 +65,7 @@ internal static class ManagedPrmStar
                 options.ReportIteration?.Invoke(iter, options.MaxIterations);
 
             var sample = Sample(rng, space.Limits);
-            if (!StateValid(sample, scene, checker, constraints, space.ToFull))
+            if (!StateValid(sample, scene, checker, constraints, space))
                 continue;
 
             nodes.Add(sample);
@@ -101,11 +107,14 @@ internal static class ManagedPrmStar
             scene,
             checker,
             constraints,
-            space.ToFull,
+            space,
             options);
         var full = smoothed
             .Select(q => new JointState(space.ToFull(q).Positions.ToArray()))
             .ToList();
+        if (space.HasMobility)
+            return PlanningPipeline.BuildTrajectoryFromPlanSpace(
+                robot, smoothed, space, planningOptions, checker, usedNative: false, "PRM*");
         return PlanningPipeline.BuildTrajectory(robot, full, planningOptions, checker, usedNative: false, "PRM*");
     }
 
@@ -127,7 +136,7 @@ internal static class ManagedPrmStar
             if (goalOnly && other != 1) continue;
             var distance = Distance(nodes[index], nodes[other]);
             if (distance > radius && !(index <= 1 || other <= 1)) continue;
-            if (!ManagedRrtConnect.SegmentValid(nodes[index], nodes[other], scene, checker, constraints, space.ToFull, options.StepRadians))
+            if (!ManagedRrtConnect.SegmentValid(nodes[index], nodes[other], scene, checker, constraints, space, options.StepRadians))
                 continue;
 
             edges[index].Add(new Edge(other, distance));
@@ -147,12 +156,13 @@ internal static class ManagedPrmStar
         CollisionScene scene,
         ICollisionChecker? checker,
         PlanningPipeline.ConstraintContext constraints,
-        Func<double[], JointState> toFull)
+        PlanningPipeline.PlanSpace space)
     {
-        var full = toFull(q);
-        if (checker is not null && !checker.IsCollisionFree(full, scene))
+        var full = space.ToFull(q);
+        var baseFrame = space.ToBaseFrame(q);
+        if (!PlanningPipeline.StateCollisionFree(checker, full, scene, baseFrame))
             return false;
-        return PlanningPipeline.TryValidateConstraints(constraints, full, out _);
+        return PlanningPipeline.TryValidateConstraints(constraints, full, baseFrame, out _);
     }
 
     private static double[] Sample(Random rng, IReadOnlyList<JointLimit> limits)

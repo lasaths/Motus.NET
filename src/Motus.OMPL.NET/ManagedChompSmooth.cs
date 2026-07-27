@@ -14,7 +14,12 @@ internal static class ManagedChompSmooth
         var checker = PlanningPipeline.ResolveChecker(request, defaultChecker);
         var robot = request.Robot;
         var scene = request.Options.CollisionScene ?? new CollisionScene();
-        var space = PlanningPipeline.BuildPlanSpace(request);
+        var spaceFail = PlanningPipeline.TryBuildPlanSpace(request, out var space);
+        if (spaceFail is not null) return spaceFail;
+        var checkerAvailabilityFail = PlanningPipeline.ValidateCollisionCheckerAvailability(request.Options, scene, checker);
+        if (checkerAvailabilityFail is not null) return checkerAvailabilityFail;
+        var checkerFail = PlanningPipeline.ValidateMobileBaseChecker(space, checker);
+        if (checkerFail is not null) return checkerFail;
 
         var startVal = request.Start.Validate(robot.Preset.JointLimits);
         var goalVal = request.Goal.Validate(robot.Preset.JointLimits);
@@ -24,7 +29,7 @@ internal static class ManagedChompSmooth
         var constraintFail = PlanningPipeline.TryBuildConstraintContext(request, serialChain, out var constraints);
         if (constraintFail is not null) return constraintFail;
 
-        if (!ManagedRrtConnect.SegmentValid(space.Start, space.Goal, scene, checker, constraints, space.ToFull, options.StepRadians))
+        if (!ManagedRrtConnect.SegmentValid(space.Start, space.Goal, scene, checker, constraints, space, options.StepRadians))
             return PlanningResult.Failed(new[] { "CHOMP-lite direct seed violates collision or path constraints." });
 
         var smoothed = ChompLiteSmoother.SmoothInternal(
@@ -33,9 +38,12 @@ internal static class ManagedChompSmooth
             scene,
             checker,
             constraints,
-            space.ToFull,
+            space,
             options);
         var full = smoothed.Select(q => new JointState(space.ToFull(q).Positions.ToArray())).ToList();
+        if (space.HasMobility)
+            return PlanningPipeline.BuildTrajectoryFromPlanSpace(
+                robot, smoothed, space, request.Options, checker, usedNative: false, "CHOMP-lite");
         return PlanningPipeline.BuildTrajectory(robot, full, request.Options, checker, usedNative: false, "CHOMP-lite");
     }
 }

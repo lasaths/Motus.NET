@@ -233,4 +233,65 @@ public class RrtConnectTests
     Assert.False(result.Success);
     Assert.Contains(result.Errors, e => e.Contains("StepRadians", StringComparison.OrdinalIgnoreCase));
   }
+
+  [Fact]
+  public void HolonomicSe2_AppendsBaseDofAndReturnsBaseFrames()
+  {
+    var robot = MobileSmokeRobot();
+    var start = new JointState(new[] { 0.0 });
+    var goal = new JointState(new[] { 0.0 });
+    var targetBase = new MobilityModel.HolonomicSE2(0.45, -0.2, 0.35);
+
+    var planner = new SamplingPlanner(robot.Preset, new SamplingPlannerOptions
+    {
+      PreferManaged = true,
+      MaxIterations = 800,
+      StepRadians = 0.25,
+      ConnectThresholdRadians = 0.25,
+      GoalBias = 1.0,
+      RandomSeed = 19
+    });
+    var result = planner.Plan(new PlanningRequest(
+      robot,
+      start,
+      goal,
+      new PlanningOptions { Mobility = targetBase, MaxJointStepRadians = 0.05 }));
+
+    Assert.True(result.Success, string.Join("; ", result.Errors));
+    Assert.NotNull(result.Trajectory!.Points[^1].BaseFrameOverride);
+    var end = result.Trajectory.Points[^1].BaseFrameOverride!.Frame;
+    Assert.InRange(end.X - targetBase.X, -1e-6, 1e-6);
+    Assert.InRange(end.Y - targetBase.Y, -1e-6, 1e-6);
+    Assert.Contains(result.Warnings, w => w.Contains(MobilityMethodRefs.LaVallePlanningAlgorithmsUrl, StringComparison.Ordinal));
+  }
+
+  [Fact]
+  public void HolonomicSe2_RejectsDefaultBoundViolationWithStatus()
+  {
+    var robot = MobileSmokeRobot();
+    var planner = new SamplingPlanner(robot.Preset, new SamplingPlannerOptions
+    {
+      PreferManaged = true,
+      MaxIterations = 10
+    });
+    var result = planner.Plan(new PlanningRequest(
+      robot,
+      new JointState(new[] { 0.0 }),
+      new JointState(new[] { 0.0 }),
+      new PlanningOptions { Mobility = new MobilityModel.HolonomicSE2(2.5, 0, 0) }));
+
+    Assert.False(result.Success);
+    Assert.Contains(result.Messages, m => m.Code == PlanningMessageCodes.InvalidOptions);
+    Assert.Contains(result.Errors, e => e.Contains("HolonomicSE2 X", StringComparison.OrdinalIgnoreCase));
+  }
+
+  private static RobotModel MobileSmokeRobot() =>
+    new(new RobotPreset
+    {
+      Manufacturer = RobotManufacturer.Unknown,
+      ModelName = "mobile_smoke",
+      Family = "mobile",
+      AxisCount = 1,
+      JointLimits = new[] { JointLimit.Radians(-1.0, 1.0, maxVelocity: 1.0) }
+    });
 }

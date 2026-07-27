@@ -22,13 +22,21 @@ public static class ChompLiteSmoother
         options ??= new SamplingPlannerOptions();
         var constraints = new PlanningPipeline.ConstraintContext(false, null, robot.Preset.BaseFrame, robot.Preset.ToolFrame, null, null);
         var qPath = path.Select(p => p.Positions.ToArray()).ToList();
+        var space = new PlanningPipeline.PlanSpace(
+            path[0],
+            qPath[0],
+            qPath[^1],
+            robot.Preset.JointLimits,
+            q => new JointState(q),
+            _ => null,
+            HasMobility: false);
         var smoothed = SmoothInternal(
             qPath,
             robot.Preset.JointLimits,
             scene ?? new CollisionScene(),
             checker,
             constraints,
-            q => new JointState(q),
+            space,
             options);
         return smoothed.Select(q => new JointState(q)).ToList();
     }
@@ -39,7 +47,7 @@ public static class ChompLiteSmoother
         CollisionScene scene,
         ICollisionChecker? checker,
         PlanningPipeline.ConstraintContext constraints,
-        Func<double[], JointState> toFull,
+        PlanningPipeline.PlanSpace space,
         SamplingPlannerOptions options)
     {
         if (path.Count <= 2 || options.ChompIterations <= 0)
@@ -61,13 +69,13 @@ public static class ChompLiteSmoother
                 for (var j = 0; j < q.Length; j++)
                 {
                     var smoothGradient = 2.0 * q[j] - prev[j] - next[j];
-                    var collisionGradient = CollisionPenaltyGradient(q, j, eps, scene, checker, constraints, toFull);
+                    var collisionGradient = CollisionPenaltyGradient(q, j, eps, scene, checker, constraints, space);
                     candidate[j] = q[j] - lr * (smoothGradient + collisionGradient);
                     candidate[j] = Math.Clamp(candidate[j], limits[j].MinRadians, limits[j].MaxRadians);
                 }
 
-                if (ManagedRrtConnect.SegmentValid(prev, candidate, scene, checker, constraints, toFull, options.StepRadians) &&
-                    ManagedRrtConnect.SegmentValid(candidate, next, scene, checker, constraints, toFull, options.StepRadians))
+                if (ManagedRrtConnect.SegmentValid(prev, candidate, scene, checker, constraints, space, options.StepRadians) &&
+                    ManagedRrtConnect.SegmentValid(candidate, next, scene, checker, constraints, space, options.StepRadians))
                 {
                     current[i] = candidate;
                 }
@@ -84,15 +92,15 @@ public static class ChompLiteSmoother
         CollisionScene scene,
         ICollisionChecker? checker,
         PlanningPipeline.ConstraintContext constraints,
-        Func<double[], JointState> toFull)
+        PlanningPipeline.PlanSpace space)
     {
         // PONYTAIL: finite-difference binary validity until a signed-distance collision backend is available.
         var plus = (double[])q.Clone();
         var minus = (double[])q.Clone();
         plus[axis] += eps;
         minus[axis] -= eps;
-        var cp = Penalty(plus, scene, checker, constraints, toFull);
-        var cm = Penalty(minus, scene, checker, constraints, toFull);
+        var cp = Penalty(plus, scene, checker, constraints, space);
+        var cm = Penalty(minus, scene, checker, constraints, space);
         return (cp - cm) / (2.0 * eps);
     }
 
@@ -101,13 +109,14 @@ public static class ChompLiteSmoother
         CollisionScene scene,
         ICollisionChecker? checker,
         PlanningPipeline.ConstraintContext constraints,
-        Func<double[], JointState> toFull)
+        PlanningPipeline.PlanSpace space)
     {
-        var full = toFull(q);
+        var full = space.ToFull(q);
+        var baseFrame = space.ToBaseFrame(q);
         var penalty = 0.0;
-        if (checker is not null && !checker.IsCollisionFree(full, scene))
+        if (!PlanningPipeline.StateCollisionFree(checker, full, scene, baseFrame))
             penalty += 1.0;
-        if (!PlanningPipeline.TryValidateConstraints(constraints, full, out _))
+        if (!PlanningPipeline.TryValidateConstraints(constraints, full, baseFrame, out _))
             penalty += 1.0;
         return penalty;
     }

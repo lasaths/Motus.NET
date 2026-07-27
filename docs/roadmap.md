@@ -61,12 +61,19 @@ Host-agnostic library (Grasshopper, CLI, services). MoveIt-shaped seams without 
 - [x] Trapezoidal retiming with jerk-aware spacing
 - [x] `TrajectoryExport.Export` with retime + validate
 - [x] Bottleneck path retiming (TOTG-lite default for export)
-- [ ] True time-optimal (TOTG) parameterization
+- [x] True time-optimal (TOTG) parameterization
 
 ## Milestone 9 — Constraints & optimizing planners · L-XL
 
-- [ ] Orientation/path constraints
-- [ ] PRM* / CHOMP-style optimization
+- [x] Orientation/path constraints
+- [x] PRM* / CHOMP-style optimization
+
+## ADR waves — parallel, tree, mobile, legged
+
+- [x] Stewart/Gough (`Family=stewart`) remains a parallel sibling stack with meters-valued leg lengths, collision validation, and managed stroke-space sampling.
+- [x] Full-tree / group planning uses `PlanningGroup` + `JointIndexMap` over full driver names; tip-only FK/IK and branch/finger group planning are documented as distinct contracts.
+- [x] Holonomic SE(2) managed sampling appends x/y/yaw with explicit local bounds and per-sample base-frame collision hooks.
+- [x] Legged full-driver Plan is an adapter over `LeggedGait.TryBuild`: SSM/collision validation only, no gait reimplementation.
 
 ## Related repos
 

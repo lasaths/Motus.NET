@@ -5,8 +5,13 @@ public class SamplingPlannerOptions
     public int MaxIterations { get; init; } = 4000;
     /// <summary>When &gt; 0, native OMPL uses time budget instead of iteration count.</summary>
     public double MaxPlanTimeSeconds { get; init; }
+    /// <summary>
+    /// Maximum sampling extension length in planning-coordinate units. Historical name:
+    /// radians for revolute joints; meters for prismatic axes and Stewart leg lengths.
+    /// </summary>
     public double StepRadians { get; init; } = 0.12;
     public double GoalBias { get; init; } = 0.08;
+    /// <summary>Connection threshold in the same generic planning-coordinate units as <see cref="StepRadians"/>.</summary>
     public double ConnectThresholdRadians { get; init; } = 0.2;
     public int RandomSeed { get; init; } = 42;
     public int MaxPathStates { get; init; } = 256;

@@ -1,5 +1,6 @@
 using Motus.Core;
 using Motus.Geometry;
+using Motus.OMPL.NET;
 using Xunit;
 
 namespace Motus.Core.Tests;
@@ -167,6 +168,64 @@ public class VerifiedStewartKinematicsTests
         var result = robot.PathPlanner.PlanToResult(start, goal);
         Assert.False(result.Success);
         Assert.Contains(result.Errors, e => e.Contains("StrokeLimit", StringComparison.OrdinalIgnoreCase) || e.Contains("stroke", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void Path_CollisionScene_FailsWithNamedStatus()
+    {
+        var robot = Classic();
+        var mid = 0.5 * (robot.Platform.StrokeLimits[0].Min + robot.Platform.StrokeLimits[0].Max);
+        var start = new CartesianPose(new Frame(0, 0, mid));
+        var goal = new CartesianPose(new Frame(0.015, 0, mid));
+        var scene = new CollisionScene(new[]
+        {
+            CollisionObject.Sphere("tcp_block", new Frame(0.0075, 0, mid), 0.01)
+        });
+
+        var result = robot.PathPlanner.PlanToResult(
+            start,
+            goal,
+            stepMeters: 0.005,
+            planningOptions: new PlanningOptions
+            {
+                CollisionScene = scene,
+                CollisionChecker = new StewartCollisionChecker(robot.Platform),
+                MaxJointStepRadians = 0.02
+            });
+
+        Assert.False(result.Success);
+        Assert.Contains(result.Messages, m =>
+            m.Code == PlanningMessageCodes.EndpointCollision ||
+            m.Code == PlanningMessageCodes.PathCollision);
+    }
+
+    [Fact]
+    public void SamplingPlanner_PlansStewartLegLengthsInMeters()
+    {
+        var robot = Classic();
+        var start = robot.Platform.HomeLengths();
+        var mid = 0.5 * (robot.Platform.StrokeLimits[0].Min + robot.Platform.StrokeLimits[0].Max);
+        var ik = robot.InverseKinematics.TrySolveDetailed(new CartesianPose(new Frame(0.01, 0, mid)));
+        Assert.True(ik.Success, ik.ToString());
+
+        var planner = new SamplingPlanner(robot.Model.Preset, new SamplingPlannerOptions
+        {
+            PreferManaged = true,
+            MaxIterations = 5000,
+            StepRadians = 0.04,
+            ConnectThresholdRadians = 0.04,
+            GoalBias = 0.5,
+            RandomSeed = 7
+        });
+        var result = planner.Plan(new PlanningRequest(
+            robot.Model,
+            start,
+            ik.JointState!,
+            new PlanningOptions { MaxJointStepRadians = 0.02 }));
+
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+        Assert.All(result.Trajectory!.Points, p => Assert.Equal(6, p.JointState.AxisCount));
+        Assert.Contains(result.Warnings, w => w.Contains("sampling", StringComparison.OrdinalIgnoreCase));
     }
 
     private static void AssertIkFkRoundTrip(StewartRobot robot, CartesianPose target)

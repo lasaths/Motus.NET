@@ -78,7 +78,9 @@ public sealed class PlanningContext
             AttachedBodies = Attached,
             PathConstraints = opts.PathConstraints,
             ConstraintChecker = opts.ConstraintChecker,
-            GroupMap = ActiveGroup is not null ? JointIndexMap.Resolve(Robot, ActiveGroup) : null
+            GroupMap = ActiveGroup is not null ? JointIndexMap.Resolve(Robot, ActiveGroup) : opts.GroupMap,
+            Mobility = opts.Mobility,
+            MobilityBounds = opts.MobilityBounds
         };
     }
 }

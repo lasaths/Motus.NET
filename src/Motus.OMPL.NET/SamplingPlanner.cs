@@ -16,7 +16,9 @@ public sealed class SamplingPlanner : IPlanner
     public SamplingPlanner(RobotPreset preset, SerialJointChain? serialChain, SamplingPlannerOptions? options = null)
     {
         _serialChain = serialChain;
-        _defaultChecker = KinematicsResolver.SupportsModel(preset, serialChain)
+        _defaultChecker = Units.IsStewart(preset)
+            ? null
+            : KinematicsResolver.SupportsModel(preset, serialChain)
             ? serialChain is null
                 ? new SphereCollisionChecker(preset)
                 : new SphereCollisionChecker(preset, serialChain)
