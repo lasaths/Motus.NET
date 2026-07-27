@@ -7,15 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-07-27
+
 ### Added
 
-- 0.12 development: `UrdfRobotLoader.LoadTreeXacro` for supported xacro subset expansion into full `KinematicTree`, plus a tiny UR-description-style xacro fixture with tip/tool link coverage
-- 0.12 development: `RetimerAlgorithm.Totg` managed TOPP-RA-style retimer with `TotgMethodRefs` DOI provenance and JSON export retime provenance
-- 0.12 development: `PathConstraints`, `PositionConstraint`, `OrientationConstraint`, `IConstraintChecker`, and planner `planning.constraint_violation` diagnostics
-- 0.12 development: managed `SamplingPlannerId.PrmStar` and `ChompLiteSmoother` / `SamplingPlannerId.ChompSmooth` with DOI-backed `PlanningMethodRefs`
-- 0.12 development: Stewart managed collision (`StewartCollisionChecker`), Stewart LIN collision validation, and Stewart stroke-space sampling planner support with `StewartMethodRefs`
-- 0.12 development: managed holonomic SE(2) sampling via `PlanningOptions.Mobility`, `MobilityBounds`, trajectory base-frame overrides, and `MobilityMethodRefs` (LaValle)
-- 0.12 development: `LeggedGait.ValidateForPlan` adapter for full-driver gait SSM/collision validation with structured `PlanningResult`
+- `UrdfRobotLoader.LoadTreeXacro` for supported xacro subset expansion into full `KinematicTree`, plus a tiny UR-description-style xacro fixture with tip/tool link coverage
+- `RetimerAlgorithm.Totg` managed TOPP-RA-style retimer with `TotgMethodRefs` DOI provenance and JSON export retime provenance
+- `PathConstraints`, `PositionConstraint`, `OrientationConstraint`, `IConstraintChecker`, and planner `planning.constraint_violation` diagnostics
+- Managed `SamplingPlannerId.PrmStar` and `ChompLiteSmoother` / `SamplingPlannerId.ChompSmooth` with DOI-backed `PlanningMethodRefs`
+- Stewart managed collision (`StewartCollisionChecker`), Stewart LIN collision validation, and Stewart stroke-space sampling planner support with `StewartMethodRefs`
+- Managed holonomic SE(2) sampling via `PlanningOptions.Mobility`, `MobilityBounds`, trajectory base-frame overrides, and `MobilityMethodRefs` (LaValle)
+- `LeggedGait.ValidateForPlan` adapter for full-driver gait SSM/collision validation with structured `PlanningResult`
 - `docs/METHODS.md` method catalog for xacro, LIN, PoE, TOTG, constraints, RRT-Connect, PRM*, CHOMP-lite, Stewart, and legged stacks
 - `LeggedGait.TerrainHeight` callback — plant/land on uneven ground; body Z = terrain(x,y) + BodyZ clearance (null = flat Z=0)
 - `MobilityModel.HolonomicSE2` optional Z for terrain-following base frames
