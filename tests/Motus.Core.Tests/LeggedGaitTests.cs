@@ -449,6 +449,43 @@ public class LeggedGaitTests
     }
 
     [Fact]
+    public void LeggedGait_ValidateForPlan_OkWithMethodProvenance()
+    {
+        var layout = LeggedLayout.HexMithi(0.12, 0.06, 0.17, 0.19, 0.12);
+        var limits = Enumerable.Range(0, 18).Select(_ => new JointLimit(-Math.PI, Math.PI, Math.PI, Math.PI * 2)).ToList();
+        var model = new RobotModel(layout.ToPreset("hex", 18, limits));
+        var path = new[] { new Vec3(0, 0, 0), new Vec3(0.3, 0, 0) };
+
+        Assert.True(LeggedGait.TryBuild(
+            layout, path, 0.08, 0.06, 0.025,
+            7.5 * Deg, 30 * Deg, -30 * Deg,
+            model, out var gait, out var err), err);
+
+        var plan = LeggedGait.ValidateForPlan(gait!, minStaticStabilityMarginMeters: -0.05);
+        Assert.True(plan.Success, string.Join("; ", plan.Errors));
+        Assert.Contains(plan.Warnings, w => w.Contains(LeggedMethodRefs.SongWaldron1987Doi, StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void LeggedGait_ValidateForPlan_SsmFailIsNamed()
+    {
+        var layout = LeggedLayout.HexMithi(0.12, 0.06, 0.17, 0.19, 0.12);
+        var limits = Enumerable.Range(0, 18).Select(_ => new JointLimit(-Math.PI, Math.PI, Math.PI, Math.PI * 2)).ToList();
+        var model = new RobotModel(layout.ToPreset("hex", 18, limits));
+        var path = new[] { new Vec3(0, 0, 0), new Vec3(0.3, 0, 0) };
+
+        Assert.True(LeggedGait.TryBuild(
+            layout, path, 0.08, 0.06, 0.025,
+            7.5 * Deg, 30 * Deg, -30 * Deg,
+            model, out var gait, out var err), err);
+
+        var plan = LeggedGait.ValidateForPlan(gait!, minStaticStabilityMarginMeters: 10.0);
+        Assert.False(plan.Success);
+        Assert.Contains(plan.Messages, m => m.Code == PlanningMessageCodes.ConstraintViolation);
+        Assert.Contains(plan.Errors, e => e.Contains("SSM", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public void BuildStanceQ_PlantsFeetNearGround()
     {
         var layout = LeggedLayout.HexMithi(0.12, 0.06, 0.17, 0.19, 0.12);

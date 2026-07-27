@@ -340,6 +340,11 @@ public sealed class CartesianLinearPathPlanner
         var startPose = new CartesianPose(Transforms.ToFrame(
             _fk.ComputeTcpTransform(request.Start.Positions, _base.Frame, _tool.Frame)));
 
+        var startConstraintFail = ValidateConstraints(request.Options, startPose.Tcp, "start");
+        if (startConstraintFail is not null) return startConstraintFail;
+        var goalConstraintFail = ValidateConstraints(request.Options, request.Goal.Tcp, "goal");
+        if (goalConstraintFail is not null) return goalConstraintFail;
+
         var workspace = CartesianWorkspace.CheckReach(robot.Preset, request.Goal, startPose);
         if (!workspace.IsWithinReach)
             return PlanningResult.Failed(new[] { workspace.Reason ?? "Goal TCP is outside robot reach." });
@@ -379,10 +384,46 @@ public sealed class CartesianLinearPathPlanner
             warnings.Add("CartesianLinearPathPlanner: LIN path validated against collision scene.");
         }
 
+        var pathConstraintFail = ValidateTrajectoryConstraints(traj, request.Options);
+        if (pathConstraintFail is not null) return pathConstraintFail;
+
         if (request.Options.RetimeTrajectory)
             traj = TrajectoryRetimer.Retime(traj);
 
         warnings.Add("CartesianLinearPathPlanner: true TCP-linear (LIN) motion.");
         return PlanningResult.Succeeded(traj, warnings);
     }
+
+    private PlanningResult? ValidateTrajectoryConstraints(Trajectory trajectory, PlanningOptions options)
+    {
+        if (options.PathConstraints is null && options.ConstraintChecker is null)
+            return null;
+
+        foreach (var point in trajectory.Points)
+        {
+            var tcp = Transforms.ToFrame(_fk.ComputeTcpTransform(point.JointState.Positions, _base.Frame, _tool.Frame));
+            var fail = ValidateConstraints(options, tcp, $"t={point.TimeSeconds:F4}s");
+            if (fail is not null) return fail;
+        }
+
+        return null;
+    }
+
+    private static PlanningResult? ValidateConstraints(PlanningOptions options, Frame tcp, string label)
+    {
+        if (options.PathConstraints is not null && !options.PathConstraints.TryValidate(tcp, out var pathReason))
+            return ConstraintFailure(label, pathReason);
+        if (options.ConstraintChecker is not null && !options.ConstraintChecker.TryValidate(tcp, out var checkerReason))
+            return ConstraintFailure(label, checkerReason);
+        return null;
+    }
+
+    private static PlanningResult ConstraintFailure(string label, string reason) =>
+        PlanningResult.Failed(new[]
+        {
+            new PlanningMessage(
+                PlanningMessageCodes.ConstraintViolation,
+                $"{label}: {reason}",
+                PlanningMessageSeverity.Error)
+        });
 }

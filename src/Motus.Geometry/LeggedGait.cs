@@ -297,6 +297,68 @@ public static class LeggedGait
     }
 
     /// <summary>
+    /// Adapter-only Plan gate for an already-built legged gait trajectory. Does not synthesize or modify gait;
+    /// it validates SSM and optional collision, then returns a <see cref="PlanningResult"/> for shared Status UI.
+    /// </summary>
+    public static PlanningResult ValidateForPlan(
+        Result gait,
+        PlanningOptions? options = null,
+        double minStaticStabilityMarginMeters = 0.0)
+    {
+        if (gait is null)
+        {
+            return PlanningResult.Failed(new[]
+            {
+                new PlanningMessage(
+                    PlanningMessageCodes.InvalidInput,
+                    "Legged gait result is null.",
+                    PlanningMessageSeverity.Error)
+            });
+        }
+
+        if (!Units.IsLegged(gait.Trajectory.Robot.Preset))
+        {
+            return PlanningResult.Failed(new[]
+            {
+                new PlanningMessage(
+                    PlanningMessageCodes.InvalidOptions,
+                    $"Legged Plan adapter requires RobotPreset.Family='{Units.LeggedFamily}'.",
+                    PlanningMessageSeverity.Error)
+            });
+        }
+
+        if (!double.IsFinite(gait.MinStaticStabilityMarginMeters) ||
+            gait.MinStaticStabilityMarginMeters < minStaticStabilityMarginMeters)
+        {
+            return PlanningResult.Failed(new[]
+            {
+                new PlanningMessage(
+                    PlanningMessageCodes.ConstraintViolation,
+                    $"Legged SSM below threshold: min={gait.MinStaticStabilityMarginMeters:F4} m, " +
+                    $"required>={minStaticStabilityMarginMeters:F4} m (McGhee&Frank doi:{LeggedMethodRefs.McGheeFrank1968Doi}).",
+                    PlanningMessageSeverity.Error)
+            });
+        }
+
+        options ??= new PlanningOptions();
+        if (options.CollisionChecker is not null && options.CollisionScene is not null)
+        {
+            var collisionFail = PlanningCollision.ValidateTrajectory(
+                gait.Trajectory,
+                options.CollisionScene,
+                options.CollisionChecker,
+                options.MaxJointStepRadians);
+            if (collisionFail is not null) return collisionFail;
+        }
+
+        var warnings = new List<string> { gait.MethodProvenance };
+        if (!string.IsNullOrWhiteSpace(gait.Warning))
+            warnings.Add(gait.Warning);
+        warnings.Add("LeggedGait.ValidateForPlan: adapter-only validation; gait generation unchanged.");
+        return PlanningResult.Succeeded(gait.Trajectory, warnings);
+    }
+
+    /// <summary>
     /// Stance joint vector: coxa heading = hip yaw ± <paramref name="hipStance"/>,
     /// femur/tibia from analytic plant IK at Z=0 (meters). Fixed <paramref name="femurStance"/> /
     /// <paramref name="tibiaStance"/> are fallbacks only if plant IK fails.

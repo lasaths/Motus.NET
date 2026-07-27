@@ -9,7 +9,8 @@ internal static class ParallelRacePlanner
     internal static PlanningResult Plan(
         PlanningRequest request,
         SamplingPlannerOptions options,
-        ICollisionChecker? defaultChecker)
+        ICollisionChecker? defaultChecker,
+        SerialJointChain? serialChain)
     {
         if (options.ShouldCancel?.Invoke() == true)
             return PlanningResult.Failed(new[] { "Planning cancelled." });
@@ -23,11 +24,13 @@ internal static class ParallelRacePlanner
         PlanningResult? connect = null;
         PlanningResult? aorrtc = null;
 
-        if (SamplingPlannerRegistry.IsNativeAvailable(SamplingPlannerId.RrtConnect))
-            connect = NativeOmplPlanner.TryPlan(request, connectOpts, defaultChecker, NativeBindings.PlannerRrtConnect, "RRT-Connect");
-        connect ??= ManagedRrtConnect.Plan(request, connectOpts, defaultChecker);
+        var hasConstraints = request.Options.PathConstraints is not null || request.Options.ConstraintChecker is not null;
 
-        if (SamplingPlannerRegistry.IsNativeAvailable(SamplingPlannerId.Aorrtc))
+        if (!hasConstraints && SamplingPlannerRegistry.IsNativeAvailable(SamplingPlannerId.RrtConnect))
+            connect = NativeOmplPlanner.TryPlan(request, connectOpts, defaultChecker, NativeBindings.PlannerRrtConnect, "RRT-Connect");
+        connect ??= ManagedRrtConnect.Plan(request, connectOpts, defaultChecker, serialChain);
+
+        if (!hasConstraints && SamplingPlannerRegistry.IsNativeAvailable(SamplingPlannerId.Aorrtc))
             aorrtc = NativeOmplPlanner.TryPlan(request, aorrtcOpts, defaultChecker, NativeBindings.PlannerAorrtc, "AORRTC");
 
         if (connect?.Success == true && aorrtc?.Success == true)
@@ -77,6 +80,10 @@ internal static class ParallelRacePlanner
         ConnectThresholdRadians = options.ConnectThresholdRadians,
         RandomSeed = options.RandomSeed,
         MaxPathStates = options.MaxPathStates,
+        PrmStarGamma = options.PrmStarGamma,
+        ChompIterations = options.ChompIterations,
+        ChompLearningRate = options.ChompLearningRate,
+        ChompFiniteDifferenceStep = options.ChompFiniteDifferenceStep,
         PlannerId = plannerId,
         PreferManaged = options.PreferManaged,
         ShouldCancel = options.ShouldCancel,

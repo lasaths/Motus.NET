@@ -16,7 +16,8 @@ internal static class NativeOmplPlanner
         int nativePlannerId,
         string plannerLabel)
     {
-        if (!NativeOmpl.IsAvailable || options.PreferManaged || options.ShouldCancel is not null)
+        if (!NativeOmpl.IsAvailable || options.PreferManaged || options.ShouldCancel is not null ||
+            request.Options.Mobility is not null)
             return null;
         if (nativePlannerId >= 0 && NativeOmpl.motus_ompl_planner_available(nativePlannerId) == 0)
             return null;
@@ -25,6 +26,8 @@ internal static class NativeOmplPlanner
         var robot = request.Robot;
         var scene = request.Options.CollisionScene ?? new CollisionScene();
         var space = PlanningPipeline.BuildPlanSpace(request);
+        var checkerAvailabilityFail = PlanningPipeline.ValidateCollisionCheckerAvailability(request.Options, scene, checker);
+        if (checkerAvailabilityFail is not null) return checkerAvailabilityFail;
         var endpointFail = PlanningCollision.ValidateEndpoints(
             space.ToFull(space.Start), space.ToFull(space.Goal), scene, checker,
             request.Options.AttachedBodies is { Count: > 0 });

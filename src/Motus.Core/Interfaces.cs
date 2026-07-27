@@ -49,3 +49,15 @@ public interface ICollisionChecker
         return true;
     }
 }
+
+public interface IBaseFrameCollisionChecker : ICollisionChecker
+{
+    /// <summary>Evaluate collision with an explicit world base pose for mobile-base planners.</summary>
+    bool IsCollisionFree(JointState state, CollisionScene scene, BaseFrame baseFrame);
+}
+
+public interface IConstraintChecker
+{
+    /// <summary>Validate a TCP frame. Position units are meters; orientation tolerances are radians.</summary>
+    bool TryValidate(Frame tcp, out string reason);
+}

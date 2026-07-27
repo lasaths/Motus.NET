@@ -130,4 +130,40 @@ public class UrdfImportTests
     Assert.Equal(6, robot.JointNames.Count);
     Assert.Contains("joint_1", robot.JointNames);
   }
+
+  [Fact]
+  public void XacroLoad_UrDescriptionStyle_TipAndToolLink()
+  {
+    var xacro = FixturePath("ur_description_style/minimal_ur_style.urdf.xacro");
+    var xacroOptions = new XacroOptions
+    {
+      Args = new Dictionary<string, string> { ["prefix"] = "demo_" }
+    };
+    var robot = UrdfRobotLoader.LoadXacro(xacro, new UrdfLoadOptions
+    {
+      BaseLink = "demo_base_link",
+      TipLink = "demo_tool0",
+      ModelName = "mini_ur_style"
+    }, xacroOptions);
+
+    Assert.Equal(2, robot.Preset.AxisCount);
+    Assert.Equal(new[] { "demo_shoulder_pan_joint", "demo_elbow_joint" }, robot.JointNames);
+    Assert.NotNull(robot.CollisionModel?.ToolGeometry);
+    Assert.Equal(CollisionShape.Box, robot.CollisionModel.ToolGeometry.Shape);
+    Assert.Equal("demo_tool0", robot.Preset.ToolFrame.Name);
+  }
+
+  [Fact]
+  public void LoadTreeXacro_UrDescriptionStyle_LoadsFullTree()
+  {
+    var xacro = FixturePath("ur_description_style/minimal_ur_style.urdf.xacro");
+    var tree = UrdfRobotLoader.LoadTreeXacro(xacro, xacroOptions: new XacroOptions
+    {
+      Args = new Dictionary<string, string> { ["prefix"] = "tree_" }
+    });
+
+    Assert.Contains(tree.Links, l => l.Name == "tree_tip_link");
+    Assert.Contains(tree.Links, l => l.Name == "tree_tool0");
+    Assert.Contains(tree.Joints, j => j.Name == "tree_tool0_fixed");
+  }
 }

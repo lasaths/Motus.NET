@@ -3,7 +3,7 @@ using Motus.Core;
 namespace Motus.Geometry;
 
 /// <summary>Sphere-envelope collision checker using link origins.</summary>
-public sealed class SphereCollisionChecker : ICollisionChecker
+public sealed class SphereCollisionChecker : IBaseFrameCollisionChecker
 {
     private readonly IFkSolver _fk;
     private readonly BaseFrame _base;
@@ -45,6 +45,9 @@ public sealed class SphereCollisionChecker : ICollisionChecker
     public bool IsCollisionFree(JointState state, CollisionScene scene) =>
         IsCollisionFree(state.Positions, scene);
 
+    public bool IsCollisionFree(JointState state, CollisionScene scene, BaseFrame baseFrame) =>
+        IsCollisionFree(state.Positions, scene, baseFrame);
+
     public bool IsCollisionFree(IReadOnlyList<double> positions, CollisionScene scene)
     {
         if (_dhChain is not null && positions is double[] q)
@@ -52,6 +55,13 @@ public sealed class SphereCollisionChecker : ICollisionChecker
         if (_dhChain is not null)
             return IsCollisionFreeFast(positions.ToArray(), scene);
         var origins = _fk.ComputeLinkOrigins(positions, _base.Frame);
+        if (!SelfCollisionFree(origins, _radii)) return false;
+        return LinkEnvelopeCollision.SceneObstacleFree(origins, _radii, scene, Intersects);
+    }
+
+    public bool IsCollisionFree(IReadOnlyList<double> positions, CollisionScene scene, BaseFrame baseFrame)
+    {
+        var origins = _fk.ComputeLinkOrigins(positions, baseFrame.Frame);
         if (!SelfCollisionFree(origins, _radii)) return false;
         return LinkEnvelopeCollision.SceneObstacleFree(origins, _radii, scene, Intersects);
     }

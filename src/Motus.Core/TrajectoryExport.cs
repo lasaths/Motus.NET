@@ -86,7 +86,7 @@ public static class TrajectoryExport
         var toolFrame = ResolveExportToolFrame(traj.Robot, options.SessionToolFrame);
         var toolCapabilities = options.ToolCapabilities;
         var diagnostics = options.Diagnostics;
-        var provenance = options.Provenance;
+        var provenance = ResolveProvenance(options);
         var jsonOptions = new JsonSerializerOptions
         {
             WriteIndented = true,
@@ -292,6 +292,19 @@ public static class TrajectoryExport
             qx = tool.Frame.Qx,
             qy = tool.Frame.Qy,
             qz = tool.Frame.Qz
+        };
+    }
+
+    private static PlannerProvenance? ResolveProvenance(TrajectoryExportOptions options)
+    {
+        if (options.Provenance is not null)
+            return options.Provenance;
+        if (!options.Retime || options.Retimer?.Algorithm != RetimerAlgorithm.Totg)
+            return null;
+        return new PlannerProvenance
+        {
+            RetimeAlgorithm = nameof(RetimerAlgorithm.Totg),
+            SettingsHash = TotgMethodRefs.DescribeStack()
         };
     }
 

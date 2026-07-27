@@ -7,6 +7,7 @@ namespace Motus.OMPL.NET;
 public sealed class SamplingPlanner : IPlanner
 {
     private readonly ICollisionChecker? _defaultChecker;
+    private readonly SerialJointChain? _serialChain;
     private readonly SamplingPlannerOptions _options;
 
     public SamplingPlanner(RobotPreset preset, SamplingPlannerOptions? options = null)
@@ -14,7 +15,10 @@ public sealed class SamplingPlanner : IPlanner
 
     public SamplingPlanner(RobotPreset preset, SerialJointChain? serialChain, SamplingPlannerOptions? options = null)
     {
-        _defaultChecker = KinematicsResolver.SupportsModel(preset, serialChain)
+        _serialChain = serialChain;
+        _defaultChecker = Units.IsStewart(preset)
+            ? null
+            : KinematicsResolver.SupportsModel(preset, serialChain)
             ? serialChain is null
                 ? new SphereCollisionChecker(preset)
                 : new SphereCollisionChecker(preset, serialChain)
@@ -45,6 +49,6 @@ public sealed class SamplingPlanner : IPlanner
                     PlanningMessageSeverity.Error)
             });
 
-        return SamplingPlannerRegistry.Dispatch(request, _options, _defaultChecker);
+        return SamplingPlannerRegistry.Dispatch(request, _options, _defaultChecker, _serialChain);
     }
 }

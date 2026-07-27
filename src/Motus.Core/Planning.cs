@@ -26,23 +26,40 @@ public static class PlanningMessageCodes
     public const string EndpointCollision = "planning.endpoint_collision";
     public const string PathCollision = "planning.path_collision";
     public const string InvalidOptions = "planning.invalid_options";
+    public const string InvalidInput = "planning.invalid_input";
     public const string InvalidStart = "planning.invalid_start";
     public const string InvalidGoal = "planning.invalid_goal";
     public const string PlannerUnavailable = "planning.planner_unavailable";
     public const string PlannerFallback = "planning.planner_fallback";
     public const string PlannerWarning = "planning.warning";
+    public const string ConstraintViolation = "planning.constraint_violation";
 }
 
 public sealed class PlanningOptions
 {
+    /// <summary>
+    /// Maximum interpolation step in each planning coordinate. Historical name: radians for revolute
+    /// serial joints; meters for prismatic and Stewart leg-length axes.
+    /// </summary>
     public double MaxJointStepRadians { get; init; } = 0.05;
     public double TimeStepSeconds { get; init; } = 0.04;
     public double MaxJointVelocityRadiansPerSecond { get; init; } = 1.5;
     public CollisionScene? CollisionScene { get; init; }
     public ICollisionChecker? CollisionChecker { get; init; }
     public IReadOnlyList<AttachedBody>? AttachedBodies { get; init; }
+    /// <summary>MoveIt-shaped TCP path constraints; position units are meters, orientation tolerances radians.</summary>
+    public PathConstraints? PathConstraints { get; init; }
+    /// <summary>Optional custom TCP constraint checker. When set, it is evaluated in addition to <see cref="PathConstraints"/>.</summary>
+    public IConstraintChecker? ConstraintChecker { get; init; }
     /// <summary>When set, planners vary only mapped joints; others stay at <see cref="PlanningRequest.Start"/>.</summary>
     public JointIndexMap? GroupMap { get; init; }
+    /// <summary>
+    /// Optional goal/base mobility target. Managed sampling planners currently support
+    /// <see cref="MobilityModel.HolonomicSE2"/> by appending x/y/yaw to the sampled space.
+    /// </summary>
+    public MobilityModel? Mobility { get; init; }
+    /// <summary>Bounds for <see cref="Mobility"/> x/y/yaw; defaults are ±2 m and ±π rad.</summary>
+    public MobilityBounds? MobilityBounds { get; init; }
     public bool RetimeTrajectory { get; init; }
 }
 

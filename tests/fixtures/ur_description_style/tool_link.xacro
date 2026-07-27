@@ -1,0 +1,16 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro">
+  <link name="${prefix}tool0">
+    <collision>
+      <origin xyz="0 0 0.025" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.04 0.04 0.05"/>
+      </geometry>
+    </collision>
+  </link>
+  <joint name="${prefix}tool0_fixed" type="fixed">
+    <parent link="${prefix}tip_link"/>
+    <child link="${prefix}tool0"/>
+    <origin xyz="0 0 ${tool_z}" rpy="0 0 0"/>
+  </joint>
+</robot>

@@ -30,9 +30,14 @@ var robot = UrdfRobotLoader.LoadXacro("robot.urdf.xacro", new UrdfLoadOptions
 });
 ```
 
-Supported: `<xacro:include>`, `<xacro:property>`, simple `<xacro:macro>` / calls, `${name}` substitution.
+Supported in-process subset:
 
-**Not supported:** `$(find pkg)` / rospack — preprocess offline or add files via `SearchPaths`.
+- `<xacro:include filename="relative/or/search/path.xacro"/>`
+- `<xacro:property name="..." value="..."/>`
+- Simple `<xacro:macro name="..." params="...">` definitions and direct `<xacro:name .../>` calls
+- `${arg}` / `${name}` substitution from `XacroOptions.Args`, properties, and macro parameters
+
+**Not supported:** `$(find pkg)` / rospack. `XacroPreprocessor` throws `NotSupportedException` when an include filename contains `$(find ...)`; preprocess offline or add files via `SearchPaths`.
 
 Or expand offline:
 
@@ -62,6 +67,7 @@ Pair names can be robot link names or `CollisionBodies.RobotLink(index)` when ma
 ## Kinematic tree
 
 `UrdfRobotLoader.LoadTree` builds a full `KinematicTree` (all links/joints), including URDF `<mimic joint="..." multiplier="..." offset="..."/>`.
+`UrdfRobotLoader.LoadTreeXacro` expands the supported xacro subset with `XacroPreprocessor.ExpandDocument` and then calls `LoadTree`.
 
 `Load` remains the legacy serial tip path (`ExtractSerialTip` → `SerialJointChain` + optional tip tool offset) and attaches `UrdfRobot.Tree`. Serial tip extract / `Load` still reject mimic joints on the tip path (off-path mimics are fine on the tree).
 
@@ -87,6 +93,7 @@ Reach samples: `ReachSampling.FillTcpPointsInto` (Halton over driver limits, cap
 | `tests/fixtures/ur10e/ur10e.srdf` | Official UR MoveIt SRDF (vendored from `Universal_Robots_ROS2_Driver`) | Pairs with `ur10e.urdf`; do not edit URDF |
 | `tests/fixtures/kr210_r3100_ultra/kr210_r3100_ultra.urdf` | KUKA KR 210 R3100 ultra (meshed) | Run `npm run fetch-assets` in `tools/urdf-viewer` |
 | `tests/fixtures/kr210_r3100_ultra/kr210_r3100_ultra_minimal.urdf` | Same kinematics, no meshes | CI / lightweight import |
+| `tests/fixtures/ur_description_style/minimal_ur_style.urdf.xacro` | Tiny UR-description-style xacro | Include/property/macro/`${arg}` coverage with tip + `tool0` link |
 
 Grasshopper examples mirror these under `Motus.Grasshopper/examples/ur10e/` and `examples/kr210_r3100_ultra/`.
 
