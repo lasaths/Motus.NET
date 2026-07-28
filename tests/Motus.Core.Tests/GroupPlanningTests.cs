@@ -34,6 +34,58 @@ public class GroupPlanningTests
     }
 
     [Fact]
+    public void GroupMap_LocksUnmappedJointsDuringJointLinear()
+    {
+        var limits = Enumerable.Range(0, 7)
+            .Select(_ => JointLimit.Radians(-Math.PI, Math.PI, maxVelocity: 1.0))
+            .ToList();
+        var robot = new RobotModel(
+            new RobotPreset
+            {
+                Manufacturer = RobotManufacturer.Unknown,
+                ModelName = "arm_plus_turntable",
+                Family = "tree",
+                AxisCount = 7,
+                JointLimits = limits
+            },
+            jointNames:
+            [
+                "shoulder_pan_joint",
+                "shoulder_lift_joint",
+                "elbow_joint",
+                "wrist_1_joint",
+                "wrist_2_joint",
+                "wrist_3_joint",
+                "turntable_yaw",
+            ]);
+
+        var start = new JointState([0.0, -1.0, 1.2, -1.6, -1.57, 0.0, 0.0]);
+        var goal = new JointState([0.3, -1.2, 1.4, -1.7, -1.57, 0.2, 1.57]);
+        var group = new PlanningGroup("arm", "base_link", "tool0",
+        [
+            "shoulder_pan_joint",
+            "shoulder_lift_joint",
+            "elbow_joint",
+            "wrist_1_joint",
+            "wrist_2_joint",
+            "wrist_3_joint",
+        ]);
+        var opts = new PlanningOptions
+        {
+            GroupMap = JointIndexMap.Resolve(robot, group),
+            MaxJointStepRadians = 0.05
+        };
+
+        var result = new JointLinearPlanner().Plan(new PlanningRequest(robot, start, goal, opts));
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+        foreach (var pt in result.Trajectory!.Points)
+            Assert.Equal(0.0, pt.JointState.Positions[6], 1e-9);
+        var last = result.Trajectory.Points[^1].JointState.Positions;
+        Assert.Equal(goal.Positions[0], last[0], 6);
+        Assert.Equal(goal.Positions[5], last[5], 6);
+    }
+
+    [Fact]
     public void SrdfGroup_ForGroup_PlanFullManipulator()
     {
         var fixtures = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "fixtures"));

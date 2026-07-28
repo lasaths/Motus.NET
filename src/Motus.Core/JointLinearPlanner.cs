@@ -32,8 +32,14 @@ public sealed class JointLinearPlanner : IPlanner
         if (!goalVal.IsValid) errors.AddRange(goalVal.Errors.Select(e => $"Goal: {e}"));
         if (errors.Count > 0) return PlanningResult.Failed(errors);
 
+        // GroupMap: plan only group joints; locked axes stay at start (same contract as RRT).
+        var map = opts.GroupMap;
+        var planGoal = map is null
+            ? request.Goal
+            : Materialize(map.EmbedGroupState(request.Start, map.ExtractGroupPositions(request.Goal)));
+
         var endpointFail = PlanningCollision.ValidateEndpoints(
-            request.Start, request.Goal, scene, opts.CollisionChecker,
+            request.Start, planGoal, scene, opts.CollisionChecker,
             opts.AttachedBodies is { Count: > 0 });
         if (endpointFail is not null)
             return endpointFail;
@@ -45,12 +51,14 @@ public sealed class JointLinearPlanner : IPlanner
         if (opts.MaxJointVelocityRadiansPerSecond <= 0)
             return PlanningResult.Failed(new[] { "MaxJointVelocityRadiansPerSecond must be positive." });
 
-        var n = robot.Preset.AxisCount;
-        var deltas = new double[n];
+        var startQ = map is null ? request.Start.Positions : map.ExtractGroupPositions(request.Start);
+        var goalQ = map is null ? planGoal.Positions : map.ExtractGroupPositions(planGoal);
+        var dim = startQ.Length;
+        var deltas = new double[dim];
         var maxSteps = 1;
-        for (var i = 0; i < n; i++)
+        for (var i = 0; i < dim; i++)
         {
-            deltas[i] = request.Goal.Positions[i] - request.Start.Positions[i];
+            deltas[i] = goalQ[i] - startQ[i];
             var steps = (int)Math.Ceiling(Math.Abs(deltas[i]) / opts.MaxJointStepRadians);
             if (steps > maxSteps) maxSteps = steps;
         }
@@ -60,11 +68,13 @@ public sealed class JointLinearPlanner : IPlanner
         for (var s = 0; s <= maxSteps; s++)
         {
             var alpha = maxSteps == 0 ? 1.0 : (double)s / maxSteps;
-            var pos = new double[n];
-            for (var i = 0; i < n; i++)
-                pos[i] = request.Start.Positions[i] + alpha * deltas[i];
+            var groupPos = new double[dim];
+            for (var i = 0; i < dim; i++)
+                groupPos[i] = startQ[i] + alpha * deltas[i];
 
-            var state = new JointState(pos);
+            var state = map is null
+                ? new JointState(groupPos)
+                : Materialize(map.EmbedGroupState(request.Start, groupPos));
             var val = state.Validate(robot.Preset.JointLimits);
             if (!val.IsValid)
             {
@@ -75,8 +85,8 @@ public sealed class JointLinearPlanner : IPlanner
             {
                 var maxJointDelta = 0.0;
                 var prev = points[^1].JointState.Positions;
-                for (var j = 0; j < n; j++)
-                    maxJointDelta = Math.Max(maxJointDelta, Math.Abs(pos[j] - prev[j]));
+                for (var j = 0; j < state.Positions.Length; j++)
+                    maxJointDelta = Math.Max(maxJointDelta, Math.Abs(state.Positions[j] - prev[j]));
                 t += Math.Max(opts.TimeStepSeconds, maxJointDelta / opts.MaxJointVelocityRadiansPerSecond);
             }
             points.Add(new TrajectoryPoint(t, state));
@@ -94,6 +104,12 @@ public sealed class JointLinearPlanner : IPlanner
             warnings.Add("JointLinearPlanner: no collision scene.");
         }
 
+        if (map is not null)
+            warnings.Add($"JointLinearPlanner: GroupMap active — {map.LockedFullIndices.Count} joint(s) locked at start.");
+
         return PlanningResult.Succeeded(trajectory, warnings);
     }
+
+    private static JointState Materialize(JointState scratch) =>
+        new(scratch.Positions.ToArray());
 }
