@@ -73,7 +73,8 @@ Host-agnostic library (Grasshopper, CLI, services). MoveIt-shaped seams without 
 - [x] Stewart/Gough (`Family=stewart`) remains a parallel sibling stack with meters-valued leg lengths, collision validation, and managed stroke-space sampling.
 - [x] Full-tree / group planning uses `PlanningGroup` + `JointIndexMap` over full driver names; tip-only FK/IK and branch/finger group planning are documented as distinct contracts.
 - [x] Holonomic SE(2) managed sampling appends x/y/yaw with explicit local bounds and per-sample base-frame collision hooks.
-- [x] Legged full-driver Plan is an adapter over `LeggedGait.TryBuild`: SSM/collision validation only, no gait reimplementation.
+- [x] Legged full-driver Plan adapter (`ValidateForPlan`) over `TryBuild` output: SSM/collision validation only.
+- [x] Legged Motus Plan synthesis (`LeggedGait.PlanBodyPath`): body-path polyline → `TryBuild` + hard SSM `ValidateForPlan` (Walk remains rich UI).
 
 ## Related repos
 

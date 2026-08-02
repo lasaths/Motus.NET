@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-08-02
+
+### Added
+
+- `LeggedGait.PlanBodyPath` — Motus Plan gait synthesis entry: body-path polyline → `TryBuild` (default `PathFollowBodyPose`) → `ValidateForPlan` (hard SSM + optional collision). Rebuilds full-driver `ToPreset` when `AxisCount != DriverCount`. Shared Walk defaults (`DefaultSpeedMetersPerSecond` / step / lift / stance).
+- Honesty Status warning `PlanBodyPathHonestyWarning` (Family=legged body-path ≠ TCP LIN; Q full-driver radians ≠ UR MoveJ).
+
+### Changed
+
+- `ValidateForPlan` remains adapter-only; `PlanBodyPath` omits the adapter-only warning after synthesis.
+- `docs/METHODS.md` / roadmap: Plan body-path synthesis in-scope; Walk stays rich UI.
+
 ## [0.13.2] - 2026-07-28
 
 ### Added
