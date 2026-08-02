@@ -427,8 +427,30 @@ public static class LeggedGait
         IBodyPoseSolver? bodyPose = null,
         TerrainHeight? terrain = null,
         PlanningOptions? options = null,
+        double minStaticStabilityMarginMeters = 0.0) =>
+        PlanBodyPath(
+            mechanism, pathXy, out _, model, speed, stepLength, stepHeight,
+            hipStance, femurStance, tibiaStance, bodyPose, terrain, options,
+            minStaticStabilityMarginMeters);
+
+    /// <inheritdoc cref="PlanBodyPath(LeggedMechanism, IReadOnlyList{Vec3}, RobotModel?, double, double, double, double, double, double, IBodyPoseSolver?, TerrainHeight?, PlanningOptions?, double)"/>
+    public static PlanningResult PlanBodyPath(
+        LeggedMechanism mechanism,
+        IReadOnlyList<Vec3> pathXy,
+        out Result? gait,
+        RobotModel? model = null,
+        double speed = DefaultSpeedMetersPerSecond,
+        double stepLength = DefaultStepLengthMeters,
+        double stepHeight = DefaultStepHeightMeters,
+        double hipStance = DefaultHipStanceRadians,
+        double femurStance = DefaultFemurStanceRadians,
+        double tibiaStance = DefaultTibiaStanceRadians,
+        IBodyPoseSolver? bodyPose = null,
+        TerrainHeight? terrain = null,
+        PlanningOptions? options = null,
         double minStaticStabilityMarginMeters = 0.0)
     {
+        gait = null;
         if (mechanism is null)
         {
             return PlanningResult.Failed(new[]
@@ -477,7 +499,7 @@ public static class LeggedGait
         if (!TryBuild(
                 mechanism, bodyPose, pathXy, speed, stepLength, stepHeight,
                 hipStance, femurStance, tibiaStance, planModel,
-                out var gait, out var error, terrain))
+                out gait, out var error, terrain))
         {
             return PlanningResult.Failed(new[]
             {
