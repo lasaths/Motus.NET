@@ -4,7 +4,8 @@ namespace Motus.Geometry;
 
 /// <summary>
 /// Foot-target gait: duty-factor swing schedule, planted stance contacts, per-leg <see cref="ILegIkSolver"/>.
-/// Preview / TreeFK only — not Motus Plan. Path is a polyline in XY (arc-length); optional terrain height at (x,y).
+/// Path is a polyline in XY (arc-length); optional terrain height at (x, y).
+/// Motus Plan entry: <see cref="PlanBodyPath"/>; adapter-only gate: <see cref="ValidateForPlan"/>.
 /// </summary>
 /// <remarks>
 /// <para><b>Gait timing:</b> Song &amp; Waldron DOI <see cref="LeggedMethodRefs.SongWaldron1987Doi"/> via
@@ -15,6 +16,24 @@ namespace Motus.Geometry;
 /// </remarks>
 public static class LeggedGait
 {
+    /// <summary>Walk / Plan default body speed (m/s).</summary>
+    public const double DefaultSpeedMetersPerSecond = 0.06;
+    /// <summary>Walk / Plan default step length along path (m).</summary>
+    public const double DefaultStepLengthMeters = 0.04;
+    /// <summary>Walk / Plan default swing foot lift (m).</summary>
+    public const double DefaultStepHeightMeters = 0.02;
+    /// <summary>Default coxa stance offset (rad).</summary>
+    public const double DefaultHipStanceRadians = 7.5 * Math.PI / 180.0;
+    /// <summary>Default femur stance (rad).</summary>
+    public const double DefaultFemurStanceRadians = 30.0 * Math.PI / 180.0;
+    /// <summary>Default tibia stance (rad).</summary>
+    public const double DefaultTibiaStanceRadians = -30.0 * Math.PI / 180.0;
+
+    /// <summary>Honesty line for Motus Plan Status (no DOIs — those stay on <see cref="Result.MethodProvenance"/>).</summary>
+    public const string PlanBodyPathHonestyWarning =
+        "Family=legged body-path: gait synthesis (Song–Waldron + McGhee–Frank), not TCP LIN; " +
+        "Q = full-driver radians — not UR MoveJ.";
+
     /// <summary>World ground height (m) at horizontal (x, y). Flat ground = always 0.</summary>
     public delegate double TerrainHeight(double x, double y);
 
@@ -386,13 +405,119 @@ public static class LeggedGait
     }
 
     /// <summary>
+    /// Motus Plan entry: synthesize a full-driver gait from a body-path polyline, then run
+    /// <see cref="ValidateForPlan"/> (hard SSM + optional collision). Plane/path orientation is unused —
+    /// XY origins drive arc-length; yaw follows path tangent.
+    /// </summary>
+    /// <remarks>
+    /// When <paramref name="model"/> is null or <c>AxisCount != DriverCount</c>, builds a full-driver
+    /// <see cref="LeggedMechanism.ToPreset"/> model. Matching AxisCount with non-legged Family fails named.
+    /// Default body pose is <see cref="PathFollowBodyPose"/> at <see cref="LeggedMechanism.NominalBodyClearance"/>.
+    /// </remarks>
+    public static PlanningResult PlanBodyPath(
+        LeggedMechanism mechanism,
+        IReadOnlyList<Vec3> pathXy,
+        RobotModel? model = null,
+        double speed = DefaultSpeedMetersPerSecond,
+        double stepLength = DefaultStepLengthMeters,
+        double stepHeight = DefaultStepHeightMeters,
+        double hipStance = DefaultHipStanceRadians,
+        double femurStance = DefaultFemurStanceRadians,
+        double tibiaStance = DefaultTibiaStanceRadians,
+        IBodyPoseSolver? bodyPose = null,
+        TerrainHeight? terrain = null,
+        PlanningOptions? options = null,
+        double minStaticStabilityMarginMeters = 0.0)
+    {
+        if (mechanism is null)
+        {
+            return PlanningResult.Failed(new[]
+            {
+                new PlanningMessage(
+                    PlanningMessageCodes.InvalidInput,
+                    "LeggedMechanism is null.",
+                    PlanningMessageSeverity.Error)
+            });
+        }
+
+        if (mechanism.Validate() is { } mechErr)
+        {
+            return PlanningResult.Failed(new[]
+            {
+                new PlanningMessage(
+                    PlanningMessageCodes.InvalidInput,
+                    mechErr,
+                    PlanningMessageSeverity.Error)
+            });
+        }
+
+        RobotModel planModel;
+        if (model is null || model.Preset.AxisCount != mechanism.DriverCount)
+        {
+            planModel = new RobotModel(mechanism.ToPreset());
+        }
+        else if (!Units.IsLegged(model.Preset))
+        {
+            return PlanningResult.Failed(new[]
+            {
+                new PlanningMessage(
+                    PlanningMessageCodes.InvalidOptions,
+                    $"LeggedGait.PlanBodyPath requires RobotPreset.Family='{Units.LeggedFamily}' " +
+                    $"(got '{model.Preset.Family ?? ""}').",
+                    PlanningMessageSeverity.Error)
+            });
+        }
+        else
+        {
+            planModel = model;
+        }
+
+        bodyPose ??= new PathFollowBodyPose(clearanceMeters: mechanism.NominalBodyClearance);
+
+        if (!TryBuild(
+                mechanism, bodyPose, pathXy, speed, stepLength, stepHeight,
+                hipStance, femurStance, tibiaStance, planModel,
+                out var gait, out var error, terrain))
+        {
+            return PlanningResult.Failed(new[]
+            {
+                new PlanningMessage(
+                    PlanningMessageCodes.InvalidInput,
+                    string.IsNullOrWhiteSpace(error) ? "LeggedGait.TryBuild failed." : error,
+                    PlanningMessageSeverity.Error)
+            });
+        }
+
+        var validated = ValidateForPlanCore(gait!, options, minStaticStabilityMarginMeters, adapterOnly: false);
+        if (!validated.Success)
+            return validated;
+
+        var warnings = new List<string>();
+        if (!string.IsNullOrWhiteSpace(gait!.Warning))
+            warnings.Add(gait.Warning);
+        warnings.Add(PlanBodyPathHonestyWarning);
+        warnings.Add($"legged-gait/PlanBodyPath; {bodyPose.MethodId}; flat Z=0 unless terrain supplied.");
+        // DOIs stay on gait.MethodProvenance / METHODS.md — not Status.
+        _ = gait.MethodProvenance;
+        return PlanningResult.Succeeded(gait.Trajectory, warnings);
+    }
+
+    /// <summary>
     /// Adapter-only Plan gate for an already-built legged gait trajectory. Does not synthesize or modify gait;
     /// it validates SSM and optional collision, then returns a <see cref="PlanningResult"/> for shared Status UI.
+    /// Prefer <see cref="PlanBodyPath"/> when Motus Plan should synthesize gait from a body path.
     /// </summary>
     public static PlanningResult ValidateForPlan(
         Result gait,
         PlanningOptions? options = null,
-        double minStaticStabilityMarginMeters = 0.0)
+        double minStaticStabilityMarginMeters = 0.0) =>
+        ValidateForPlanCore(gait, options, minStaticStabilityMarginMeters, adapterOnly: true);
+
+    private static PlanningResult ValidateForPlanCore(
+        Result gait,
+        PlanningOptions? options,
+        double minStaticStabilityMarginMeters,
+        bool adapterOnly)
     {
         if (gait is null)
         {
@@ -443,7 +568,8 @@ public static class LeggedGait
         var warnings = new List<string>();
         if (!string.IsNullOrWhiteSpace(gait.Warning))
             warnings.Add(gait.Warning);
-        warnings.Add("LeggedGait.ValidateForPlan: adapter-only validation; gait generation unchanged.");
+        if (adapterOnly)
+            warnings.Add("LeggedGait.ValidateForPlan: adapter-only validation; gait generation unchanged.");
         return PlanningResult.Succeeded(gait.Trajectory, warnings);
     }
 

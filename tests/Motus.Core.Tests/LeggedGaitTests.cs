@@ -764,7 +764,178 @@ public class LeggedGaitTests
         Assert.Equal("right-middle/tibia", mech.TipLinkName);
     }
 
+    // --- PlanBodyPath (Motus Plan gait synthesis) ---
+
+    [Fact]
+    public void PlanBodyPath_Hex_18Dof_Success()
+    {
+        var mech = LeggedLayout.HexMithi(0.12, 0.06, 0.17, 0.19, 0.12).ToMechanism();
+        var path = new[] { new Vec3(0, 0, 0), new Vec3(0.4, 0, 0) };
+        var plan = LeggedGait.PlanBodyPath(mech, path);
+        Assert.True(plan.Success, string.Join("; ", plan.Errors));
+        Assert.NotNull(plan.Trajectory);
+        Assert.True(Units.IsLegged(plan.Trajectory!.Robot.Preset));
+        Assert.Equal(mech.DriverCount, plan.Trajectory.Robot.Preset.AxisCount);
+        Assert.Equal(18, plan.Trajectory.Robot.Preset.AxisCount);
+        Assert.True(plan.Trajectory.Points.Count >= 2);
+        Assert.Contains(plan.Warnings, w => w.Contains(LeggedGait.PlanBodyPathHonestyWarning, StringComparison.Ordinal));
+        Assert.Contains(plan.Warnings, w => w.Contains("PathFollow", StringComparison.Ordinal));
+        Assert.DoesNotContain(plan.Warnings, w => w.Contains("adapter-only", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(plan.Warnings, w => w.Contains("doi:", StringComparison.OrdinalIgnoreCase));
+        Assert.True(double.IsFinite(plan.Trajectory.Points[0].JointState.Positions[0]));
+    }
+
+    [Fact]
+    public void PlanBodyPath_ShortPath_FailsNamed()
+    {
+        var mech = LeggedLayout.HexMithi(0.12, 0.06, 0.17, 0.19, 0.12).ToMechanism();
+        var path = new[] { new Vec3(0, 0, 0), new Vec3(0.01, 0, 0) };
+        var plan = LeggedGait.PlanBodyPath(mech, path);
+        Assert.False(plan.Success);
+        Assert.Contains(plan.Messages, m => m.Code == PlanningMessageCodes.InvalidInput);
+        Assert.Contains(plan.Errors, e => e.Contains("short", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void PlanBodyPath_RebuildsWhenAxisCountMismatchesTipPath()
+    {
+        var mech = LeggedLayout.HexMithi(0.12, 0.06, 0.17, 0.19, 0.12).ToMechanism();
+        var tipPreset = mech.ToPreset();
+        tipPreset = new RobotPreset
+        {
+            Manufacturer = tipPreset.Manufacturer,
+            ModelName = tipPreset.ModelName,
+            Family = Units.LeggedFamily,
+            AxisCount = 3,
+            JointLimits = tipPreset.JointLimits.Take(3).ToList(),
+            BaseFrame = tipPreset.BaseFrame,
+            ToolFrame = tipPreset.ToolFrame,
+        };
+        var tipModel = new RobotModel(tipPreset);
+        var path = new[] { new Vec3(0, 0, 0), new Vec3(0.35, 0, 0) };
+        var plan = LeggedGait.PlanBodyPath(mech, path, model: tipModel);
+        Assert.True(plan.Success, string.Join("; ", plan.Errors));
+        Assert.Equal(18, plan.Trajectory!.Robot.Preset.AxisCount);
+    }
+
+    [Fact]
+    public void PlanBodyPath_WrongFamily_FailsNamed()
+    {
+        var mech = LeggedLayout.HexMithi(0.12, 0.06, 0.17, 0.19, 0.12).ToMechanism();
+        var limits = Enumerable.Range(0, 18).Select(_ => new JointLimit(-Math.PI, Math.PI, Math.PI, Math.PI * 2)).ToList();
+        var serial = new RobotPreset
+        {
+            Manufacturer = RobotManufacturer.Unknown,
+            ModelName = "fake-serial",
+            Family = "serial",
+            AxisCount = 18,
+            JointLimits = limits,
+            BaseFrame = BaseFrame.Identity,
+            ToolFrame = ToolFrame.Identity,
+        };
+        var path = new[] { new Vec3(0, 0, 0), new Vec3(0.35, 0, 0) };
+        var plan = LeggedGait.PlanBodyPath(mech, path, model: new RobotModel(serial));
+        Assert.False(plan.Success);
+        Assert.Contains(plan.Messages, m => m.Code == PlanningMessageCodes.InvalidOptions);
+        Assert.Contains(plan.Errors, e => e.Contains(Units.LeggedFamily, StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void PlanBodyPath_SsmBelowThreshold_HardFails()
+    {
+        var mech = LeggedLayout.HexMithi(0.12, 0.06, 0.17, 0.19, 0.12).ToMechanism();
+        var path = new[] { new Vec3(0, 0, 0), new Vec3(0.3, 0, 0) };
+        var plan = LeggedGait.PlanBodyPath(mech, path, minStaticStabilityMarginMeters: 10.0);
+        Assert.False(plan.Success);
+        Assert.Contains(plan.Messages, m => m.Code == PlanningMessageCodes.ConstraintViolation);
+        Assert.Contains(plan.Errors, e => e.Contains("SSM", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void PlanBodyPath_CollisionOptions_PathCollisionNamed()
+    {
+        var mech = LeggedLayout.HexMithi(0.12, 0.06, 0.17, 0.19, 0.12).ToMechanism();
+        var path = new[] { new Vec3(0, 0, 0), new Vec3(0.3, 0, 0) };
+        var options = new PlanningOptions
+        {
+            CollisionScene = new CollisionScene(new[] { CollisionObject.Sphere("block", Frame.Identity, 1.0) }),
+            CollisionChecker = new AlwaysCollidingChecker(),
+        };
+        var plan = LeggedGait.PlanBodyPath(mech, path, options: options);
+        Assert.False(plan.Success);
+        Assert.Contains(plan.Messages, m =>
+            m.Code is PlanningMessageCodes.PathCollision or PlanningMessageCodes.EndpointCollision);
+    }
+
+    [Fact]
+    public void PlanBodyPath_Deterministic_IdenticalTwice()
+    {
+        var mech = LeggedLayout.HexMithi(0.12, 0.06, 0.17, 0.19, 0.12).ToMechanism();
+        var path = new[] { new Vec3(0, 0, 0), new Vec3(0.35, 0.1, 0) };
+        var a = LeggedGait.PlanBodyPath(mech, path);
+        var b = LeggedGait.PlanBodyPath(mech, path);
+        Assert.True(a.Success && b.Success, string.Join("; ", a.Errors.Concat(b.Errors)));
+        Assert.Equal(a.Trajectory!.Points.Count, b.Trajectory!.Points.Count);
+        for (var i = 0; i < a.Trajectory.Points.Count; i++)
+        {
+            var qa = a.Trajectory.Points[i].JointState.Positions;
+            var qb = b.Trajectory.Points[i].JointState.Positions;
+            Assert.Equal(qa.Length, qb.Length);
+            for (var j = 0; j < qa.Length; j++)
+                Assert.InRange(qa[j] - qb[j], -Tol, Tol);
+        }
+    }
+
+    [Fact]
+    public void PlanBodyPath_CyclesCap_StepTooSmall_FailsNamed()
+    {
+        var mech = LeggedLayout.HexMithi(0.12, 0.06, 0.17, 0.19, 0.12).ToMechanism();
+        var path = new[] { new Vec3(0, 0, 0), new Vec3(1.0, 0, 0) };
+        var plan = LeggedGait.PlanBodyPath(mech, path, stepLength: 0.001);
+        Assert.False(plan.Success);
+        Assert.Contains(plan.Errors, e => e.Contains("too small", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void PlanBodyPath_NaNPath_FailsNamed()
+    {
+        var mech = LeggedLayout.HexMithi(0.12, 0.06, 0.17, 0.19, 0.12).ToMechanism();
+        var path = new[] { new Vec3(0, 0, 0), new Vec3(double.NaN, 0, 0) };
+        var plan = LeggedGait.PlanBodyPath(mech, path);
+        Assert.False(plan.Success);
+        Assert.Contains(plan.Messages, m => m.Code == PlanningMessageCodes.InvalidInput);
+    }
+
+    [Fact]
+    public void TipPath_LeggedJointGoals_StillJointLinear()
+    {
+        var mech = LeggedLayout.HexMithi(0.12, 0.06, 0.17, 0.19, 0.12).ToMechanism();
+        var tipLimits = Enumerable.Range(0, 3).Select(_ => new JointLimit(-Math.PI, Math.PI, Math.PI, Math.PI * 2)).ToList();
+        var tipPreset = new RobotPreset
+        {
+            Manufacturer = RobotManufacturer.Unknown,
+            ModelName = "tip",
+            Family = Units.LeggedFamily,
+            AxisCount = 3,
+            JointLimits = tipLimits,
+            BaseFrame = BaseFrame.Identity,
+            ToolFrame = ToolFrame.Identity,
+        };
+        var tipModel = new RobotModel(tipPreset);
+        var start = new JointState(new[] { 0.0, 0.3, -0.3 });
+        var goal = new JointState(new[] { 0.1, 0.35, -0.25 });
+        var result = new JointLinearPlanner().Plan(new PlanningRequest(tipModel, start, goal, new PlanningOptions()));
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+        Assert.Equal(3, result.Trajectory!.Robot.Preset.AxisCount);
+        Assert.True(Units.IsLegged(result.Trajectory.Robot.Preset));
+    }
+
     // --- Helper ---
+
+    private sealed class AlwaysCollidingChecker : ICollisionChecker
+    {
+        public bool IsCollisionFree(JointState state, CollisionScene scene) => false;
+    }
 
     private static void AssertVec3Near(Vec3 actual, Vec3 expected, double tol, string msg = "")
     {
