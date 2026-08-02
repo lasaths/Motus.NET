@@ -167,4 +167,52 @@ public class UrdfWriterTests
                 Directory.Delete(dir, recursive: true);
         }
     }
+
+    [Fact]
+    public void TryParse_RoundTrip_PreservesTopologyAndMimic()
+    {
+        var gripper = RobotDescription.Assemble(
+            "grip",
+            [
+                new UrdfLink("palm", visuals: [UrdfGeometry.Box(0.08, 0.04, 0.02)]),
+                new UrdfLink("L", visuals: [UrdfGeometry.Box(0.02, 0.01, 0.04)]),
+                new UrdfLink("R", visuals: [UrdfGeometry.Box(0.02, 0.01, 0.04)]),
+            ],
+            [
+                new UrdfJoint("j_left", "revolute", "palm", "L", 0, 0, 0, 0, 0, 1, 0, 0.8),
+                new UrdfJoint("j_right", "revolute", "palm", "R", 0, 0, 0, 0, 0, 1, 0, 0.8,
+                    mimicJoint: "j_left", mimicMultiplier: -1),
+            ],
+            tipLink: "palm");
+
+        var xml = UrdfWriter.ToXml(gripper, inlineMeshes: true);
+        Assert.True(UrdfWriter.TryParse(xml, out var round, out var errors), string.Join("; ", errors));
+        Assert.NotNull(round);
+        Assert.Equal("grip", round!.Name);
+        Assert.Equal("palm", round.TipLink);
+        Assert.Equal(3, round.Links.Count);
+        Assert.Equal(2, round.Joints.Count);
+        Assert.Equal("j_left", round.Joints.Single(j => j.MimicJoint is null).Name);
+        Assert.Equal("j_left", round.Joints.Single(j => j.MimicJoint is not null).MimicJoint);
+    }
+
+    [Fact]
+    public void TryParse_InlineMesh_RoundTripVertices()
+    {
+        var verts = new[] { new[] { 0.0, 0.0, 0.0 }, new[] { 1.0, 0.0, 0.0 }, new[] { 0.0, 1.0, 0.0 } };
+        var indices = new[] { 0, 1, 2 };
+        var desc = RobotDescription.Assemble(
+            "mesh_bot",
+            [new UrdfLink("base_link", visuals: [UrdfGeometry.Mesh(verts, indices)])],
+            []);
+
+        var xml = UrdfWriter.ToXml(desc, inlineMeshes: true);
+        Assert.Contains("motus_vertices", xml, StringComparison.Ordinal);
+        Assert.True(UrdfWriter.TryParse(xml, out var round, out var errors), string.Join("; ", errors));
+        var mesh = round!.Links[0].Visuals[0];
+        Assert.Equal(UrdfGeometryKind.Mesh, mesh.Kind);
+        Assert.Equal(3, mesh.Vertices!.Count);
+        Assert.Equal(3, mesh.Indices!.Count);
+        Assert.Equal(1.0, mesh.Vertices[1][0], 9);
+    }
 }

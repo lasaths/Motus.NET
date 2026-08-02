@@ -18,14 +18,30 @@ public sealed class CartesianGoalSolver
         }
 
         var ik = KinematicsResolver.CreateInverseKinematics(robot.Preset, chain);
+        var numerical = ik as NumericalInverseKinematics;
         JointState? best = null;
         var bestDelta = double.MaxValue;
         JointState? reference = null;
+        string? lastFailure = null;
         foreach (var seed in seeds)
         {
             reference ??= seed;
-            if (!ik.TrySolve(goal, seed, out var solution))
+            JointState solution;
+            if (numerical is not null)
+            {
+                var detailed = numerical.TrySolveDetailed(goal, seed);
+                if (!detailed.Success)
+                {
+                    lastFailure = PreferFailureReason(lastFailure, detailed.FailureReason);
+                    continue;
+                }
+
+                solution = detailed.Solution;
+            }
+            else if (!ik.TrySolve(goal, seed, out solution))
+            {
                 continue;
+            }
 
             var delta = MaxAbsJointDelta(reference, solution);
             if (delta >= bestDelta)
@@ -38,10 +54,22 @@ public sealed class CartesianGoalSolver
                 break;
         }
 
-        return best is not null
-            ? CartesianReachResult.Succeeded(best)
-            : CartesianReachResult.Failed(
-                "Goal TCP is not reachable (IK failed). Wire Motus TCP Pose for valid orientation.");
+        if (best is not null)
+            return CartesianReachResult.Succeeded(best);
+
+        var reason = lastFailure ?? "failed";
+        return CartesianReachResult.Failed(
+            $"Goal TCP is not reachable (IK {reason}). Wire Motus TCP Pose for valid orientation.");
+    }
+
+    private static string PreferFailureReason(string? current, string? next)
+    {
+        if (string.IsNullOrEmpty(next)) return current ?? NumericalIkFailureReasons.NoConvergence;
+        // Prefer named structural failures over generic non-convergence when any seed hit them.
+        if (next == NumericalIkFailureReasons.InvalidInput ||
+            next == NumericalIkFailureReasons.SingularJacobian)
+            return next;
+        return current ?? next;
     }
 
     private static double MaxAbsJointDelta(JointState a, JointState b)

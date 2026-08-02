@@ -26,6 +26,24 @@ public class ToolParameterBindingTests
         Assert.Equal(0.8, q[1], 9);
         Assert.Equal(0, q[0]);
     }
+
+    [Fact]
+    public void WidthBinding_CustomCap_ApplyIntoExactJoint()
+    {
+        var caps = ToolCapabilities.WidthSchema(0, 0.12, 0.12);
+        var binding = ToolParameterBinding.WidthBinding("j_jaw", openWidthMeters: 0.12, closedDriverValue: 1.0);
+        var names = new[] { "j_other", "j_jaw" };
+        var q = new double[2];
+        var n = ToolParameterBinding.ApplyInto(
+            caps,
+            new EndEffectorState(new Dictionary<string, double> { ["width"] = 0 }),
+            names,
+            q,
+            [binding]);
+        Assert.Equal(1, n);
+        Assert.Equal(1.0, q[1], 9);
+        Assert.Equal(0, q[0]);
+    }
 }
 
 public class MobilityModelTests

@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-08-02
+
+### Added
+
+- `ToolCapabilities.WidthSchema` — custom jaw-width Cap (meters) for hosts beyond Robotiq2F85.
+- `ToolParameterBinding.WidthBinding` — Cap-agnostic width→driver `ToolDriverBinding` factory.
+- `UrdfWriter.TryParse` + `ToXml(..., inlineMeshes: true)` — RobotDescription round-trip with optional inline mesh payloads (GH Tool Internalise); rejects non-finite numerics and meshes over `MaxInlineMeshVertices`.
+- `CartesianGoalSolver` surfaces `NumericalIkFailureReasons` (`NoConvergence` / `SingularJacobian` / `InvalidInput`) in reach Status when numerical IK is used.
+
 ## [0.14.0] - 2026-08-02
 
 ### Added
