@@ -96,6 +96,14 @@ public sealed class CartesianLinearPathPlanner
             // discontinuous IK branch — that produces wrist/elbow flips that look like
             // "wild" robot paths even when TCP is linear.
             JointState? solvedJoint = null;
+            if (_ik.TrySolveNear(interpPose, currentJoint, out var nearJoint))
+            {
+                nearJoint = UnwrapNear(currentJoint, nearJoint);
+                if (PoseMatches(interpPose.Tcp, nearJoint) &&
+                    MaxJointDelta(currentJoint, nearJoint) <= MaxJointJumpRadians)
+                    solvedJoint = nearJoint;
+            }
+
             var attemptSeed = currentJoint;
             for (var seedAttempts = 0; seedAttempts < options.MaxIkAttemptsPerStep && solvedJoint is null; seedAttempts++)
             {

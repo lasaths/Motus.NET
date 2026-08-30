@@ -31,6 +31,25 @@ public static class ToolParameterBinding
     }
 
     /// <summary>
+    /// Build a width→driver binding from Cap open width (m) and closed driver value (rad or m).
+    /// Cap-agnostic; Robotiq defaults match <see cref="Robotiq2F85OpenWidthMeters"/> /
+    /// <see cref="Robotiq2F85ClosedDriverRadians"/>.
+    /// </summary>
+    public static ToolDriverBinding WidthBinding(
+        string driverJoint,
+        double openWidthMeters,
+        double closedDriverValue)
+    {
+        if (string.IsNullOrWhiteSpace(driverJoint))
+            throw new ArgumentException("Driver joint name is required.", nameof(driverJoint));
+        if (!(openWidthMeters > 1e-12) || double.IsNaN(openWidthMeters) || double.IsInfinity(openWidthMeters))
+            throw new ArgumentException("Open width must be a positive finite value.", nameof(openWidthMeters));
+        if (double.IsNaN(closedDriverValue) || double.IsInfinity(closedDriverValue))
+            throw new ArgumentException("Closed driver value must be finite.", nameof(closedDriverValue));
+        return new ToolDriverBinding("width", driverJoint.Trim(), openWidthMeters, closedDriverValue);
+    }
+
+    /// <summary>
     /// True when this driver joint is the Robotiq 2F-85 primary knuckle (width maps here).
     /// </summary>
     public static bool IsRobotiq2F85PrimaryDriver(string jointName)

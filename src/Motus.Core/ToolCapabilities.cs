@@ -84,6 +84,23 @@ public sealed class ToolCapabilities
     });
 
     /// <summary>
+    /// Custom jaw-width Cap schema (meters). Used by GH Cap=<c>Custom</c>; Tool State / export use <c>width</c>.
+    /// </summary>
+    public static ToolCapabilities WidthSchema(double minMeters, double maxMeters, double defaultMeters)
+    {
+        if (!(maxMeters > minMeters))
+            throw new ArgumentException("width max must be greater than min.", nameof(maxMeters));
+        if (double.IsNaN(minMeters) || double.IsInfinity(minMeters) ||
+            double.IsNaN(maxMeters) || double.IsInfinity(maxMeters) ||
+            double.IsNaN(defaultMeters) || double.IsInfinity(defaultMeters))
+            throw new ArgumentException("width bounds must be finite.");
+        return new ToolCapabilities(new[]
+        {
+            new ToolParameter("width", "m", minMeters, maxMeters, defaultMeters)
+        });
+    }
+
+    /// <summary>
     /// Declarative Wave-3 <c>width</c>→driver binding for the bundled Robotiq 2F-85 URDF, whose primary
     /// actuated knuckle joint is named exactly <c>robotiq_left_knuckle</c> (URDF mimic joints follow it).
     /// </summary>

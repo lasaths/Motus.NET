@@ -91,4 +91,40 @@ public class CartesianGoalSolverTests
             homeTcp.Tcp.Qw, homeTcp.Tcp.Qx, homeTcp.Tcp.Qy, homeTcp.Tcp.Qz));
         Assert.True(ik.TrySolve(nudged, home, out _), "1cm TCP nudge from home should be IK-able");
     }
+
+    [Fact]
+    public void NonUrSerial_FarGoal_StatusNamesNumericalIkReason()
+    {
+        var tree = SerialKinematicTrees.FromLengths(new[] { 0.3, 0.3, 0.2, 0.15, 0.1, 0.08 }, rail: false);
+        var tip = tree.ExtractSerialTip("base_link", "tool0");
+        var limits = new List<JointLimit>(tip.Chain.Joints.Length);
+        foreach (var name in tip.JointNames)
+        {
+            var j = tree.Joints.First(jj => string.Equals(jj.Name, name, StringComparison.OrdinalIgnoreCase));
+            limits.Add(new JointLimit(j.Lower, j.Upper, Math.PI, Math.PI * 2));
+        }
+
+        var preset = new RobotPreset
+        {
+            Manufacturer = RobotManufacturer.Unknown,
+            ModelName = "serial_arm",
+            Family = "serial",
+            AxisCount = tip.Chain.Joints.Length,
+            JointLimits = limits,
+            BaseFrame = BaseFrame.Identity,
+            ToolFrame = ToolFrame.Identity,
+        };
+        var robot = new RobotModel(preset);
+        var home = new JointState(new double[preset.AxisCount]);
+        var far = new CartesianPose(new Frame(50, 0, 0));
+
+        var result = new CartesianGoalSolver().TryReach(
+            robot, far, CartesianGoalSolver.EnumerateDefaultSeeds(home, robot), tip.Chain);
+
+        Assert.False(result.Success);
+        Assert.Contains(result.Errors, e =>
+            e.Contains("IK NoConvergence", StringComparison.Ordinal) ||
+            e.Contains("IK SingularJacobian", StringComparison.Ordinal) ||
+            e.Contains("IK InvalidInput", StringComparison.Ordinal));
+    }
 }

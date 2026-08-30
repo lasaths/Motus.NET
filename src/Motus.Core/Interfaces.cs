@@ -18,6 +18,16 @@ public interface IForwardKinematics
 public interface IInverseKinematics
 {
     bool TrySolve(CartesianPose target, JointState seed, out JointState solution);
+
+    /// <summary>
+    /// Seed-local IK (stay on the current configuration branch). Return false when
+    /// unimplemented; callers fall back to <see cref="TrySolve"/>.
+    /// </summary>
+    bool TrySolveNear(CartesianPose target, JointState seed, out JointState solution)
+    {
+        solution = seed;
+        return false;
+    }
 }
 
 public interface ICollisionChecker

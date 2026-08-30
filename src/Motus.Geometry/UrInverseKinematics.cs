@@ -86,6 +86,47 @@ public sealed class UrInverseKinematics : IInverseKinematics
         return false;
     }
 
+    /// <summary>
+    /// Closest verified analytic solution to <paramref name="seed"/>, then seed-only numerical.
+    /// Skips the multi-start numerical hunt used by <see cref="TrySolve"/>.
+    /// </summary>
+    public bool TrySolveNear(CartesianPose target, JointState seed, out JointState solution)
+    {
+        var targetM = Transforms.FromFrame(target.Tcp);
+        var flangeM = FlangeTarget(targetM);
+
+        JointState? best = null;
+        var bestDelta = double.MaxValue;
+        foreach (var candidate in UrAnalyticInverseKinematics.EnumerateSolutions(_chain, flangeM, _limits))
+        {
+            if (!Verify(target, candidate)) continue;
+            var delta = MaxJointDelta(seed, candidate);
+            if (delta >= bestDelta) continue;
+            bestDelta = delta;
+            best = candidate;
+        }
+
+        if (best is not null && bestDelta <= 2.0)
+        {
+            solution = UnwrapNear(seed, best);
+            return true;
+        }
+
+        if (_numerical is not null &&
+            _numerical.TrySolveNear(target, seed, out var numerical))
+        {
+            numerical = UnwrapNear(seed, numerical);
+            if (Verify(target, numerical))
+            {
+                solution = numerical;
+                return true;
+            }
+        }
+
+        solution = seed;
+        return false;
+    }
+
     private double[] FlangeTarget(double[] targetM) =>
         IsFlangeTool(_tool) ? targetM : Transforms.Multiply(targetM, Transforms.Inverse(_toolM));
 
