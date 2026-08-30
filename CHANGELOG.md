@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Cartesian LIN stays on the previous waypoint via `IInverseKinematics.TrySolveNear` before the multi-start `TrySolve` hunt (UR analytic + seed-only numerical). Grasshopper plane goals from default home no longer run full numerical IK at every 5 mm step.
+
 ## [0.15.0] - 2026-08-02
 
 ### Added

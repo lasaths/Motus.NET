@@ -1,6 +1,7 @@
 using Motus.Core;
 using Motus.Geometry;
 using Motus.Presets;
+using System.Diagnostics;
 
 namespace Motus.Core.Tests;
 
@@ -105,9 +106,13 @@ public class Grasshopper01PlaneGoalTests
         var home = new JointState(new[] { 0.0, -1.5708, 1.5708, -1.5708, 0.0, 0.0 });
         var goal = new CartesianPose(RhinoDownPlaneFrame(-0.5, 0.45, 0.15));
 
+        var sw = Stopwatch.StartNew();
         var lin = new CartesianLinearPathPlanner(preset).PlanToResult(
             new CartesianPlanningRequest(robot, home, goal, new PlanningOptions()), 0.005);
+        sw.Stop();
         Assert.True(lin.Success, string.Join("; ", lin.Errors));
+        Assert.True(sw.ElapsedMilliseconds < 400,
+            $"Rhino-down LIN from home should stay seed-local after TrySolveNear, took {sw.ElapsedMilliseconds}ms");
         Assert.NotNull(lin.Trajectory);
         Assert.True(lin.Trajectory!.Points.Count >= 2);
 

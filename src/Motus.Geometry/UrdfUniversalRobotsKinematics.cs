@@ -46,6 +46,14 @@ internal sealed class UrdfUniversalRobotsKinematics : IInverseKinematics
         return _numerical.TrySolve(target, seed, out solution);
     }
 
+    public bool TrySolveNear(CartesianPose target, JointState seed, out JointState solution)
+    {
+        var dhTarget = ToDhFrame(target);
+        if (_dhIk.TrySolveNear(dhTarget, seed, out solution) && UrdfTcpMatches(target, solution))
+            return true;
+        return _numerical.TrySolveNear(target, seed, out solution);
+    }
+
     private static IEnumerable<JointState> ExtraSeeds(JointState seed)
     {
         yield return new JointState(new[] { 0.0, -1.4, 1.4, -1.4, -1.5708, 0.0 });
