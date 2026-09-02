@@ -119,4 +119,86 @@ public class AttachPlanningTests
         var tcp1 = fk.ComputeTcp(q1, preset.BaseFrame, preset.ToolFrame);
         Assert.True(Math.Abs(tcp0.Tcp.X - tcp1.Tcp.X) > 0.01);
     }
+
+    /// <summary>Logic for GH example 10_pick_place.ghx — three programs with attach context swaps between plans.</summary>
+    [Fact]
+    public void Example10_PickAndPlace_Box()
+    {
+        var preset = PresetLoader.LoadByModelName("UR5e");
+        var robot = new RobotModel(preset);
+        var fk = KinematicsResolver.CreateFkSolver(preset);
+        var planner = new IndustrialMotionPlanner(preset);
+
+        var home = new JointState(new double[] { 0, -Math.PI / 2, Math.PI / 2, 0, Math.PI / 2, 0 });
+        var workpiece = CollisionObject.Box("workpiece", new Frame(0.6, 0, 0.08), 0.03, 0.03, 0.03);
+        var scene = new CollisionScene(new[] { workpiece });
+        var tcpLocal = new Frame(0, 0, -0.06);
+
+        var homeTcp = fk.ComputeTcp(home, preset.BaseFrame, preset.ToolFrame);
+        var pickPose = homeTcp;
+        var placePose = new CartesianPose(new Frame(
+            homeTcp.Tcp.X - 0.05, homeTcp.Tcp.Y + 0.05, homeTcp.Tcp.Z,
+            homeTcp.Tcp.Qw, homeTcp.Tcp.Qx, homeTcp.Tcp.Qy, homeTcp.Tcp.Qz));
+        var retractPose = new CartesianPose(new Frame(
+            homeTcp.Tcp.X - 0.05, homeTcp.Tcp.Y + 0.05, homeTcp.Tcp.Z + 0.10,
+            homeTcp.Tcp.Qw, homeTcp.Tcp.Qx, homeTcp.Tcp.Qy, homeTcp.Tcp.Qz));
+
+        var open = new EndEffectorState(new Dictionary<string, double> { ["width"] = 0.085 });
+        var closed = new EndEffectorState(new Dictionary<string, double> { ["width"] = 0.0 });
+        var caps = ToolCapabilities.Robotiq2F85;
+
+        var ctx = PlanningContext.Create(robot, scene);
+        var checker = CollisionCheckerFactory.Create(robot, attached: ctx.Attached);
+        var opts = new PlanningOptions { CollisionChecker = checker, MaxJointStepRadians = 0.05 };
+
+        var approach = planner.Plan(new MotionProgramRequest(
+            robot,
+            home,
+            new MotionSegment[]
+            {
+                new LinSegment(pickPose, stepMeters: 0.005),
+                new SetToolStateSegment(closed, durationSeconds: 0.1)
+            },
+            ctx.ToPlanningOptions(opts))
+        {
+            InitialToolState = open,
+            ToolCapabilities = caps
+        });
+        Assert.True(approach.Success, string.Join("; ", approach.Errors));
+        Assert.Contains(approach.Trajectory!.Points, p => p.ToolState?.GetValueOrDefault("width") == 0.0);
+
+        var pickEnd = approach.Trajectory.Points[^1].JointState;
+        ctx = ctx.Attach("workpiece", workpiece, tcpLocal);
+        Assert.DoesNotContain(ctx.Scene.Objects, o => o.Name == "workpiece");
+        checker = CollisionCheckerFactory.Create(robot, attached: ctx.Attached);
+
+        var carry = planner.Plan(new MotionProgramRequest(
+            robot,
+            pickEnd,
+            new MotionSegment[]
+            {
+                new LinSegment(placePose, stepMeters: 0.005),
+                new SetToolStateSegment(open, durationSeconds: 0.1)
+            },
+            ctx.ToPlanningOptions(new PlanningOptions { CollisionChecker = checker, MaxJointStepRadians = 0.05 }))
+        {
+            InitialToolState = closed,
+            ToolCapabilities = caps
+        });
+        Assert.True(carry.Success, string.Join("; ", carry.Errors));
+        Assert.Contains(carry.Trajectory!.Points, p => p.ToolState?.GetValueOrDefault("width") == 0.085);
+
+        var placeEnd = carry.Trajectory.Points[^1].JointState;
+        var placeWorld = new Frame(homeTcp.Tcp.X - 0.05, homeTcp.Tcp.Y + 0.05, 0.08);
+        ctx = ctx.Detach("workpiece", placeWorld);
+        Assert.Contains(ctx.Scene.Objects, o => o.Name == "workpiece");
+        checker = CollisionCheckerFactory.Create(robot, attached: ctx.Attached);
+
+        var retract = planner.Plan(new MotionProgramRequest(
+            robot,
+            placeEnd,
+            new MotionSegment[] { new LinSegment(retractPose, stepMeters: 0.005) },
+            ctx.ToPlanningOptions(new PlanningOptions { CollisionChecker = checker, MaxJointStepRadians = 0.05 })));
+        Assert.True(retract.Success, string.Join("; ", retract.Errors));
+    }
 }
