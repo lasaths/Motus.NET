@@ -86,28 +86,36 @@ public sealed class PlanningResult
     public IReadOnlyList<string> Errors { get; }
     public IReadOnlyList<string> Warnings { get; }
     public IReadOnlyList<PlanningMessage> Messages { get; }
+    /// <summary>Attach windows from Attach/Detach motion segments (empty when unused).</summary>
+    public IReadOnlyList<AttachTimeSpan> AttachSpans { get; }
 
     private PlanningResult(
         bool success,
         Trajectory? trajectory,
         IReadOnlyList<string> errors,
         IReadOnlyList<string> warnings,
-        IReadOnlyList<PlanningMessage> messages)
+        IReadOnlyList<PlanningMessage> messages,
+        IReadOnlyList<AttachTimeSpan>? attachSpans = null)
     {
         Success = success;
         Trajectory = trajectory;
         Errors = errors;
         Warnings = warnings;
         Messages = messages;
+        AttachSpans = attachSpans ?? Array.Empty<AttachTimeSpan>();
     }
 
-    public static PlanningResult Succeeded(Trajectory trajectory, IReadOnlyList<string>? warnings = null) =>
+    public static PlanningResult Succeeded(
+        Trajectory trajectory,
+        IReadOnlyList<string>? warnings = null,
+        IReadOnlyList<AttachTimeSpan>? attachSpans = null) =>
         new(
             true,
             trajectory,
             Array.Empty<string>(),
             warnings ?? Array.Empty<string>(),
-            BuildSuccessMessages(warnings));
+            BuildSuccessMessages(warnings),
+            attachSpans);
 
     public static PlanningResult Succeeded(Trajectory trajectory, IReadOnlyList<PlanningMessage> messages) =>
         new(

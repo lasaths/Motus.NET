@@ -6,7 +6,9 @@ public enum MotionPrimitiveType
     Lin,
     Circ,
     Set,
-    Wait
+    Wait,
+    Attach,
+    Detach
 }
 
 public abstract class MotionSegment
@@ -86,6 +88,41 @@ public sealed class WaitSegment : MotionSegment
         : base(MotionPrimitiveType.Wait, 0)
     {
         DurationSeconds = Math.Max(0, durationSeconds);
+    }
+}
+
+/// <summary>Zero-time: attach geometry to TCP (hides matching scene name when present).</summary>
+public sealed class AttachSegment : MotionSegment
+{
+    public string Name { get; }
+    public Frame TcpLocal { get; }
+    /// <summary>World- or identity-posed collision volume; planner stores TCP-local identity copy.</summary>
+    public CollisionObject Geometry { get; }
+
+    public AttachSegment(string name, Frame tcpLocal, CollisionObject geometry)
+        : base(MotionPrimitiveType.Attach, 0)
+    {
+        if (string.IsNullOrWhiteSpace(name))
+            throw new ArgumentException("Attach name is required.", nameof(name));
+        Name = name;
+        TcpLocal = tcpLocal;
+        Geometry = geometry ?? throw new ArgumentNullException(nameof(geometry));
+    }
+}
+
+/// <summary>Zero-time: detach named body and place its geometry at <see cref="WorldPose"/>.</summary>
+public sealed class DetachSegment : MotionSegment
+{
+    public string Name { get; }
+    public Frame WorldPose { get; }
+
+    public DetachSegment(string name, Frame worldPose)
+        : base(MotionPrimitiveType.Detach, 0)
+    {
+        if (string.IsNullOrWhiteSpace(name))
+            throw new ArgumentException("Detach name is required.", nameof(name));
+        Name = name;
+        WorldPose = worldPose;
     }
 }
 

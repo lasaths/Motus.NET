@@ -36,6 +36,8 @@ public static class ToolStateTimeline
                     ApplySetSegment(points, annotated, first, last, set, ref current);
                     continue;
                 case WaitSegment:
+                case AttachSegment:
+                case DetachSegment:
                     ApplyHoldSegment(points, annotated, first, last, current);
                     continue;
             }

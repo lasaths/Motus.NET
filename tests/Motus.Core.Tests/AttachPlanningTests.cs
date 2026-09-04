@@ -120,7 +120,7 @@ public class AttachPlanningTests
         Assert.True(Math.Abs(tcp0.Tcp.X - tcp1.Tcp.X) > 0.01);
     }
 
-    /// <summary>Logic for GH example 10_pick_place.ghx — three programs with attach context swaps between plans.</summary>
+    /// <summary>Logic for GH example 10 — destack via PickPlaceCycle (attach/detach mid-program).</summary>
     [Fact]
     public void Example10_PickAndPlace_Box()
     {
@@ -130,75 +130,97 @@ public class AttachPlanningTests
         var planner = new IndustrialMotionPlanner(preset);
 
         var home = new JointState(new double[] { 0, -Math.PI / 2, Math.PI / 2, 0, Math.PI / 2, 0 });
-        var workpiece = CollisionObject.Box("workpiece", new Frame(0.6, 0, 0.08), 0.03, 0.03, 0.03);
-        var scene = new CollisionScene(new[] { workpiece });
-        var tcpLocal = new Frame(0, 0, -0.06);
-
         var homeTcp = fk.ComputeTcp(home, preset.BaseFrame, preset.ToolFrame);
-        var pickPose = homeTcp;
-        var placePose = new CartesianPose(new Frame(
+        var grasp = homeTcp;
+        var place = new CartesianPose(new Frame(
             homeTcp.Tcp.X - 0.05, homeTcp.Tcp.Y + 0.05, homeTcp.Tcp.Z,
             homeTcp.Tcp.Qw, homeTcp.Tcp.Qx, homeTcp.Tcp.Qy, homeTcp.Tcp.Qz));
-        var retractPose = new CartesianPose(new Frame(
-            homeTcp.Tcp.X - 0.05, homeTcp.Tcp.Y + 0.05, homeTcp.Tcp.Z + 0.10,
-            homeTcp.Tcp.Qw, homeTcp.Tcp.Qx, homeTcp.Tcp.Qy, homeTcp.Tcp.Qz));
+
+        // Brick in Motus TCP-local (0,0,-0.06) so AttachAwareChecker matches legacy Example10.
+        var brickPose = Transforms.ToFrame(Transforms.Multiply(
+            Transforms.FromFrame(grasp.Tcp),
+            Transforms.FromFrame(new Frame(0, 0, -0.06))));
+        var brick = CollisionObject.Box("b00", brickPose, 0.03, 0.03, 0.03);
+        var scene = new CollisionScene(Array.Empty<CollisionObject>());
 
         var open = new EndEffectorState(new Dictionary<string, double> { ["width"] = 0.085 });
-        var closed = new EndEffectorState(new Dictionary<string, double> { ["width"] = 0.0 });
+        var close = new EndEffectorState(new Dictionary<string, double> { ["width"] = 0.04 });
         var caps = ToolCapabilities.Robotiq2F85;
 
-        var ctx = PlanningContext.Create(robot, scene);
-        var checker = CollisionCheckerFactory.Create(robot, attached: ctx.Attached);
-        var opts = new PlanningOptions { CollisionChecker = checker, MaxJointStepRadians = 0.05 };
+        var segments = PickPlaceCycle.Expand(grasp, place, approachMeters: 0.05, open, close, brick);
 
-        var approach = planner.Plan(new MotionProgramRequest(
-            robot,
-            home,
-            new MotionSegment[]
-            {
-                new LinSegment(pickPose, stepMeters: 0.005),
-                new SetToolStateSegment(closed, durationSeconds: 0.1)
-            },
-            ctx.ToPlanningOptions(opts))
+        var opts = new PlanningOptions
+        {
+            CollisionScene = scene,
+            CollisionChecker = CollisionCheckerFactory.Create(robot),
+            MaxJointStepRadians = 0.05
+        };
+        var result = planner.Plan(new MotionProgramRequest(robot, home, segments, opts)
         {
             InitialToolState = open,
             ToolCapabilities = caps
         });
-        Assert.True(approach.Success, string.Join("; ", approach.Errors));
-        Assert.Contains(approach.Trajectory!.Points, p => p.ToolState?.GetValueOrDefault("width") == 0.0);
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+        Assert.Single(result.AttachSpans);
+        Assert.Contains(result.Trajectory!.Points, p => p.ToolState?.GetValueOrDefault("width") == 0.04);
+        Assert.Contains(result.Trajectory.Points, p => p.ToolState?.GetValueOrDefault("width") == 0.085);
+        Assert.Equal("b00", result.AttachSpans[0].Bodies[0].Name);
+    }
 
-        var pickEnd = approach.Trajectory.Points[^1].JointState;
-        ctx = ctx.Attach("workpiece", workpiece, tcpLocal);
-        Assert.DoesNotContain(ctx.Scene.Objects, o => o.Name == "workpiece");
-        checker = CollisionCheckerFactory.Create(robot, attached: ctx.Attached);
+    [Fact]
+    public void Destack_TwoBricks_AttachHides_DetachRestores_ExpandMany()
+    {
+        var preset = PresetLoader.LoadByModelName("UR5e");
+        var robot = new RobotModel(preset);
+        var open = new EndEffectorState(new Dictionary<string, double> { ["width"] = 0.085 });
+        var close = new EndEffectorState(new Dictionary<string, double> { ["width"] = 0.04 });
 
-        var carry = planner.Plan(new MotionProgramRequest(
-            robot,
-            pickEnd,
-            new MotionSegment[]
-            {
-                new LinSegment(placePose, stepMeters: 0.005),
-                new SetToolStateSegment(open, durationSeconds: 0.1)
-            },
-            ctx.ToPlanningOptions(new PlanningOptions { CollisionChecker = checker, MaxJointStepRadians = 0.05 }))
-        {
-            InitialToolState = closed,
-            ToolCapabilities = caps
-        });
-        Assert.True(carry.Success, string.Join("; ", carry.Errors));
-        Assert.Contains(carry.Trajectory!.Points, p => p.ToolState?.GetValueOrDefault("width") == 0.085);
+        var grasp0 = new CartesianPose(new Frame(0.5, 0, 0.3));
+        var place0 = new CartesianPose(new Frame(0.4, -0.1, 0.3));
+        var grasp1 = new CartesianPose(new Frame(0.5, 0.05, 0.3));
+        var place1 = new CartesianPose(new Frame(0.4, -0.1, 0.32));
+        var b0 = CollisionObject.Box("b00", new Frame(0.5, 0, 0.28), 0.04, 0.02, 0.01);
+        var b1 = CollisionObject.Box("b01", new Frame(0.5, 0.05, 0.28), 0.04, 0.02, 0.01);
 
-        var placeEnd = carry.Trajectory.Points[^1].JointState;
-        var placeWorld = new Frame(homeTcp.Tcp.X - 0.05, homeTcp.Tcp.Y + 0.05, 0.08);
-        ctx = ctx.Detach("workpiece", placeWorld);
-        Assert.Contains(ctx.Scene.Objects, o => o.Name == "workpiece");
-        checker = CollisionCheckerFactory.Create(robot, attached: ctx.Attached);
+        var segs = PickPlaceCycle.ExpandMany(
+            new[] { grasp0, grasp1 },
+            new[] { place0, place1 },
+            new[] { b0, b1 },
+            0.08,
+            open,
+            close);
+        Assert.Equal(2, segs.OfType<AttachSegment>().Count());
+        Assert.Equal(2, segs.OfType<DetachSegment>().Count());
 
-        var retract = planner.Plan(new MotionProgramRequest(
-            robot,
-            placeEnd,
-            new MotionSegment[] { new LinSegment(retractPose, stepMeters: 0.005) },
-            ctx.ToPlanningOptions(new PlanningOptions { CollisionChecker = checker, MaxJointStepRadians = 0.05 })));
-        Assert.True(retract.Success, string.Join("; ", retract.Errors));
+        // Scene starts with both bricks; Attach hides grasped name; Detach restores at column pose.
+        var ctx = PlanningContext.Create(robot, new CollisionScene(new[] { b0, b1 }));
+        Assert.Equal(2, ctx.Scene.Objects.Count);
+
+        var att0 = (AttachSegment)segs.First(s => s is AttachSegment);
+        ctx = ctx.Attach(att0.Name, CollisionObject.Box(att0.Name, Frame.Identity, 0.04, 0.02, 0.01), att0.TcpLocal);
+        Assert.DoesNotContain(ctx.Scene.Objects, o => o.Name == "b00");
+        Assert.Contains(ctx.Scene.Objects, o => o.Name == "b01");
+        Assert.Single(ctx.Attached);
+
+        var det0 = (DetachSegment)segs.First(s => s is DetachSegment d && d.Name == "b00");
+        ctx = ctx.Detach(det0.Name, det0.WorldPose);
+        Assert.Contains(ctx.Scene.Objects, o => o.Name == "b00");
+        Assert.Empty(ctx.Attached);
+        var restored = ctx.Scene.Objects.First(o => o.Name == "b00");
+        Assert.InRange(restored.Pose.X, place0.Tcp.X - 0.05, place0.Tcp.X + 0.05);
+    }
+
+    [Fact]
+    public void PickPlaceCycle_Expand_EmitsAttachDetach()
+    {
+        var grasp = new CartesianPose(new Frame(0.5, 0, 0.2));
+        var place = new CartesianPose(new Frame(0.4, 0.1, 0.2));
+        var obj = CollisionObject.Box("brick", new Frame(0.5, 0, 0.18), 0.04, 0.02, 0.01);
+        var open = new EndEffectorState(new Dictionary<string, double> { ["width"] = 0.085 });
+        var close = new EndEffectorState(new Dictionary<string, double> { ["width"] = 0.04 });
+        var segs = PickPlaceCycle.Expand(grasp, place, 0.08, open, close, obj);
+        Assert.Contains(segs, s => s is AttachSegment a && a.Name == "brick" && a.Geometry.Name == "brick");
+        Assert.Contains(segs, s => s is DetachSegment d && d.Name == "brick");
+        Assert.Equal(10, segs.Count);
     }
 }

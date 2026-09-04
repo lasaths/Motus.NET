@@ -3,8 +3,9 @@ using Motus.Core;
 namespace Motus.Geometry;
 
 /// <summary>
-/// Motion program planner for mixed PTP/LIN/CIRC segment lists.
+/// Motion program planner for mixed PTP/LIN/CIRC/SET/WAIT/Attach/Detach segment lists.
 /// Blend radii truncate TCP paths at segment corners when feasible; otherwise exact-stop fallback.
+/// Attach/Detach mutate a <see cref="PlanningContext"/> mid-program and emit <see cref="AttachTimeSpan"/> windows.
 /// </summary>
 public sealed class IndustrialMotionPlanner
 {
@@ -38,9 +39,40 @@ public sealed class IndustrialMotionPlanner
         double pendingEntryBlend = 0;
         int pendingBlendFromSegment = -1;
 
+        var ctx = BuildContext(request);
+        var liveOptions = CloneOptions(request.Options, ctx);
+        var openAttachStart = new Dictionary<string, (double Start, AttachedBody Body)>(StringComparer.OrdinalIgnoreCase);
+        var attachSpans = new List<AttachTimeSpan>();
+
         for (var i = 0; i < request.Segments.Count; i++)
         {
             var segment = request.Segments[i];
+
+            if (segment is AttachSegment attachSeg)
+            {
+                var apply = ApplyAttach(ctx, attachSeg, request.Robot, ref liveOptions, out var err);
+                if (err is not null)
+                    return PlanningResult.Failed(new[] { $"Segment {i + 1} Attach: {err}" });
+                ctx = apply;
+                var body = ctx.Attached.First(a => string.Equals(a.Name, attachSeg.Name, StringComparison.OrdinalIgnoreCase));
+                openAttachStart[attachSeg.Name] = (t, body);
+                spans.Add(new ToolStateTimeline.SegmentSpan(i, segment, points.Count - 1, points.Count - 1));
+                continue;
+            }
+
+            if (segment is DetachSegment detachSeg)
+            {
+                if (openAttachStart.TryGetValue(detachSeg.Name, out var open))
+                {
+                    attachSpans.Add(new AttachTimeSpan(open.Start, t, new[] { open.Body }, detachSeg.WorldPose));
+                    openAttachStart.Remove(detachSeg.Name);
+                }
+
+                ctx = ctx.Detach(detachSeg.Name, detachSeg.WorldPose);
+                liveOptions = CloneOptions(liveOptions, ctx);
+                spans.Add(new ToolStateTimeline.SegmentSpan(i, segment, points.Count - 1, points.Count - 1));
+                continue;
+            }
 
             if (segment is SetToolStateSegment setSeg)
             {
@@ -67,7 +99,7 @@ public sealed class IndustrialMotionPlanner
             }
 
             var pointStartBefore = points.Count;
-            var result = PlanSegment(request, currentState, currentPose, segment, warnings);
+            var result = PlanSegment(request.Robot, liveOptions, currentState, currentPose, segment, warnings);
             if (!result.Success || result.Trajectory is null)
                 return result;
 
@@ -126,6 +158,9 @@ public sealed class IndustrialMotionPlanner
             currentPose = TcpPose(currentState);
         }
 
+        foreach (var leftover in openAttachStart.Values)
+            attachSpans.Add(new AttachTimeSpan(leftover.Start, t, new[] { leftover.Body }));
+
         var initialToolState = ResolveInitialToolState(request);
         var annotated = ToolStateTimeline.Apply(points, request.Segments, spans, initialToolState);
         var trajectory = new Trajectory(request.Robot, annotated);
@@ -135,11 +170,75 @@ public sealed class IndustrialMotionPlanner
             warnings.AddRange(ToolStateCollision.ValidateTrajectory(
                 trajectory,
                 sessionTool,
-                request.Options.CollisionScene,
-                request.Options.CollisionChecker));
+                liveOptions.CollisionScene,
+                liveOptions.CollisionChecker));
         }
 
-        return PlanningResult.Succeeded(trajectory, warnings);
+        return PlanningResult.Succeeded(trajectory, warnings, attachSpans);
+    }
+
+    private static PlanningContext BuildContext(MotionProgramRequest request)
+    {
+        var scene = request.Options.CollisionScene ?? new CollisionScene();
+        var attached = request.Options.AttachedBodies ?? Array.Empty<AttachedBody>();
+        var ctx = PlanningContext.Create(request.Robot, scene);
+        foreach (var body in attached)
+            ctx = ctx.Attach(body);
+        return ctx;
+    }
+
+    private static PlanningContext ApplyAttach(
+        PlanningContext ctx,
+        AttachSegment attach,
+        RobotModel robot,
+        ref PlanningOptions liveOptions,
+        out string? error)
+    {
+        error = null;
+        _ = robot;
+        var next = ctx.Attach(attach.Name, WithIdentityPose(attach.Geometry), attach.TcpLocal);
+        liveOptions = CloneOptions(liveOptions, next);
+        return next;
+    }
+
+    private static CollisionObject WithIdentityPose(CollisionObject source) =>
+        source.Shape switch
+        {
+            CollisionShape.Box => CollisionObject.Box(source.Name, Frame.Identity, source.ExtentX, source.ExtentY, source.ExtentZ),
+            CollisionShape.Sphere => CollisionObject.Sphere(source.Name, Frame.Identity, source.ExtentX),
+            CollisionShape.Capsule => CollisionObject.Capsule(source.Name, Frame.Identity, source.ExtentX, source.ExtentY),
+            CollisionShape.Mesh when source.MeshVertices is not null && source.MeshIndices is not null =>
+                CollisionObject.Mesh(source.Name, Frame.Identity, source.MeshVertices, source.MeshIndices),
+            _ => source
+        };
+
+    private static PlanningOptions CloneOptions(PlanningOptions baseOpts, PlanningContext ctx)
+    {
+        // Robot-vs-scene without attached; attached volumes only vs scene (grasp occupies the part).
+        var robotOnly = CollisionCheckerFactory.Create(ctx.Robot, attached: null);
+        ICollisionChecker checker = robotOnly;
+        if (ctx.Attached is { Count: > 0 })
+        {
+            var fk = KinematicsResolver.CreateFkSolver(ctx.Robot.Preset);
+            checker = new AttachAwareCollisionChecker(
+                robotOnly, fk, ctx.Robot.Preset.BaseFrame, ctx.Robot.Preset.ToolFrame, ctx.Attached);
+        }
+
+        return new PlanningOptions
+        {
+            MaxJointStepRadians = baseOpts.MaxJointStepRadians,
+            TimeStepSeconds = baseOpts.TimeStepSeconds,
+            MaxJointVelocityRadiansPerSecond = baseOpts.MaxJointVelocityRadiansPerSecond,
+            CollisionScene = ctx.Scene,
+            CollisionChecker = checker,
+            RetimeTrajectory = baseOpts.RetimeTrajectory,
+            AttachedBodies = ctx.Attached,
+            PathConstraints = baseOpts.PathConstraints,
+            ConstraintChecker = baseOpts.ConstraintChecker,
+            GroupMap = baseOpts.GroupMap,
+            Mobility = baseOpts.Mobility,
+            MobilityBounds = baseOpts.MobilityBounds
+        };
     }
 
     private static EndEffectorState? ResolveInitialToolState(MotionProgramRequest request) =>
@@ -155,6 +254,8 @@ public sealed class IndustrialMotionPlanner
             CircSegment circ => circ.Goal,
             SetToolStateSegment => throw new InvalidOperationException("SET segment has no Cartesian goal."),
             WaitSegment => throw new InvalidOperationException("WAIT segment has no Cartesian goal."),
+            AttachSegment => throw new InvalidOperationException("Attach segment has no Cartesian goal."),
+            DetachSegment => throw new InvalidOperationException("Detach segment has no Cartesian goal."),
             _ => throw new InvalidOperationException("Unsupported motion segment type.")
         };
 
@@ -232,7 +333,8 @@ public sealed class IndustrialMotionPlanner
     }
 
     private PlanningResult PlanSegment(
-        MotionProgramRequest request,
+        RobotModel robot,
+        PlanningOptions options,
         JointState currentState,
         CartesianPose currentPose,
         MotionSegment segment,
@@ -240,21 +342,20 @@ public sealed class IndustrialMotionPlanner
     {
         return segment switch
         {
-            PtpSegment ptp => _joint.Plan(new PlanningRequest(
-                request.Robot,
-                currentState,
-                ptp.Goal,
-                request.Options)),
-            LinSegment lin => PlanLinearSegment(request, currentState, currentPose, lin),
-            CircSegment circ => PlanCircularSegment(request, currentState, currentPose, circ, warnings),
-            SetToolStateSegment => PlanningResult.Succeeded(new Trajectory(request.Robot, new[] { new TrajectoryPoint(0, currentState) })),
-            WaitSegment => PlanningResult.Succeeded(new Trajectory(request.Robot, new[] { new TrajectoryPoint(0, currentState) })),
+            PtpSegment ptp => _joint.Plan(new PlanningRequest(robot, currentState, ptp.Goal, options)),
+            LinSegment lin => PlanLinearSegment(robot, options, currentState, currentPose, lin),
+            CircSegment circ => PlanCircularSegment(robot, options, currentState, currentPose, circ, warnings),
+            SetToolStateSegment => PlanningResult.Succeeded(new Trajectory(robot, new[] { new TrajectoryPoint(0, currentState) })),
+            WaitSegment => PlanningResult.Succeeded(new Trajectory(robot, new[] { new TrajectoryPoint(0, currentState) })),
+            AttachSegment => PlanningResult.Succeeded(new Trajectory(robot, new[] { new TrajectoryPoint(0, currentState) })),
+            DetachSegment => PlanningResult.Succeeded(new Trajectory(robot, new[] { new TrajectoryPoint(0, currentState) })),
             _ => PlanningResult.Failed(new[] { "Unsupported motion segment type." })
         };
     }
 
     private PlanningResult PlanLinearSegment(
-        MotionProgramRequest request,
+        RobotModel robot,
+        PlanningOptions options,
         JointState currentState,
         CartesianPose currentPose,
         LinSegment segment)
@@ -270,14 +371,15 @@ public sealed class IndustrialMotionPlanner
         if (traj is null)
             return PlanningResult.Failed(new[] { "LIN planning failed (IK at intermediate poses)." });
 
-        var fail = ValidateSegmentCollision(request, traj);
+        var fail = ValidateSegmentCollision(robot, options, traj);
         if (fail is not null) return fail;
 
         return PlanningResult.Succeeded(traj);
     }
 
     private PlanningResult PlanCircularSegment(
-        MotionProgramRequest request,
+        RobotModel robot,
+        PlanningOptions options,
         JointState currentState,
         CartesianPose currentPose,
         CircSegment segment,
@@ -294,26 +396,26 @@ public sealed class IndustrialMotionPlanner
         if (traj is null)
             return PlanningResult.Failed(new[] { "CIRC planning failed (IK on circular waypoints)." });
 
-        var fail = ValidateSegmentCollision(request, traj);
+        var fail = ValidateSegmentCollision(robot, options, traj);
         if (fail is not null) return fail;
 
         warnings.Add("CIRC orientation policy: SLERP from segment start orientation to final orientation.");
         return PlanningResult.Succeeded(traj);
     }
 
-    private static PlanningResult? ValidateSegmentCollision(MotionProgramRequest request, Trajectory traj)
+    private static PlanningResult? ValidateSegmentCollision(RobotModel robot, PlanningOptions options, Trajectory traj)
     {
-        var checker = request.Options.CollisionChecker;
-        var scene = request.Options.CollisionScene ?? new CollisionScene();
+        var checker = options.CollisionChecker;
+        var scene = options.CollisionScene ?? new CollisionScene();
         if (!PlanningCollision.SceneHasObstacles(scene) &&
-            request.Options.AttachedBodies is not { Count: > 0 })
+            options.AttachedBodies is not { Count: > 0 })
             return null;
 
-        checker ??= CollisionCheckerFactory.Create(request.Robot, attached: request.Options.AttachedBodies);
+        checker ??= CollisionCheckerFactory.Create(robot, attached: options.AttachedBodies);
         if (checker is null)
             return PlanningResult.Failed(new[] { "Collision scene provided but no collision checker available." });
 
-        return PlanningCollision.ValidateTrajectory(traj, scene!, checker, request.Options.MaxJointStepRadians);
+        return PlanningCollision.ValidateTrajectory(traj, scene!, checker, options.MaxJointStepRadians);
     }
 
     private static IReadOnlyList<CartesianPose>? BuildCircularWaypoints(

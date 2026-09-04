@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-09-03
+
+### Added
+
+- `AttachSegment` / `DetachSegment` motion primitives; `IndustrialMotionPlanner` mutates scene/attached mid-program and returns `AttachTimeSpan` windows on `PlanningResult`.
+- `PickPlaceCycle.Expand` / `ExpandMany` — one brick cycle → LIN/SET/Attach/Detach segment list.
+
 ### Changed
 
 - Cartesian LIN stays on the previous waypoint via `IInverseKinematics.TrySolveNear` before the multi-start `TrySolve` hunt (UR analytic + seed-only numerical). Grasshopper plane goals from default home no longer run full numerical IK at every 5 mm step.
