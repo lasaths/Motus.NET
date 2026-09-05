@@ -107,7 +107,9 @@ public sealed class CartesianLinearPathPlanner
             var attemptSeed = currentJoint;
             for (var seedAttempts = 0; seedAttempts < options.MaxIkAttemptsPerStep && solvedJoint is null; seedAttempts++)
             {
-                if (_ik.TrySolve(interpPose, attemptSeed, out var testJoint))
+                // TrySolveNear only — TrySolve runs a 10-seed workspace hunt and hangs LIN
+                // on 180° orientation slers (pick-place home vs Z-down grasp).
+                if (_ik.TrySolveNear(interpPose, attemptSeed, out var testJoint))
                 {
                     testJoint = UnwrapNear(currentJoint, testJoint);
                     if (PoseMatches(interpPose.Tcp, testJoint) &&
@@ -140,7 +142,7 @@ public sealed class CartesianLinearPathPlanner
         }
 
         // Snap only when every waypoint succeeded — avoid a goal jump on partial paths.
-        if (points.Count == steps + 1 && _ik.TrySolve(goalPose, points[^2].JointState, out var finalJoint))
+        if (points.Count == steps + 1 && _ik.TrySolveNear(goalPose, points[^2].JointState, out var finalJoint))
         {
             finalJoint = UnwrapNear(points[^2].JointState, finalJoint);
             if (PoseMatches(goalPose.Tcp, finalJoint) &&

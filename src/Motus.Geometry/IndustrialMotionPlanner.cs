@@ -41,6 +41,15 @@ public sealed class IndustrialMotionPlanner
 
         var ctx = BuildContext(request);
         var liveOptions = CloneOptions(request.Options, ctx);
+        var startCollision = PlanningCollision.ValidateEndpoints(
+            request.Start,
+            request.Start,
+            liveOptions.CollisionScene,
+            liveOptions.CollisionChecker,
+            includeAttachedBodies: liveOptions.AttachedBodies is { Count: > 0 });
+        if (startCollision is not null)
+            return startCollision;
+
         var openAttachStart = new Dictionary<string, (double Start, AttachedBody Body)>(StringComparer.OrdinalIgnoreCase);
         var attachSpans = new List<AttachTimeSpan>();
 

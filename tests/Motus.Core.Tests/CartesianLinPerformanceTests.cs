@@ -50,4 +50,27 @@ public class CartesianLinPerformanceTests
 
         Assert.True(sw.ElapsedMilliseconds < 1000, $"Expected bounded LIN cost, took {sw.ElapsedMilliseconds}ms");
     }
+
+    [Fact]
+    public void When_ApproachFlips180_Then_FailsUnderOneSecond()
+    {
+        var preset = PresetLoader.LoadByModelName("UR5e", ResourcesRoot);
+        var robot = new RobotModel(preset);
+        var fk = new DhForwardKinematics(preset);
+        var home = new JointState(new[] { 0.0, -1.5708, 1.5708, -1.5708, 0.0, 0.0 });
+        var startTcp = fk.ComputeTcp(home, preset.BaseFrame, preset.ToolFrame);
+        var m = Transforms.FromFrame(startTcp.Tcp);
+        var flipped = Transforms.ToFrame(Transforms.Multiply(m, Transforms.FromRpy(0, 0, 0, 0, Math.PI, 0)));
+        var goal = new CartesianPose(new Frame(
+            flipped.X + 0.2, flipped.Y, flipped.Z - 0.4,
+            flipped.Qw, flipped.Qx, flipped.Qy, flipped.Qz));
+
+        var sw = Stopwatch.StartNew();
+        var result = new CartesianLinearPathPlanner(preset).PlanToResult(
+            new CartesianPlanningRequest(robot, home, goal, new PlanningOptions()));
+        sw.Stop();
+
+        Assert.True(sw.ElapsedMilliseconds < 1000, $"180° approach LIN must not hunt IK, took {sw.ElapsedMilliseconds}ms");
+        _ = result;
+    }
 }
