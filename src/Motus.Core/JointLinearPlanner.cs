@@ -10,6 +10,7 @@ public sealed class JointLinearPlanner : IPlanner
         var robot = request.Robot;
         var opts = request.Options;
         var scene = opts.CollisionScene;
+        var checker = opts.CollisionChecker is null ? null : PlanningDiagnostics.Wrap(opts.CollisionChecker);
 
         if (request.Start.AxisCount != robot.Preset.AxisCount)
             errors.Add($"Start state has {request.Start.AxisCount} joints; robot expects {robot.Preset.AxisCount}.");
@@ -39,7 +40,7 @@ public sealed class JointLinearPlanner : IPlanner
             : Materialize(map.EmbedGroupState(request.Start, map.ExtractGroupPositions(request.Goal)));
 
         var endpointFail = PlanningCollision.ValidateEndpoints(
-            request.Start, planGoal, scene, opts.CollisionChecker,
+            request.Start, planGoal, scene, checker,
             opts.AttachedBodies is { Count: > 0 });
         if (endpointFail is not null)
             return endpointFail;
@@ -93,9 +94,9 @@ public sealed class JointLinearPlanner : IPlanner
         }
 
         var trajectory = new Trajectory(robot, points);
-        if (opts.CollisionChecker is not null && scene is not null)
+        if (checker is not null && scene is not null)
         {
-            var collisionFail = PlanningCollision.ValidateTrajectory(trajectory, scene, opts.CollisionChecker, opts.MaxJointStepRadians);
+            var collisionFail = PlanningCollision.ValidateTrajectory(trajectory, scene, checker, opts.MaxJointStepRadians);
             if (collisionFail is not null) return collisionFail;
             warnings.Add("JointLinearPlanner: path validated against collision scene.");
         }

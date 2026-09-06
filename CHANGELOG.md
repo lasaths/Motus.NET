@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `TransferSegment` and `MotionProgramRequest.TransferPlannerFactory`: inject RRT-Connect for joint-space travel between Cartesian hover poses while keeping precise LIN approaches/retracts.
+- `PickPlaceOptions` with opt-in sampling transfers and explicit gripper `TouchBodies`; segment-local `AllowedCollisionPairs` keep all other objects checked.
+- `Trajectory.AttachSpans` carries attachment geometry, source names, TCP-local poses and release poses through retiming and JSON/CSV export.
+- Multi-object pick/place and carried-object obstacle-routing regressions; all four retimers checked for dwell/event/export consistency.
+
+### Fixed
+
+- Pick/place opens and detaches at placement before retraction; released workpieces remain in the collision scene.
+- Motion programs honor the supplied robot-only checker and serial chain, validate attach/detach transitions, reject duplicate/missing attachments, and check tool-state warnings against each segment's scene.
+- Retiming preserves SET/WAIT durations and stops at program/attachment boundaries. Export retimes once with the selected algorithm; CSV uses invariant numbers and escaped JSON cells.
+- Mesh detach restores geometry at its release pose; attachment lookup is case-insensitive.
+
+### Changed
+
+- Development package/version files and Grasshopper pin aligned to **0.17.0** (unreleased).
+
 ## [0.16.0] - 2026-09-03
 
 ### Added

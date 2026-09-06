@@ -98,11 +98,13 @@ public sealed class PlanningResult
         IReadOnlyList<AttachTimeSpan>? attachSpans = null)
     {
         Success = success;
-        Trajectory = trajectory;
+        Trajectory = trajectory is not null && attachSpans is not null
+            ? new Trajectory(trajectory.Robot, trajectory.Points, attachSpans)
+            : trajectory;
         Errors = errors;
         Warnings = warnings;
         Messages = messages;
-        AttachSpans = attachSpans ?? Array.Empty<AttachTimeSpan>();
+        AttachSpans = Trajectory?.AttachSpans ?? Array.Empty<AttachTimeSpan>();
     }
 
     public static PlanningResult Succeeded(

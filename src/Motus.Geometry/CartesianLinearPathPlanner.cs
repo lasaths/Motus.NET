@@ -98,6 +98,7 @@ public sealed class CartesianLinearPathPlanner
             JointState? solvedJoint = null;
             if (_ik.TrySolveNear(interpPose, currentJoint, out var nearJoint))
             {
+                PlanningDiagnostics.RecordIkAttempt();
                 nearJoint = UnwrapNear(currentJoint, nearJoint);
                 if (PoseMatches(interpPose.Tcp, nearJoint) &&
                     MaxJointDelta(currentJoint, nearJoint) <= MaxJointJumpRadians)
@@ -109,6 +110,7 @@ public sealed class CartesianLinearPathPlanner
             {
                 // TrySolveNear only — TrySolve runs a 10-seed workspace hunt and hangs LIN
                 // on 180° orientation slers (pick-place home vs Z-down grasp).
+                PlanningDiagnostics.RecordIkAttempt();
                 if (_ik.TrySolveNear(interpPose, attemptSeed, out var testJoint))
                 {
                     testJoint = UnwrapNear(currentJoint, testJoint);
@@ -369,11 +371,13 @@ public sealed class CartesianLinearPathPlanner
             });
         }
 
-        var hasCollision = PlanningCollision.SceneHasObstacles(scene) ||
-                           request.Options.AttachedBodies is { Count: > 0 };
+        // Obstacles only — attached-without-scene still trips SelfCollisionFree on fat tool hulls.
+        var hasCollision = PlanningCollision.SceneHasObstacles(scene);
         var checker = request.Options.CollisionChecker;
         if (hasCollision && checker is null)
             checker = CollisionCheckerFactory.Create(robot, attached: request.Options.AttachedBodies);
+        if (checker is not null)
+            checker = PlanningDiagnostics.Wrap(checker);
 
         if (hasCollision)
         {

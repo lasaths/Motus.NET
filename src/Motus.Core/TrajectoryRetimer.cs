@@ -32,6 +32,68 @@ public static class TrajectoryRetimer
     public static Trajectory Retime(Trajectory geometric, TrajectoryRetimerOptions? options = null)
     {
         options ??= new TrajectoryRetimerOptions();
+        ValidateGeometricTrajectory(geometric);
+        var points = geometric.Points;
+        if (points.Count <= 1) return geometric;
+        // Program dwells and attachment transitions are exact-stop boundaries. Retime each
+        // motion block separately so velocity cannot carry through a grasp/release or WAIT.
+        var boundaries = new SortedSet<int> { 0, points.Count - 1 };
+        for (var i = 1; i < points.Count; i++)
+        {
+            if (IsDwell(points[i]))
+            {
+                boundaries.Add(i - 1);
+                boundaries.Add(i);
+            }
+            if (points[i].SegmentIndex != points[i - 1].SegmentIndex &&
+                points[i - 1].SegmentIndex is not null && (points[i - 1].BlendRadiusMeters ?? 0) == 0)
+                boundaries.Add(i - 1);
+        }
+        foreach (var span in geometric.AttachSpans)
+        {
+            boundaries.Add(EventIndex(span.StartSeconds));
+            boundaries.Add(EventIndex(span.EndSeconds));
+        }
+
+        var retimed = new List<TrajectoryPoint> { CopyWithTime(points[0], 0) };
+        var indices = boundaries.ToArray();
+        for (var b = 1; b < indices.Length; b++)
+        {
+            var first = indices[b - 1];
+            var last = indices[b];
+            var offset = retimed[^1].TimeSeconds;
+            if (last == first + 1 && IsDwell(points[last]))
+            {
+                if (!points[first].JointState.Positions.SequenceEqual(points[last].JointState.Positions))
+                    throw new ArgumentException("SET/WAIT dwell must hold joint position.", nameof(geometric));
+                retimed.Add(CopyWithTime(points[last], offset + points[last].TimeSeconds - points[first].TimeSeconds));
+                continue;
+            }
+            var block = new Trajectory(geometric.Robot, points.Skip(first).Take(last - first + 1)
+                .Select(p => CopyWithTime(p, p.TimeSeconds - points[first].TimeSeconds)).ToArray());
+            var timed = RetimeMotion(block, options);
+            for (var i = 1; i < timed.Points.Count; i++)
+                retimed.Add(CopyWithTime(timed.Points[i], offset + timed.Points[i].TimeSeconds));
+        }
+
+        var spans = geometric.AttachSpans.Select(span => new AttachTimeSpan(
+            retimed[EventIndex(span.StartSeconds)].TimeSeconds,
+            retimed[EventIndex(span.EndSeconds)].TimeSeconds, span.Bodies, span.ReleaseWorldPose)).ToArray();
+        return new Trajectory(geometric.Robot, retimed, spans);
+
+        int EventIndex(double seconds)
+        {
+            for (var i = 0; i < points.Count; i++)
+                if (Math.Abs(points[i].TimeSeconds - seconds) <= 1e-9) return i;
+            throw new ArgumentException("Attachment events must coincide with trajectory waypoints.", nameof(geometric));
+        }
+    }
+
+    private static bool IsDwell(TrajectoryPoint point) =>
+        point.MotionType is MotionPrimitiveType.Set or MotionPrimitiveType.Wait;
+
+    private static Trajectory RetimeMotion(Trajectory geometric, TrajectoryRetimerOptions options)
+    {
         if (options.Algorithm == RetimerAlgorithm.TotgLite || options.Algorithm == RetimerAlgorithm.Bottleneck)
             return RetimeBottleneck(geometric, options);
         if (options.Algorithm == RetimerAlgorithm.Totg)
@@ -322,6 +384,9 @@ public static class TrajectoryRetimer
         var limits = trajectory.Robot.Preset.JointLimits;
         for (var i = 0; i < trajectory.Points.Count; i++)
         {
+            var time = trajectory.Points[i].TimeSeconds;
+            if (!double.IsFinite(time) || time < 0 || (i > 0 && time < trajectory.Points[i - 1].TimeSeconds))
+                throw new InvalidOperationException($"Trajectory point {i} has an invalid timestamp.");
             var q = trajectory.Points[i].JointState.Positions;
             if (q.Length != limits.Count)
                 throw new InvalidOperationException(
@@ -349,5 +414,6 @@ public static class TrajectoryRetimer
             source.MotionType,
             source.SegmentIndex,
             source.BlendRadiusMeters,
-            source.ToolState);
+            source.ToolState,
+            source.BaseFrameOverride);
 }

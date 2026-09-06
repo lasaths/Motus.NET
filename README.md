@@ -4,7 +4,7 @@
 
 | Motus.NET | [Motus.Grasshopper](https://github.com/lasaths/Motus.Grasshopper) |
 |-----------|-------------------------------------------------------------------|
-| Libraries on [nuget.org](https://www.nuget.org/profiles/lasaths) (`0.13.1`) | Rhino/GH UI that calls these APIs |
+| Libraries on [nuget.org](https://www.nuget.org/profiles/lasaths); development version `0.17.0` | Rhino/GH UI that calls these APIs |
 | Owns math, units, Status contracts, method DOIs | Thin components + examples |
 
 No UI, no vendor runtime, no live robot I/O. Algorithm catalog: [docs/METHODS.md](docs/METHODS.md) · citations: [docs/REFERENCES.bib](docs/REFERENCES.bib).
@@ -101,6 +101,8 @@ var result = planner.Plan(new MotionProgramRequest(robot, start, new MotionSegme
 }));
 ```
 
+Pick/place programs support explicit gripper contact, obstacle-aware transfers, and attachment timelines that survive retiming and export. See [docs/pick-place.md](docs/pick-place.md).
+
 ## Algorithms and references
 
 Canonical detail (API, units, failure codes): [docs/METHODS.md](docs/METHODS.md). BibTeX: [docs/REFERENCES.bib](docs/REFERENCES.bib).
@@ -176,7 +178,7 @@ Benchmarks: `benchmarks/Motus.Benchmarks` (BenchmarkDotNet).
 
 Tag `vX.Y.Z` → [release workflow](.github/workflows/release.yml) builds, tests, packs, publishes to [nuget.org](https://www.nuget.org/profiles/lasaths), and creates a GitHub Release.
 
-Changelog: [CHANGELOG.md](CHANGELOG.md). Current pin for Grasshopper: **0.13.1**.
+Changelog: [CHANGELOG.md](CHANGELOG.md). Current development version and Grasshopper pin: **0.17.0** (unreleased). Use sibling project references until packages are published.
 
 ## Safety
 

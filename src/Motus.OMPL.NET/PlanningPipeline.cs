@@ -26,11 +26,14 @@ internal static class PlanningPipeline
         IConstraintChecker? PathConstraints,
         IConstraintChecker? ConstraintChecker);
 
-    internal static ICollisionChecker? ResolveChecker(PlanningRequest request, ICollisionChecker? defaultChecker) =>
-        request.Options.CollisionChecker
-        ?? (request.Options.AttachedBodies is { Count: > 0 }
-            ? CollisionCheckerFactory.Create(request.Robot, null, request.Options.AttachedBodies)
-            : defaultChecker);
+    internal static ICollisionChecker? ResolveChecker(PlanningRequest request, ICollisionChecker? defaultChecker)
+    {
+        var checker = request.Options.CollisionChecker
+            ?? (request.Options.AttachedBodies is { Count: > 0 }
+                ? CollisionCheckerFactory.Create(request.Robot, null, request.Options.AttachedBodies)
+                : defaultChecker);
+        return checker is null ? null : PlanningDiagnostics.Wrap(checker);
+    }
 
     internal static PlanningResult? TryBuildPlanSpace(PlanningRequest request, out PlanSpace space)
     {

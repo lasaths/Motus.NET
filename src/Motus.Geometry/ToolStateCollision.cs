@@ -9,12 +9,13 @@ public static class ToolStateCollision
         Trajectory trajectory,
         ToolDefinition sessionTool,
         CollisionScene? scene,
-        ICollisionChecker? checker)
+        ICollisionChecker? checker,
+        SerialJointChain? chain = null)
     {
         if (sessionTool.Capabilities is null || !PlanningCollision.SceneHasObstacles(scene))
             return Array.Empty<string>();
 
-        checker ??= CollisionCheckerFactory.Create(trajectory.Robot);
+        checker ??= CollisionCheckerFactory.Create(trajectory.Robot, chain);
         if (checker is null)
             return new[] { "Tool-state collision check skipped: no collision checker available." };
 
@@ -26,7 +27,7 @@ public static class ToolStateCollision
 
             var session = trajectory.Robot.WithTool(new ToolDefinition(
                 sessionTool.Name, sessionTool.Tcp, geom, sessionTool.Capabilities));
-            var stateChecker = CollisionCheckerFactory.Create(session) ?? checker;
+            var stateChecker = CollisionCheckerFactory.Create(session, chain) ?? checker;
             if (!stateChecker.IsCollisionFree(point.JointState, scene!))
             {
                 var width = point.ToolState?.GetValueOrDefault("width");

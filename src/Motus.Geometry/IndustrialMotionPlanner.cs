@@ -16,9 +16,13 @@ public sealed class IndustrialMotionPlanner
     private readonly IFkSolver _fk;
     private readonly BaseFrame _base;
     private readonly ToolFrame _tool;
+    private readonly SerialJointChain? _chain;
+    /// <summary>Sticky: empty initial plan scene skips collision for the whole program (Detach must not re-enable checks).</summary>
+    private bool _collisionActive;
 
     public IndustrialMotionPlanner(RobotPreset preset, SerialJointChain? chain = null)
     {
+        _chain = chain;
         _linPlanner = new CartesianLinearPathPlanner(preset, chain);
         _fk = KinematicsResolver.CreateFkSolver(preset, chain);
         _base = preset.BaseFrame;
@@ -30,18 +34,23 @@ public sealed class IndustrialMotionPlanner
         if (request.Segments.Count == 0)
             return PlanningResult.Failed(new[] { "Motion program requires at least one segment." });
 
+        // Empty plan ColScene (example 10): Detach restores workpieces into the live scene —
+        // without a sticky skip, retract then fails on the fat Robotiq hull.
+        _collisionActive = PlanningCollision.SceneHasObstacles(request.Options.CollisionScene);
+
         var currentState = request.Start;
         var currentPose = TcpPose(currentState);
         var points = new List<TrajectoryPoint> { new(0, currentState) };
         var spans = new List<ToolStateTimeline.SegmentSpan>();
+        var segmentOptions = new Dictionary<int, PlanningOptions>();
         var warnings = new List<string>();
         var t = 0.0;
         double pendingEntryBlend = 0;
         int pendingBlendFromSegment = -1;
 
         var ctx = BuildContext(request);
-        var robotOnly = CollisionCheckerFactory.Create(ctx.Robot, attached: null);
-        var liveOptions = CloneOptions(request.Options, ctx, robotOnly);
+        var robotOnly = request.Options.CollisionChecker ?? CollisionCheckerFactory.Create(ctx.Robot, _chain, attached: null);
+        var liveOptions = CloneOptions(request.Options, ctx, robotOnly, request.Segments[0].AllowedCollisionPairs);
         var startCollision = PlanningCollision.ValidateEndpoints(
             request.Start,
             request.Start,
@@ -52,18 +61,32 @@ public sealed class IndustrialMotionPlanner
             return startCollision;
 
         var openAttachStart = new Dictionary<string, (double Start, AttachedBody Body)>(StringComparer.OrdinalIgnoreCase);
+        foreach (var body in ctx.Attached)
+            openAttachStart.Add(body.Name, (0, body));
         var attachSpans = new List<AttachTimeSpan>();
 
         for (var i = 0; i < request.Segments.Count; i++)
         {
             var segment = request.Segments[i];
+            liveOptions = CloneOptions(request.Options, ctx, robotOnly, segment.AllowedCollisionPairs);
+            segmentOptions[i] = liveOptions;
 
             if (segment is AttachSegment attachSeg)
             {
+                if (openAttachStart.ContainsKey(attachSeg.Name))
+                    return InvalidAttachment(i, $"'{attachSeg.Name}' is already attached.");
                 var apply = ApplyAttach(ctx, attachSeg, request.Robot, ref liveOptions, robotOnly, out var err);
                 if (err is not null)
                     return PlanningResult.Failed(new[] { $"Segment {i + 1} Attach: {err}" });
                 ctx = apply;
+                segmentOptions[i] = liveOptions;
+                // Skip attach pose check when plan started with no obstacles.
+                if (_collisionActive)
+                {
+                    var attachHit = PlanningCollision.ValidateEndpoints(currentState, currentState,
+                        liveOptions.CollisionScene, liveOptions.CollisionChecker, includeAttachedBodies: true);
+                    if (attachHit is not null) return attachHit;
+                }
                 var body = ctx.Attached.First(a => string.Equals(a.Name, attachSeg.Name, StringComparison.OrdinalIgnoreCase));
                 openAttachStart[attachSeg.Name] = (t, body);
                 spans.Add(new ToolStateTimeline.SegmentSpan(i, segment, points.Count - 1, points.Count - 1));
@@ -72,6 +95,8 @@ public sealed class IndustrialMotionPlanner
 
             if (segment is DetachSegment detachSeg)
             {
+                if (!openAttachStart.ContainsKey(detachSeg.Name))
+                    return InvalidAttachment(i, $"'{detachSeg.Name}' is not attached.");
                 if (openAttachStart.TryGetValue(detachSeg.Name, out var open))
                 {
                     attachSpans.Add(new AttachTimeSpan(open.Start, t, new[] { open.Body }, detachSeg.WorldPose));
@@ -79,9 +104,28 @@ public sealed class IndustrialMotionPlanner
                 }
 
                 ctx = ctx.Detach(detachSeg.Name, detachSeg.WorldPose);
-                liveOptions = CloneOptions(liveOptions, ctx, robotOnly);
+                liveOptions = CloneOptions(request.Options, ctx, robotOnly, segment.AllowedCollisionPairs);
+                segmentOptions[i] = liveOptions;
+                if (_collisionActive)
+                {
+                    var detachHit = PlanningCollision.ValidateEndpoints(currentState, currentState,
+                        liveOptions.CollisionScene, liveOptions.CollisionChecker,
+                        includeAttachedBodies: ctx.Attached.Count > 0);
+                    if (detachHit is not null) return detachHit;
+                }
                 spans.Add(new ToolStateTimeline.SegmentSpan(i, segment, points.Count - 1, points.Count - 1));
                 continue;
+            }
+
+            if (segment is SetToolStateSegment or WaitSegment)
+            {
+                if (_collisionActive)
+                {
+                    var holdHit = PlanningCollision.ValidateEndpoints(currentState, currentState,
+                        liveOptions.CollisionScene, liveOptions.CollisionChecker,
+                        includeAttachedBodies: ctx.Attached.Count > 0);
+                    if (holdHit is not null) return holdHit;
+                }
             }
 
             if (segment is SetToolStateSegment setSeg)
@@ -109,9 +153,12 @@ public sealed class IndustrialMotionPlanner
             }
 
             var pointStartBefore = points.Count;
-            var result = PlanSegment(request.Robot, liveOptions, currentState, currentPose, segment, warnings);
+            var result = segment is TransferSegment transfer
+                ? PlanTransfer(request, liveOptions, currentState, transfer)
+                : PlanSegment(request.Robot, liveOptions, currentState, currentPose, segment, warnings);
             if (!result.Success || result.Trajectory is null)
                 return result;
+            warnings.AddRange(result.Warnings);
 
             var rawPoints = result.Trajectory.Points;
             var startIdx = 0;
@@ -173,18 +220,42 @@ public sealed class IndustrialMotionPlanner
 
         var initialToolState = ResolveInitialToolState(request);
         var annotated = ToolStateTimeline.Apply(points, request.Segments, spans, initialToolState);
-        var trajectory = new Trajectory(request.Robot, annotated);
+        var trajectory = new Trajectory(request.Robot, annotated, attachSpans);
+        if (request.Options.RetimeTrajectory)
+            trajectory = TrajectoryRetimer.Retime(trajectory);
 
         if (request.SessionTool is { Capabilities: not null } sessionTool)
         {
-            warnings.AddRange(ToolStateCollision.ValidateTrajectory(
-                trajectory,
-                sessionTool,
-                liveOptions.CollisionScene,
-                liveOptions.CollisionChecker));
+            foreach (var span in spans)
+            {
+                var options = segmentOptions[span.SegmentIndex];
+                warnings.AddRange(ToolStateCollision.ValidateTrajectory(
+                    new Trajectory(request.Robot, trajectory.Points.Skip(span.FirstPointIndex)
+                        .Take(span.LastPointIndex - span.FirstPointIndex + 1).ToArray()),
+                    sessionTool, options.CollisionScene, options.CollisionChecker, _chain));
+            }
         }
 
-        return PlanningResult.Succeeded(trajectory, warnings, attachSpans);
+        return PlanningResult.Succeeded(trajectory, warnings);
+    }
+
+    private static PlanningResult InvalidAttachment(int index, string error) => PlanningResult.Failed(new[]
+    {
+        new PlanningMessage(PlanningMessageCodes.InvalidInput, $"Segment {index + 1}: {error}", PlanningMessageSeverity.Error)
+    });
+
+    private PlanningResult PlanTransfer(MotionProgramRequest request, PlanningOptions options,
+        JointState start, TransferSegment segment)
+    {
+        if (request.TransferPlannerFactory is null)
+            return PlanningResult.Failed(new[] { new PlanningMessage(PlanningMessageCodes.PlannerUnavailable,
+                "TransferSegment requires TransferPlannerFactory (for example, RRT-Connect).", PlanningMessageSeverity.Error) });
+        var reach = CartesianGoalSolver.TryReachFromStart(request.Robot, segment.Goal, start, _chain);
+        if (!reach.Success || reach.Solution is null)
+            return PlanningResult.Failed(reach.Errors.Select(error => new PlanningMessage(
+                PlanningMessageCodes.InvalidGoal, error, PlanningMessageSeverity.Error)));
+        return request.TransferPlannerFactory(options.CollisionChecker!).Plan(
+            new PlanningRequest(request.Robot, start, reach.Solution, options));
     }
 
     private static PlanningContext BuildContext(MotionProgramRequest request)
@@ -197,7 +268,7 @@ public sealed class IndustrialMotionPlanner
         return ctx;
     }
 
-    private static PlanningContext ApplyAttach(
+    private PlanningContext ApplyAttach(
         PlanningContext ctx,
         AttachSegment attach,
         RobotModel robot,
@@ -208,7 +279,7 @@ public sealed class IndustrialMotionPlanner
         error = null;
         _ = robot;
         var next = ctx.Attach(attach.Name, WithIdentityPose(attach.Geometry), attach.TcpLocal);
-        liveOptions = CloneOptions(liveOptions, next, robotOnly);
+        liveOptions = CloneOptions(liveOptions, next, robotOnly, attach.AllowedCollisionPairs);
         return next;
     }
 
@@ -223,16 +294,16 @@ public sealed class IndustrialMotionPlanner
             _ => source
         };
 
-    private static PlanningOptions CloneOptions(
-        PlanningOptions baseOpts, PlanningContext ctx, ICollisionChecker robotOnly)
+    private PlanningOptions CloneOptions(
+        PlanningOptions baseOpts, PlanningContext ctx, ICollisionChecker robotOnly,
+        IReadOnlyList<(string A, string B)>? contacts = null)
     {
         // Robot-vs-scene without attached; attached volumes only vs scene (grasp occupies the part).
         ICollisionChecker checker = robotOnly;
         if (ctx.Attached is { Count: > 0 })
         {
-            var fk = KinematicsResolver.CreateFkSolver(ctx.Robot.Preset);
             checker = new AttachAwareCollisionChecker(
-                robotOnly, fk, ctx.Robot.Preset.BaseFrame, ctx.Robot.Preset.ToolFrame, ctx.Attached);
+                robotOnly, _fk, ctx.Robot.Preset.BaseFrame, ctx.Robot.Preset.ToolFrame, ctx.Attached);
         }
 
         return new PlanningOptions
@@ -240,9 +311,11 @@ public sealed class IndustrialMotionPlanner
             MaxJointStepRadians = baseOpts.MaxJointStepRadians,
             TimeStepSeconds = baseOpts.TimeStepSeconds,
             MaxJointVelocityRadiansPerSecond = baseOpts.MaxJointVelocityRadiansPerSecond,
-            CollisionScene = ctx.Scene,
+            CollisionScene = contacts is { Count: > 0 }
+                ? new CollisionScene(ctx.Scene.Objects, ctx.Scene.AllowedPairs.Concat(contacts).ToArray())
+                : ctx.Scene,
             CollisionChecker = checker,
-            RetimeTrajectory = baseOpts.RetimeTrajectory,
+            RetimeTrajectory = false,
             AttachedBodies = ctx.Attached,
             PathConstraints = baseOpts.PathConstraints,
             ConstraintChecker = baseOpts.ConstraintChecker,
@@ -262,6 +335,7 @@ public sealed class IndustrialMotionPlanner
         {
             PtpSegment ptp => TcpPose(ptp.Goal),
             LinSegment lin => lin.Goal,
+            TransferSegment transfer => transfer.Goal,
             CircSegment circ => circ.Goal,
             SetToolStateSegment => throw new InvalidOperationException("SET segment has no Cartesian goal."),
             WaitSegment => throw new InvalidOperationException("WAIT segment has no Cartesian goal."),
@@ -414,12 +488,12 @@ public sealed class IndustrialMotionPlanner
         return PlanningResult.Succeeded(traj);
     }
 
-    private static PlanningResult? ValidateSegmentCollision(RobotModel robot, PlanningOptions options, Trajectory traj)
+    private PlanningResult? ValidateSegmentCollision(RobotModel robot, PlanningOptions options, Trajectory traj)
     {
         var checker = options.CollisionChecker;
         var scene = options.CollisionScene ?? new CollisionScene();
-        if (!PlanningCollision.SceneHasObstacles(scene) &&
-            options.AttachedBodies is not { Count: > 0 })
+        // Sticky empty-scene skip (see Plan): Detach-seeded obstacles must not re-enable checks.
+        if (!_collisionActive)
             return null;
 
         checker ??= CollisionCheckerFactory.Create(robot, attached: options.AttachedBodies);

@@ -1,6 +1,7 @@
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Globalization;
 
 namespace Motus.Core;
 
@@ -70,8 +71,8 @@ public static class TrajectoryExport
 
         return new TrajectoryExportResult(
             prepared,
-            ToJson(prepared, options),
-            ToCsv(prepared, options.Retime),
+            SerializeJson(prepared, options),
+            SerializeCsv(prepared),
             validation);
     }
 
@@ -81,7 +82,11 @@ public static class TrajectoryExport
     public static string ToJson(Trajectory trajectory, TrajectoryExportOptions? options)
     {
         options ??= new TrajectoryExportOptions();
-        var traj = Prepare(trajectory, options);
+        return SerializeJson(Prepare(trajectory, options), options);
+    }
+
+    private static string SerializeJson(Trajectory traj, TrajectoryExportOptions options)
+    {
         var jointNames = traj.Robot.JointNames;
         var toolFrame = ResolveExportToolFrame(traj.Robot, options.SessionToolFrame);
         var toolCapabilities = options.ToolCapabilities;
@@ -141,6 +146,7 @@ public static class TrajectoryExport
                     max = p.Max,
                     defaultValue = p.Default
                 }),
+                attachSpans = AttachmentData(traj),
                 points = traj.Points.Select(p =>
                 {
                     Dictionary<string, double>? joints = null;
@@ -208,6 +214,7 @@ public static class TrajectoryExport
                 max = p.Max,
                 defaultValue = p.Default
             }),
+            attachSpans = AttachmentData(traj),
             points = traj.Points.Select(p =>
             {
                 Dictionary<string, double>? joints = null;
@@ -237,8 +244,11 @@ public static class TrajectoryExport
 
     public static string ToCsv(Trajectory trajectory, TrajectoryExportOptions? options)
     {
-        options ??= new TrajectoryExportOptions();
-        var traj = Prepare(trajectory, options);
+        return SerializeCsv(Prepare(trajectory, options));
+    }
+
+    private static string SerializeCsv(Trajectory traj)
+    {
         var n = traj.Robot.Preset.AxisCount;
         var stewart = Units.IsStewart(traj.Robot.Preset);
         var jointSuffix = stewart ? "_m" : "_rad";
@@ -249,17 +259,19 @@ public static class TrajectoryExport
         for (var i = 1; i <= n; i++) sb.Append($",joint_{i}{jointSuffix}");
         if (hasMotionMetadata) sb.Append(",motion_type,segment_index,blend_radius_m");
         if (hasToolState) sb.Append(",tool_state_json");
+        if (traj.AttachSpans.Count > 0) sb.Append(",attachment_spans_json");
         sb.AppendLine();
+        var firstPoint = true;
         foreach (var p in traj.Points)
         {
-            sb.Append(p.TimeSeconds.ToString("F6"));
+            sb.Append(p.TimeSeconds.ToString("F6", CultureInfo.InvariantCulture));
             foreach (var j in p.JointState.Positions)
-                sb.Append(',').Append(j.ToString("F6"));
+                sb.Append(',').Append(j.ToString("F6", CultureInfo.InvariantCulture));
             if (hasMotionMetadata)
             {
                 sb.Append(',').Append(p.MotionType?.ToString().ToLowerInvariant() ?? string.Empty);
                 sb.Append(',').Append(p.SegmentIndex?.ToString() ?? string.Empty);
-                sb.Append(',').Append(p.BlendRadiusMeters?.ToString("F6") ?? string.Empty);
+                sb.Append(',').Append(p.BlendRadiusMeters?.ToString("F6", CultureInfo.InvariantCulture) ?? string.Empty);
             }
             if (hasToolState)
             {
@@ -267,12 +279,52 @@ public static class TrajectoryExport
                 if (p.ToolState is null)
                     sb.Append(string.Empty);
                 else
-                    sb.Append('"').Append(JsonSerializer.Serialize(p.ToolState.Values)).Append('"');
+                    AppendJsonCell(sb, p.ToolState.Values);
+            }
+            if (traj.AttachSpans.Count > 0)
+            {
+                sb.Append(',');
+                if (firstPoint) AppendJsonCell(sb, AttachmentData(traj));
             }
             sb.AppendLine();
+            firstPoint = false;
         }
         return sb.ToString();
     }
+
+    private static void AppendJsonCell(StringBuilder sb, object? value) =>
+        sb.Append('"').Append(JsonSerializer.Serialize(value).Replace("\"", "\"\"")).Append('"');
+
+    private static object? AttachmentData(Trajectory trajectory) => trajectory.AttachSpans.Count == 0 ? null :
+        trajectory.AttachSpans.Select(span => new
+        {
+            startSeconds = span.StartSeconds,
+            endSeconds = span.EndSeconds,
+            releaseWorldPose = span.ReleaseWorldPose is { } release ? FrameData(release) : null,
+            bodies = span.Bodies.Select(body => new
+            {
+                name = body.Name,
+                sourceSceneObjectName = body.SourceSceneObjectName,
+                tcpLocalPose = FrameData(body.TcpLocalPose),
+                geometry = new
+                {
+                    name = body.Geometry.Name,
+                    shape = body.Geometry.Shape.ToString().ToLowerInvariant(),
+                    pose = FrameData(body.Geometry.Pose),
+                    extentX = body.Geometry.ExtentX,
+                    extentY = body.Geometry.ExtentY,
+                    extentZ = body.Geometry.ExtentZ,
+                    meshVertices = body.Geometry.MeshVertices,
+                    meshIndices = body.Geometry.MeshIndices
+                }
+            })
+        });
+
+    private static object FrameData(Frame frame) => new
+    {
+        x = frame.X, y = frame.Y, z = frame.Z,
+        qw = frame.Qw, qx = frame.Qx, qy = frame.Qy, qz = frame.Qz
+    };
 
     private static object? ResolveExportToolFrame(RobotModel robot, ToolFrame? sessionTool)
     {

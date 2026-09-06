@@ -37,11 +37,15 @@ public sealed class Trajectory
 {
     public RobotModel Robot { get; }
     public IReadOnlyList<TrajectoryPoint> Points { get; }
+    /// <summary>Attachment timeline on the same clock as Points; preserved by retiming and export.</summary>
+    public IReadOnlyList<AttachTimeSpan> AttachSpans { get; }
     public double DurationSeconds => Points.Count == 0 ? 0 : Points[^1].TimeSeconds;
 
-    public Trajectory(RobotModel robot, IReadOnlyList<TrajectoryPoint> points)
+    public Trajectory(RobotModel robot, IReadOnlyList<TrajectoryPoint> points,
+        IReadOnlyList<AttachTimeSpan>? attachSpans = null)
     {
         Robot = robot;
         Points = points;
+        AttachSpans = attachSpans ?? Array.Empty<AttachTimeSpan>();
     }
 }

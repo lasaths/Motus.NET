@@ -125,7 +125,9 @@ public class AttachPlanningTests
     public void Example10_PickAndPlace_Box()
     {
         var preset = PresetLoader.LoadByModelName("UR5e");
-        var robot = new RobotModel(preset);
+        var robot = new RobotModel(preset, new RobotCollisionModel(
+            new[] { new LinkCollisionGeometry(0, "base", CollisionObject.Sphere("base", Frame.Identity, 0.01)) },
+            CollisionObject.Sphere("robotiq_2f85", new Frame(0, 0, -0.06), 0.015)));
         var fk = KinematicsResolver.CreateFkSolver(preset);
         var planner = new IndustrialMotionPlanner(preset);
 
@@ -141,20 +143,35 @@ public class AttachPlanningTests
             Transforms.FromFrame(grasp.Tcp),
             Transforms.FromFrame(new Frame(0, 0, -0.06))));
         var brick = CollisionObject.Box("b00", brickPose, 0.03, 0.03, 0.03);
-        var scene = new CollisionScene(Array.Empty<CollisionObject>());
+        // GH example 10 plans against table only; brick enters the scene at Detach.
+        var table = CollisionObject.Box("table", new Frame(homeTcp.Tcp.X, homeTcp.Tcp.Y, homeTcp.Tcp.Z - 0.15), 0.4, 0.4, 0.01);
+        var scene = new CollisionScene(new[] { table });
 
         var open = new EndEffectorState(new Dictionary<string, double> { ["width"] = 0.085 });
         var close = new EndEffectorState(new Dictionary<string, double> { ["width"] = 0.04 });
         var caps = ToolCapabilities.Robotiq2F85;
-
-        var segments = PickPlaceCycle.Expand(grasp, place, approachMeters: 0.05, open, close, brick);
-
+        var checker = new RobotMeshCollisionChecker(robot);
         var opts = new PlanningOptions
         {
             CollisionScene = scene,
-            CollisionChecker = CollisionCheckerFactory.Create(robot),
+            CollisionChecker = checker,
             MaxJointStepRadians = 0.05
         };
+
+        // Detach-at-place restores the brick into the gripper; without Touch, Tr is null.
+        var noTouch = PickPlaceCycle.Expand(grasp, place, approachMeters: 0.05, open, close, brick);
+        var failed = planner.Plan(new MotionProgramRequest(robot, home, noTouch, opts)
+        {
+            InitialToolState = open,
+            ToolCapabilities = caps
+        });
+        Assert.False(failed.Success);
+        Assert.Null(failed.Trajectory);
+
+        // Explicit gripper contact is allowed only during grasp/release (GH Touch = robotiq_2f85).
+        var segments = PickPlaceCycle.Expand(grasp, place, approachMeters: 0.05, open, close, brick,
+            options: new PickPlaceOptions { TouchBodies = new[] { "robotiq_2f85" } });
+
         var result = planner.Plan(new MotionProgramRequest(robot, home, segments, opts)
         {
             InitialToolState = open,

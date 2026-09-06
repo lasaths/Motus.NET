@@ -23,6 +23,12 @@ public sealed class FclCollisionChecker : ICollisionChecker, IDisposable
     private readonly Dictionary<string, uint> _nameToId = new(StringComparer.OrdinalIgnoreCase);
     private int _sceneHash;
 
+    // Rough per-world native footprint (broadphase + colliders) — the managed wrapper is a few
+    // pointers/fields, so without this hint the GC has no signal to collect it promptly and this
+    // unmanaged memory piles up (e.g. one world per attach/detach fingerprint under Auto Plan).
+    private const long FclWorldMemoryPressureBytes = 64 * 1024;
+    private bool _memoryPressureAdded;
+
     public FclCollisionChecker(RobotModel robot, SerialJointChain? chain = null, IReadOnlyList<AttachedBody>? attached = null)
     {
         _robot = robot;
@@ -39,6 +45,8 @@ public sealed class FclCollisionChecker : ICollisionChecker, IDisposable
                 _world = NativeBindings.motus_fcl_world_create();
                 RegisterSelfAllowedPairs();
             }
+            GC.AddMemoryPressure(FclWorldMemoryPressureBytes);
+            _memoryPressureAdded = true;
         }
         else
         {
@@ -119,6 +127,11 @@ public sealed class FclCollisionChecker : ICollisionChecker, IDisposable
                 NativeBindings.motus_fcl_world_destroy(_world);
                 _world = IntPtr.Zero;
             }
+        }
+        if (_memoryPressureAdded)
+        {
+            GC.RemoveMemoryPressure(FclWorldMemoryPressureBytes);
+            _memoryPressureAdded = false;
         }
         GC.SuppressFinalize(this);
     }

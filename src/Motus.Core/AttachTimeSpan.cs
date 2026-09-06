@@ -15,8 +15,12 @@ public sealed class AttachTimeSpan
         IReadOnlyList<AttachedBody> bodies,
         Frame? releaseWorldPose = null)
     {
+        if (!double.IsFinite(startSeconds) || startSeconds < 0)
+            throw new ArgumentOutOfRangeException(nameof(startSeconds));
+        if (!double.IsFinite(endSeconds) || endSeconds < startSeconds)
+            throw new ArgumentOutOfRangeException(nameof(endSeconds));
         StartSeconds = startSeconds;
-        EndSeconds = Math.Max(endSeconds, startSeconds);
+        EndSeconds = endSeconds;
         Bodies = bodies ?? Array.Empty<AttachedBody>();
         ReleaseWorldPose = releaseWorldPose;
     }

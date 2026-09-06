@@ -76,6 +76,15 @@ Host-agnostic library (Grasshopper, CLI, services). MoveIt-shaped seams without 
 - [x] Legged full-driver Plan adapter (`ValidateForPlan`) over `TryBuild` output: SSM/collision validation only.
 - [x] Legged Motus Plan synthesis (`LeggedGait.PlanBodyPath`): body-path polyline → `TryBuild` + hard SSM `ValidateForPlan` (Walk remains rich UI).
 
+## Milestone 10 — Reliable pick/place · 0.17.0 (unreleased)
+
+- [x] Detach at placement before retract; explicit segment-local gripper contact pairs
+- [x] Multi-object scene regression, including already placed objects
+- [x] Opt-in RRT-Connect transfers via injected planner; LIN approach/retract
+- [x] Attachment timeline on Trajectory, preserved by all retimers and JSON/CSV export
+- [x] SET/WAIT dwell preservation and single-pass export retiming
+- [x] Version metadata aligned across core and Grasshopper
+
 ## Related repos
 
 Rhino / Grasshopper UI lives in **Motus.Grasshopper** and consumes this core via versioned DLLs or NuGet.

@@ -43,10 +43,10 @@ public sealed class PlanningContext
 
     public PlanningContext Detach(string name, Frame worldPose)
     {
-        var body = Attached.FirstOrDefault(a => a.Name == name);
+        var body = Attached.FirstOrDefault(a => string.Equals(a.Name, name, StringComparison.OrdinalIgnoreCase));
         if (body is null) return this;
 
-        var attached = Attached.Where(a => a.Name != name).ToList();
+        var attached = Attached.Where(a => !string.Equals(a.Name, name, StringComparison.OrdinalIgnoreCase)).ToList();
         var objects = Scene.Objects.ToList();
         if (body.SourceSceneObjectName is not null)
             objects.Add(TransformGeometryToWorld(body.Geometry, worldPose));
@@ -60,6 +60,7 @@ public sealed class PlanningContext
             CollisionShape.Sphere => CollisionObject.Sphere(local.Name, worldPose, local.ExtentX),
             CollisionShape.Box => CollisionObject.Box(local.Name, worldPose, local.ExtentX, local.ExtentY, local.ExtentZ),
             CollisionShape.Capsule => CollisionObject.Capsule(local.Name, worldPose, local.ExtentX, local.ExtentY),
+            CollisionShape.Mesh => CollisionObject.Mesh(local.Name, worldPose, local.MeshVertices!, local.MeshIndices!),
             _ => local
         };
     }

@@ -50,7 +50,8 @@ public static class PlanningCollision
         ICollisionChecker? checker,
         bool includeAttachedBodies = false)
     {
-        if (checker is null || (!SceneHasObstacles(scene) && !includeAttachedBodies))
+        // No obstacles → nothing to endpoint-check (attached-only empty scenes still trip SelfCollisionFree).
+        if (checker is null || !SceneHasObstacles(scene))
             return null;
         scene ??= new CollisionScene();
 

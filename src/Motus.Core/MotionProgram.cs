@@ -8,7 +8,8 @@ public enum MotionPrimitiveType
     Set,
     Wait,
     Attach,
-    Detach
+    Detach,
+    Transfer
 }
 
 public abstract class MotionSegment
@@ -18,6 +19,8 @@ public abstract class MotionSegment
     /// <summary>Target tool state at segment end (Ramp) or start (Instant).</summary>
     public EndEffectorState? TargetState { get; init; }
     public ToolStateMode ToolStateMode { get; init; } = ToolStateMode.Hold;
+    /// <summary>Explicit contact exceptions for this segment only; other bodies remain collision checked.</summary>
+    public IReadOnlyList<(string A, string B)> AllowedCollisionPairs { get; init; } = Array.Empty<(string, string)>();
 
     protected MotionSegment(MotionPrimitiveType type, double blendRadiusMeters)
     {
@@ -47,6 +50,17 @@ public sealed class LinSegment : MotionSegment
     {
         Goal = goal;
         StepMeters = stepMeters;
+    }
+}
+
+/// <summary>Collision-aware joint-space transfer to a Cartesian goal; no straight TCP path guarantee.</summary>
+public sealed class TransferSegment : MotionSegment
+{
+    public CartesianPose Goal { get; }
+
+    public TransferSegment(CartesianPose goal) : base(MotionPrimitiveType.Transfer, 0)
+    {
+        Goal = goal ?? throw new ArgumentNullException(nameof(goal));
     }
 }
 
@@ -135,6 +149,8 @@ public sealed class MotionProgramRequest
     public EndEffectorState? InitialToolState { get; init; }
     public ToolCapabilities? ToolCapabilities { get; init; }
     public ToolDefinition? SessionTool { get; init; }
+    /// <summary>Creates a transfer planner for the current robot/attached-body checker, e.g. RRT-Connect.</summary>
+    public Func<ICollisionChecker, IPlanner>? TransferPlannerFactory { get; init; }
 
     public MotionProgramRequest(
         RobotModel robot,

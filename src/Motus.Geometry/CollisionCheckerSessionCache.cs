@@ -5,7 +5,11 @@ namespace Motus.Geometry;
 /// <summary>Reuses collision checkers for identical robot / attach / scene fingerprints within a process.</summary>
 public static class CollisionCheckerSessionCache
 {
+    // ponytail: unbounded fingerprints (e.g. one per attach/detach cycle under Auto Plan) would
+    // otherwise pile up WeakReference entries the GC has no pressure to collect; cap + FIFO evict.
+    private const int MaxEntries = 64;
     private static readonly Dictionary<int, WeakReference<ICollisionChecker>> Cache = new();
+    private static readonly List<int> Order = new();
     private static readonly object Gate = new();
 
     public static ICollisionChecker GetOrCreate(
@@ -36,19 +40,39 @@ public static class CollisionCheckerSessionCache
                 ? CollisionCheckerFactory.Create(robot, tree, chain, planJointNames, treeDriverHome, attached)
                 : CollisionCheckerFactory.Create(robot, chain, attached);
             Cache[key] = new WeakReference<ICollisionChecker>(checker);
+            Order.Add(key);
             PruneDead();
+            EvictOverflow();
             return checker;
         }
     }
 
-    public static void Clear() { lock (Gate) Cache.Clear(); }
+    public static void Clear() { lock (Gate) { Cache.Clear(); Order.Clear(); } }
 
     private static void PruneDead()
     {
         foreach (var key in Cache.Keys.ToList())
         {
             if (!Cache[key].TryGetTarget(out _))
+            {
                 Cache.Remove(key);
+                Order.Remove(key);
+            }
+        }
+    }
+
+    // Bookkeeping-only eviction: the value is a WeakReference, so dropping the dictionary entry
+    // never frees memory a caller still holds — it only bounds the (key, WeakReference) overhead
+    // itself, which would otherwise grow with every distinct attach/scene fingerprint over a long
+    // session (e.g. one per pick-place attach/detach cycle under Auto Plan). Never Dispose here:
+    // the checker may still be in active use by whoever is holding the strong reference.
+    private static void EvictOverflow()
+    {
+        while (Order.Count > MaxEntries)
+        {
+            var oldest = Order[0];
+            Order.RemoveAt(0);
+            Cache.Remove(oldest);
         }
     }
 

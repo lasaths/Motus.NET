@@ -50,6 +50,7 @@ internal static class ManagedRrtConnect
 
         for (var iter = 0; iter < options.MaxIterations; iter++)
         {
+            PlanningDiagnostics.RecordRrtIteration();
             if (options.ShouldCancel?.Invoke() == true)
                 return PlanningResult.Failed(new[] { "Planning cancelled." });
 
