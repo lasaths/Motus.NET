@@ -38,6 +38,7 @@ public sealed class IndustrialMotionPlanner
         // without a sticky skip, retract then fails on the fat Robotiq hull.
         _collisionActive = PlanningCollision.SceneHasObstacles(request.Options.CollisionScene);
 
+        request.ReportProgress?.Invoke(new(0, request.Segments.Count, "Checking start"));
         var currentState = request.Start;
         var currentPose = TcpPose(currentState);
         var points = new List<TrajectoryPoint> { new(0, currentState) };
@@ -68,6 +69,7 @@ public sealed class IndustrialMotionPlanner
         for (var i = 0; i < request.Segments.Count; i++)
         {
             var segment = request.Segments[i];
+            request.ReportProgress?.Invoke(new(i, request.Segments.Count, segment.Type.ToString()));
             liveOptions = CloneOptions(request.Options, ctx, robotOnly, segment.AllowedCollisionPairs);
             segmentOptions[i] = liveOptions;
 
@@ -218,6 +220,7 @@ public sealed class IndustrialMotionPlanner
         foreach (var leftover in openAttachStart.Values)
             attachSpans.Add(new AttachTimeSpan(leftover.Start, t, new[] { leftover.Body }));
 
+        request.ReportProgress?.Invoke(new(request.Segments.Count, request.Segments.Count, "Timing and tool checks"));
         var initialToolState = ResolveInitialToolState(request);
         var annotated = ToolStateTimeline.Apply(points, request.Segments, spans, initialToolState);
         var trajectory = new Trajectory(request.Robot, annotated, attachSpans);
@@ -236,6 +239,7 @@ public sealed class IndustrialMotionPlanner
             }
         }
 
+        request.ReportProgress?.Invoke(new(request.Segments.Count, request.Segments.Count, "Done"));
         return PlanningResult.Succeeded(trajectory, warnings);
     }
 

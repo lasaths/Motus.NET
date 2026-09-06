@@ -140,12 +140,17 @@ public sealed class DetachSegment : MotionSegment
     }
 }
 
+/// <summary>Completed segment count plus the active planning phase; counts do not estimate wall time.</summary>
+public sealed record MotionProgramProgress(int CompletedSegments, int TotalSegments, string Phase);
+
 public sealed class MotionProgramRequest
 {
     public RobotModel Robot { get; }
     public JointState Start { get; }
     public IReadOnlyList<MotionSegment> Segments { get; }
     public PlanningOptions Options { get; }
+    /// <summary>Optional synchronous progress callback on the planning thread. Marshal UI work in the caller.</summary>
+    public Action<MotionProgramProgress>? ReportProgress { get; init; }
     public EndEffectorState? InitialToolState { get; init; }
     public ToolCapabilities? ToolCapabilities { get; init; }
     public ToolDefinition? SessionTool { get; init; }
