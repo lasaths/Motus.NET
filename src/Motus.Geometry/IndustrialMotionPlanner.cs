@@ -40,7 +40,8 @@ public sealed class IndustrialMotionPlanner
         int pendingBlendFromSegment = -1;
 
         var ctx = BuildContext(request);
-        var liveOptions = CloneOptions(request.Options, ctx);
+        var robotOnly = CollisionCheckerFactory.Create(ctx.Robot, attached: null);
+        var liveOptions = CloneOptions(request.Options, ctx, robotOnly);
         var startCollision = PlanningCollision.ValidateEndpoints(
             request.Start,
             request.Start,
@@ -59,7 +60,7 @@ public sealed class IndustrialMotionPlanner
 
             if (segment is AttachSegment attachSeg)
             {
-                var apply = ApplyAttach(ctx, attachSeg, request.Robot, ref liveOptions, out var err);
+                var apply = ApplyAttach(ctx, attachSeg, request.Robot, ref liveOptions, robotOnly, out var err);
                 if (err is not null)
                     return PlanningResult.Failed(new[] { $"Segment {i + 1} Attach: {err}" });
                 ctx = apply;
@@ -78,7 +79,7 @@ public sealed class IndustrialMotionPlanner
                 }
 
                 ctx = ctx.Detach(detachSeg.Name, detachSeg.WorldPose);
-                liveOptions = CloneOptions(liveOptions, ctx);
+                liveOptions = CloneOptions(liveOptions, ctx, robotOnly);
                 spans.Add(new ToolStateTimeline.SegmentSpan(i, segment, points.Count - 1, points.Count - 1));
                 continue;
             }
@@ -201,12 +202,13 @@ public sealed class IndustrialMotionPlanner
         AttachSegment attach,
         RobotModel robot,
         ref PlanningOptions liveOptions,
+        ICollisionChecker robotOnly,
         out string? error)
     {
         error = null;
         _ = robot;
         var next = ctx.Attach(attach.Name, WithIdentityPose(attach.Geometry), attach.TcpLocal);
-        liveOptions = CloneOptions(liveOptions, next);
+        liveOptions = CloneOptions(liveOptions, next, robotOnly);
         return next;
     }
 
@@ -221,10 +223,10 @@ public sealed class IndustrialMotionPlanner
             _ => source
         };
 
-    private static PlanningOptions CloneOptions(PlanningOptions baseOpts, PlanningContext ctx)
+    private static PlanningOptions CloneOptions(
+        PlanningOptions baseOpts, PlanningContext ctx, ICollisionChecker robotOnly)
     {
         // Robot-vs-scene without attached; attached volumes only vs scene (grasp occupies the part).
-        var robotOnly = CollisionCheckerFactory.Create(ctx.Robot, attached: null);
         ICollisionChecker checker = robotOnly;
         if (ctx.Attached is { Count: > 0 })
         {

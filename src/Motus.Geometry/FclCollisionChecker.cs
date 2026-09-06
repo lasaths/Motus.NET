@@ -108,6 +108,8 @@ public sealed class FclCollisionChecker : ICollisionChecker, IDisposable
         return true;
     }
 
+    ~FclCollisionChecker() => Dispose();
+
     public void Dispose()
     {
         lock (NativeSync.Gate)
@@ -118,6 +120,7 @@ public sealed class FclCollisionChecker : ICollisionChecker, IDisposable
                 _world = IntPtr.Zero;
             }
         }
+        GC.SuppressFinalize(this);
     }
 
     // Plane has no FCL upsert yet — fall back so planes are not silently ignored.
