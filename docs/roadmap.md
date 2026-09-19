@@ -90,9 +90,9 @@ Host-agnostic library (Grasshopper, CLI, services). MoveIt-shaped seams without 
 
 Public package SemVer is **aligned** across Motus.NET (NuGet), Motus.Grasshopper, and yak `motus`.
 
-After **0.17.0**, the next public package versions are **1.8.0 → 2.0.0 → 2.0.0**. There is no empty 1.0–1.7 NuGet/Yak upload series; those numbers are not published package lines. Milestone names match the coordinated release tags.
+After **0.17.0**, the next public package versions are **1.8.0 → 1.9.0 → 2.0.0**. There is no empty 1.0–1.7 NuGet/Yak upload series; those numbers are not published package lines. Milestone names match the coordinated release tags.
 
-First public Yak Package Manager release is **2.0.0**.
+First public Yak Package Manager release is **2.0.0** (identity + pack path ready; Package Manager push still open).
 
 ## Milestone 11 — Trust & polish · 1.8.0
 
@@ -104,22 +104,24 @@ Prove 0.17-class behavior is shippable. Few new features — polish and hardenin
 - [x] Package identity / CHANGELOG prepared for **1.8.0**; docs reflect SemVer jump after shipped **0.17.0**
 - [x] Coordinated Motus.NET + Motus.Grasshopper **1.8.0** release (NuGet + GitHub tags [v1.8.0](https://github.com/lasaths/Motus.NET/releases/tag/v1.8.0)); Yak not required
 
-## Milestone 12 — Host product · 2.0.0
+## Milestone 12 — Host product · 1.9.0
 
 - [x] Pick Place empty-`TouchBodies` fail-closed (`PickPlaceCycle`); GH empty **Touch** gate landed in Motus.Grasshopper
-- [ ] Remaining GH UX from 1.8 QA: Program Tr-keep / experimental Robot Status / family handoff (Motus.Grasshopper follow-up; not blocking 2.0.0 SemVer cut)
+- [ ] Remaining GH UX from 1.8 QA: Program Tr-keep / experimental Robot Status / family handoff (Motus.Grasshopper follow-up; not blocking 1.9.0 / 2.0.0 SemVer cuts)
 - [x] Motus.Grasshopper NuGet-default integration path (`UseMotusNetProjectReference` defaults false; pin via `MotusNetPackages.props`). Remaining “all hosts” = other consumers / docs only — see Future optional.
 - [x] Small additive API: empty-`TouchBodies` throw before stability promise
-- [x] Package identity / CHANGELOG prepared for **2.0.0** (this cut); NuGet + tags on `v2.0.0` after merge — Yak still unpublished (first public Yak **2.0.0**)
+- [x] Coordinated Motus.NET + Motus.Grasshopper **1.9.0** release (NuGet + GitHub tags [v1.9.0](https://github.com/lasaths/Motus.NET/releases/tag/v1.9.0)); Yak still unpublished (first public Yak **2.0.0**)
 - [ ] Still no live control / ROS / vendor SDKs
 
 ## Milestone 13 — Public product · 2.0.0
 
-- [ ] Align Motus.NET + Motus.Grasshopper (+ yak `motus`) to **2.0.0**
-- [ ] First public Yak Package Manager push
-- [ ] Declare supported vs advanced surface (e.g. UR pick/place + LIN/RRT supported; stewart/legged advanced unless proven in 1.8)
-- [ ] SemVer major = supported product / Yak GA; breaking changes only if banked from 1.8/1.9
-- [ ] Release checklist: dual-TFM pack, yak build/push, docs
+- [x] Align Motus.NET + Motus.Grasshopper package / tag identity to **2.0.0** ([v2.0.0](https://github.com/lasaths/Motus.NET/releases/tag/v2.0.0); sibling GH [v2.0.0](https://github.com/lasaths/Motus.Grasshopper/releases/tag/v2.0.0)); yak `motus` manifest identity **2.0.0** in-repo
+- [x] Motus.NET NuGet **2.0.0** flat-container live + Grasshopper NuGet-default restore proven (all six packages)
+- [ ] First public Yak Package Manager push (`motus` **2.0.0**)
+- [x] Declare supported vs advanced surface — [supported-surface.md](supported-surface.md)
+- [x] SemVer major cut = supported-product identity (breaking changes only if banked from 1.8/1.9); Yak GA still gated on Package Manager push + Rhino matrix
+- [x] Dual-TFM pack / yak build path + docs for **2.0.0** identity (pack scripts ready; production yak push open)
+- [ ] Rhino regression matrix green on host (serial, Stewart, SE2, Tool, Walk/Plan, Example 10) — soft until local Rhino pass
 
 ## Related repos
 
@@ -138,28 +140,29 @@ Unless scope expands, these remain out through the **2.0.0** public product:
 - ROS / MoveIt runtime dependency
 - Vendor SDKs
 
-## Experimental mobility (post-1.8 / parallel track)
+## Experimental mobility (tip-shipped; outside Yak GA)
 
-**Shipped on Motus.NET tip (1.8.0+ tree; NuGet publish may lag):** HolonomicSE3 + free-flyer hull collision + aerial export honesty (`Family=aerial`), Unitree H2 / Go2 meshless fixtures + FK smoke. **Not** Motus.Grasshopper GA components — GH Motus Robot optional URDF load stays experimental Remark only. Stays outside the 2.0 Yak GA surface unless product scope explicitly expands. Physical control, ROS, and vendor SDKs remain out.
+**Shipped on Motus.NET tip / NuGet 2.0.0 (experimental bar):** HolonomicSE3 + free-flyer hull collision + aerial export honesty (`Family=aerial`, RPY fixed-axis XYZ / URDF), Unitree H2 / Go2 meshless fixtures + FK / stance smoke. **Not** Motus.Grasshopper GA components — GH Motus Robot optional URDF load stays experimental Remark only; Waypoints/Export warn aerial ≠ MoveJ. Stays outside the 2.0 Yak GA / Supported surface unless product scope explicitly expands. Physical control, ROS, and vendor SDKs remain out.
 
 Honest Motus meanings (planning / preview / export only):
 
-| Track | Verdict | In Motus | Not Motus |
-|-------|---------|----------|-----------|
-| **Drone (full)** | Conditional — offline SE(3) | Holonomic SE(3) body planning, collision, export; recommended `Family=aerial` | ArduPilot/PX4, battery, MAVLink, live SITL |
-| **Humanoid** | Partial experimental | Fixed-base / tree arm groups on **Unitree H2** URDF first; optional kinematic biped without balance | Walking balance, loco-manipulation GA |
-| **Quadruped** | Partial experimental | Mammal stance/IK on Go2/ANYmal-class URDF; distinct from insectoid `Family=legged` Walk | Spot-class loco product equivalence |
+| Track | Verdict | In Motus (tip) | Not Motus |
+|-------|---------|----------------|-----------|
+| **Drone (full)** | Conditional — offline SE(3) | Holonomic SE(3) body planning, hull collision, export `bodyPose`; recommended `Family=aerial` | ArduPilot/PX4, battery, MAVLink, live SITL |
+| **Humanoid** | Partial experimental | Fixed-base / tree arm groups on **Unitree H2** meshless fixture; no balance claim | Walking balance, loco-manipulation GA |
+| **Quadruped** | Partial experimental | Go2 meshless FK / stance smoke; distinct from insectoid `Family=legged` Walk | Mammal foot-IK product, Spot-class loco GA |
 
-Suggested phasing (does **not** change 1.8 → 1.9 → 2.0 supported promises):
+Phasing vs Supported / Yak GA (does **not** shrink the 2.0 product goal):
 
-- **1.9 (optional):** Family string helpers / experimental flags + skipped tests only — no GH GA components
-- **Post-2.0 parallel track:** SE(3) aerial Motus-full; humanoid upper-body (H2); quadruped stance/IK fixtures
+- **Tip-shipped experimental (2.0.0 tree):** SE(3) aerial Motus-honest path; H2 upper-body / arm-group fixture; Go2 stance FK fixture — see [supported-surface.md](supported-surface.md) Experimental
+- **Still open for M13 completion:** first Yak Package Manager push; Rhino matrix host pass
+- **Post-Yak deepen (optional):** richer aerial fixtures (Crazyflie / Skydio), mammal foot IK, kinematic biped preview — still not balance / flight stack
 
-Candidate fixtures ([awesome-robot-descriptions](https://github.com/robot-descriptions/awesome-robot-descriptions) / Unitree):
+Fixtures ([awesome-robot-descriptions](https://github.com/robot-descriptions/awesome-robot-descriptions) / Unitree):
 
-1. **Crazyflie 2.0** (`cf2_description`) — aerial / SE(3) body proxy
-2. **Unitree H2** (`h2_description`) — **first humanoid fixture** ([unitree_ros/robots/h2_description](https://github.com/unitreerobotics/unitree_ros/tree/master/robots/h2_description)); prefer over G1
-3. **Unitree Go2** (`go2_description`) — mammal quadruped stance/IK
-4. Optional visual: Skydio X2; G1 only if H2 meshless strip fails CI
+1. **Unitree H2** (`tests/fixtures/unitree_h2/`) — **landed** experimental humanoid fixture ([unitree_ros/robots/h2_description](https://github.com/unitreerobotics/unitree_ros/tree/master/robots/h2_description))
+2. **Unitree Go2** (`tests/fixtures/unitree_go2/`) — **landed** experimental mammal quad FK / stance smoke
+3. Free-flyer box (`tests/fixtures/aerial/`) — **landed** SE(3) hull-collision fixture
+4. Optional later: Crazyflie 2.0 / Skydio X2 visuals; G1 only if H2 path regresses
 
-Do not claim shipped support in release notes until ADR + METHODS + fixtures land.
+Do not promote experimental tracks to Supported / Yak headline in release notes without ADR + METHODS + Rhino matrix proof.
