@@ -99,3 +99,24 @@ Rhino / Grasshopper UI lives in **Motus.Grasshopper** and consumes this core via
 - Physical robot control
 - ROS / MoveIt runtime dependency
 - Vendor SDKs
+
+## Experimental mobility (post-1.8 / parallel track)
+
+**Not shipped.** Docs-only intent for aerial / humanoid / mammal-quadruped work that stays outside the 2.0 Yak GA surface unless product scope explicitly expands. Physical control, ROS, and vendor SDKs remain out (see above / Path to 2.0 when present).
+
+Honest Motus meanings (planning / preview / export only):
+
+| Track | Verdict | In Motus | Not Motus |
+|-------|---------|----------|-----------|
+| **Drone (full)** | Conditional — offline SE(3) | Holonomic SE(3) body planning, collision, export; recommended `Family=aerial` | ArduPilot/PX4, battery, MAVLink, live SITL |
+| **Humanoid** | Partial experimental | Fixed-base / tree arm groups on a humanoid URDF; optional kinematic biped without balance | Walking balance, loco-manipulation GA |
+| **Quadruped** | Partial experimental | Mammal stance/IK on Go2/ANYmal-class URDF; distinct from insectoid `Family=legged` Walk | Spot-class loco product equivalence |
+
+Suggested phasing (does **not** change 1.8 → 1.9 → 2.0 supported promises):
+
+- **1.9 (optional):** Family string helpers / experimental flags + skipped tests only — no GH GA components
+- **Post-2.0 parallel track:** SE(3) aerial Motus-full; humanoid upper-body; quadruped stance/IK fixtures
+
+Candidate fixtures ([awesome-robot-descriptions](https://github.com/robot-descriptions/awesome-robot-descriptions)): Crazyflie 2.0 (`cf2_description`), Unitree Go2 (`go2_description`), Unitree G1 or Skydio X2.
+
+Do not claim shipped support in release notes until ADR + METHODS + fixtures land.
