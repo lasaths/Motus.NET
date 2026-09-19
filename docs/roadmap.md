@@ -100,9 +100,9 @@ Prove 0.17-class behavior is shippable. Few new features — polish and hardenin
 
 - [ ] Drive Motus.Grasshopper regression matrix green on real Rhino (serial, Stewart, SE2, Tool, Walk/Plan legged, Example 10). See sibling Motus.Grasshopper `docs/regression-matrix.md`
 - [x] Expand Motus.NET automated coverage for matrix rows that cannot run Rhino GUI in CI (`RegressionMatrixLogicTests`)
-- [ ] Fix defects found in that pass
-- [x] Docs / examples match NuGet **0.17.0** default (UseLocal optional for close-open-dev / tip)
-- [ ] Coordinated Motus.NET + Motus.Grasshopper **1.8.0** release (NuGet + GitHub tags); Yak not required yet
+- [ ] Fix defects found in that Rhino pass
+- [x] Package identity / CHANGELOG prepared for **1.8.0** (this cut); docs reflect SemVer jump after shipped **0.17.0**
+- [ ] Coordinated Motus.NET + Motus.Grasshopper **1.8.0** release (NuGet + GitHub tags); Yak not required yet — publish on tag after this metadata lands
 
 ## Milestone 12 — Host product · 1.9.0
 
