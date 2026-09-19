@@ -4,7 +4,7 @@
 
 | Motus.NET | [Motus.Grasshopper](https://github.com/lasaths/Motus.Grasshopper) |
 |-----------|-------------------------------------------------------------------|
-| Libraries on [nuget.org](https://www.nuget.org/profiles/lasaths) (latest published **1.8.0**; next cut **1.9.0** — publish on tag) | Rhino/GH UI that calls these APIs |
+| Libraries on [nuget.org](https://www.nuget.org/profiles/lasaths) (latest published **1.8.0**; next cut **2.0.0** — publish on tag) | Rhino/GH UI that calls these APIs |
 | Owns math, units, Status contracts, method DOIs | Thin components + examples |
 
 No UI, no vendor runtime, no live robot I/O. Algorithm catalog: [docs/METHODS.md](docs/METHODS.md) · citations: [docs/REFERENCES.bib](docs/REFERENCES.bib).
@@ -178,7 +178,7 @@ Benchmarks: `benchmarks/Motus.Benchmarks` (BenchmarkDotNet).
 
 Tag `vX.Y.Z` → [release workflow](.github/workflows/release.yml) builds, tests, packs, publishes to [nuget.org](https://www.nuget.org/profiles/lasaths), and creates a GitHub Release.
 
-Changelog: [CHANGELOG.md](CHANGELOG.md). Package/`Directory.Build.props` targets **1.9.0** (NuGet publish on `v1.9.0` tag). Latest published NuGet is **1.8.0** ([GitHub v1.8.0](https://github.com/lasaths/Motus.NET/releases/tag/v1.8.0)). Use sibling project references until **1.9.0** is tagged and published.
+Changelog: [CHANGELOG.md](CHANGELOG.md). Package/`Directory.Build.props` targets **2.0.0** (NuGet publish on `v2.0.0` tag). Latest published NuGet is **1.8.0** ([GitHub v1.8.0](https://github.com/lasaths/Motus.NET/releases/tag/v1.8.0)). Use sibling project references until **2.0.0** is tagged and published.
 
 ## Safety
 
