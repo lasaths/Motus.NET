@@ -18,6 +18,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `MobilityModel.HolonomicSE3` + `MobilityBoundsSE3`: offline SE(3) free-flyer mobility (x/y/z + RPY) with singularity Status near pitch ±π/2; managed sampling appends +6 dims beside existing HolonomicSE2.
 - `Units.AerialFamily` / `IsAerial` — Family gate so aerial body poses are not treated as UR MoveJ radians.
 - Docs: `docs/adr/0001-holonomic-se3-aerial.md`, `docs/aerial.md`; meshless fixture `tests/fixtures/aerial/free_flyer_box.urdf`.
+- Catalog URDF fixtures + smoke tests (Panda, UR10e+Robotiq minimal); experimental Unitree H2 meshless fixture + smoke tests.
+- `RegressionMatrixLogicTests` — CI coverage for Motus.Grasshopper `docs/regression-matrix.md` rows that cannot run Rhino GUI on GitHub runners (serial LIN/joint/RRT, Stewart meters export, HolonomicSE2, Tool Cap schema, IK Status, PlanBodyPath, Example 10 Touch, export TotgLite default).
 
 ## [0.17.0] - 2026-09-19
 
