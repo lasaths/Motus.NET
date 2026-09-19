@@ -106,7 +106,7 @@ Prove 0.17-class behavior is shippable. Few new features — polish and hardenin
 
 ## Milestone 12 — Host product · 1.9.0
 
-- [ ] Grasshopper UX / Program / Pick Place / Preview edge cases from 1.8 QA
+- [ ] Grasshopper UX / Program / Pick Place / Preview edge cases from 1.8 QA (Touch fail-closed landed; Program Tr-keep / experimental Robot / family handoff in Motus.Grasshopper follow-up)
 - [x] Motus.Grasshopper NuGet-default integration path (`UseMotusNetProjectReference` defaults false; pin via `MotusNetPackages.props`). Remaining “all hosts” = other consumers / docs only — see Future optional.
 - [ ] Small additive APIs only if needed before the stability promise
 - [ ] Coordinated **1.9.0** NuGet + GitHub tags; still no requirement to publish Yak
@@ -139,7 +139,7 @@ Unless scope expands, these remain out through the **2.0.0** public product:
 
 ## Experimental mobility (post-1.8 / parallel track)
 
-**Not shipped.** Docs-only intent for aerial / humanoid / mammal-quadruped work that stays outside the 2.0 Yak GA surface unless product scope explicitly expands. Physical control, ROS, and vendor SDKs remain out (see above / Path to 2.0 when present).
+**Shipped on Motus.NET tip (1.8.0+ tree; NuGet publish may lag):** HolonomicSE3 + free-flyer hull collision + aerial export honesty (`Family=aerial`), Unitree H2 / Go2 meshless fixtures + FK smoke. **Not** Motus.Grasshopper GA components — GH Motus Robot optional URDF load stays experimental Remark only. Stays outside the 2.0 Yak GA surface unless product scope explicitly expands. Physical control, ROS, and vendor SDKs remain out.
 
 Honest Motus meanings (planning / preview / export only):
 
