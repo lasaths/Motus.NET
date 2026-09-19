@@ -171,6 +171,93 @@ public static class TrajectoryExport
             return JsonSerializer.Serialize(stewartObj, jsonOptions);
         }
 
+        // Aerial / HolonomicSE3: body poses — not UR MoveJ radians.
+        if (Units.IsAerial(traj.Robot.Preset))
+        {
+            var aerialObj = new
+            {
+                exportVersion = PlanBundleContract.ExportVersion,
+                contractVersion = PlanBundleContract.ContractVersion,
+                robot = traj.Robot.DisplayName,
+                family = traj.Robot.Preset.Family,
+                jointNames,
+                units = new
+                {
+                    bodyPosition = "meters",
+                    bodyOrientation = "radians_rpy_fixed_xyz",
+                    time = "seconds",
+                    distance = "meters",
+                    // Explicit: empty/prop joints are not industrial MoveJ coordinates.
+                    waypointsQ = "not_ur_movej"
+                },
+                frameConvention = new
+                {
+                    baseFrame = "free_flyer_body",
+                    orientation = "rpy_fixed_axis_xyz_urdf",
+                    tcpFrame = "tool_center_point",
+                    jointOrder = "robot.jointNames order (often empty for pure free-flyer)"
+                },
+                durationSeconds = traj.DurationSeconds,
+                pointCount = traj.Points.Count,
+                retimed = options.Retime,
+                provenance = provenance is null ? null : new
+                {
+                    plannerId = provenance.PlannerId,
+                    randomSeed = provenance.RandomSeed,
+                    settingsHash = provenance.SettingsHash,
+                    retimeAlgorithm = provenance.RetimeAlgorithm
+                },
+                diagnostics = diagnostics?.Select(d => new
+                {
+                    code = d.Code,
+                    severity = d.Severity.ToString().ToLowerInvariant(),
+                    message = d.Message
+                }),
+                toolFrame,
+                toolCapabilities = toolCapabilities is null ? null : toolCapabilities.Parameters.Select(p => new
+                {
+                    name = p.Name,
+                    unit = p.Unit,
+                    min = p.Min,
+                    max = p.Max,
+                    defaultValue = p.Default
+                }),
+                attachSpans = AttachmentData(traj),
+                points = traj.Points.Select(p =>
+                {
+                    Dictionary<string, double>? joints = null;
+                    if (jointNames is not null && jointNames.Count > 0)
+                    {
+                        joints = new Dictionary<string, double>();
+                        for (var i = 0; i < jointNames.Count; i++)
+                            joints[jointNames[i]] = p.JointState.Positions[i];
+                    }
+
+                    var body = ResolveAerialBodyPose(traj.Robot, p);
+                    return new
+                    {
+                        timeSeconds = p.TimeSeconds,
+                        bodyPose = body is null ? null : new
+                        {
+                            x = body.Value.X,
+                            y = body.Value.Y,
+                            z = body.Value.Z,
+                            roll = body.Value.Roll,
+                            pitch = body.Value.Pitch,
+                            yaw = body.Value.Yaw
+                        },
+                        baseFrame = p.BaseFrameOverride is { } bf ? FrameData(bf.Frame) : null,
+                        propJoints = joints,
+                        motionType = p.MotionType?.ToString().ToLowerInvariant(),
+                        segmentIndex = p.SegmentIndex,
+                        blendRadiusMeters = p.BlendRadiusMeters,
+                        toolState = p.ToolState?.Values
+                    };
+                })
+            };
+            return JsonSerializer.Serialize(aerialObj, jsonOptions);
+        }
+
         var obj = new
         {
             exportVersion = PlanBundleContract.ExportVersion,
@@ -249,6 +336,9 @@ public static class TrajectoryExport
 
     private static string SerializeCsv(Trajectory traj)
     {
+        if (Units.IsAerial(traj.Robot.Preset))
+            return SerializeAerialCsv(traj);
+
         var n = traj.Robot.Preset.AxisCount;
         var stewart = Units.IsStewart(traj.Robot.Preset);
         var jointSuffix = stewart ? "_m" : "_rad";
@@ -290,6 +380,57 @@ public static class TrajectoryExport
             firstPoint = false;
         }
         return sb.ToString();
+    }
+
+    /// <summary>
+    /// Aerial CSV: body SE(3) columns — never <c>joint_N_rad</c> (that would imply MoveJ).
+    /// </summary>
+    private static string SerializeAerialCsv(Trajectory traj)
+    {
+        var hasMotionMetadata = traj.Points.Any(p => p.MotionType is not null || p.SegmentIndex is not null || p.BlendRadiusMeters is not null);
+        var sb = new StringBuilder();
+        sb.Append("time_seconds,body_x_m,body_y_m,body_z_m,body_roll_rad,body_pitch_rad,body_yaw_rad");
+        if (hasMotionMetadata) sb.Append(",motion_type,segment_index,blend_radius_m");
+        sb.AppendLine();
+        foreach (var p in traj.Points)
+        {
+            var body = ResolveAerialBodyPose(traj.Robot, p);
+            sb.Append(p.TimeSeconds.ToString("F6", CultureInfo.InvariantCulture));
+            if (body is null)
+            {
+                sb.Append(",,,,,,");
+            }
+            else
+            {
+                sb.Append(',').Append(body.Value.X.ToString("F6", CultureInfo.InvariantCulture));
+                sb.Append(',').Append(body.Value.Y.ToString("F6", CultureInfo.InvariantCulture));
+                sb.Append(',').Append(body.Value.Z.ToString("F6", CultureInfo.InvariantCulture));
+                sb.Append(',').Append(body.Value.Roll.ToString("F6", CultureInfo.InvariantCulture));
+                sb.Append(',').Append(body.Value.Pitch.ToString("F6", CultureInfo.InvariantCulture));
+                sb.Append(',').Append(body.Value.Yaw.ToString("F6", CultureInfo.InvariantCulture));
+            }
+
+            if (hasMotionMetadata)
+            {
+                sb.Append(',').Append(p.MotionType?.ToString().ToLowerInvariant() ?? string.Empty);
+                sb.Append(',').Append(p.SegmentIndex?.ToString() ?? string.Empty);
+                sb.Append(',').Append(p.BlendRadiusMeters?.ToString("F6", CultureInfo.InvariantCulture) ?? string.Empty);
+            }
+
+            sb.AppendLine();
+        }
+
+        return sb.ToString();
+    }
+
+    private static (double X, double Y, double Z, double Roll, double Pitch, double Yaw)? ResolveAerialBodyPose(
+        RobotModel robot,
+        TrajectoryPoint point)
+    {
+        var frame = point.BaseFrameOverride?.Frame ?? robot.Preset.BaseFrame.Frame;
+        if (!MobilityModel.HolonomicSE3.TryFromFrame(frame, out var pose, out _))
+            return null;
+        return (pose.X, pose.Y, pose.Z, pose.RollRadians, pose.PitchRadians, pose.YawRadians);
     }
 
     private static void AppendJsonCell(StringBuilder sb, object? value) =>

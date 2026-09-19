@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `FreeFlyerHullCollisionChecker` (`IBaseFrameCollisionChecker`): sphere hull at per-sample base frame for HolonomicSE3 free-flyer collision (clear/blocked RRT smoke).
+- Aerial `TrajectoryExport` honesty: `Family=aerial` JSON/CSV emit `bodyPose` (m + RPY rad) and `waypointsQ=not_ur_movej` — never `jointsRadians` / MoveJ columns.
 - `MobilityModel.HolonomicSE3` + `MobilityBoundsSE3`: offline SE(3) free-flyer mobility (x/y/z + RPY) with singularity Status near pitch ±π/2; managed sampling appends +6 dims beside existing HolonomicSE2.
 - `Units.AerialFamily` / `IsAerial` — Family gate so aerial body poses are not treated as UR MoveJ radians.
 - Docs: `docs/adr/0001-holonomic-se3-aerial.md`, `docs/aerial.md`; meshless fixture `tests/fixtures/aerial/free_flyer_box.urdf`.
