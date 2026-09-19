@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.0] - 2026-09-19
+
+### Added
+
+- Public product / Yak GA SemVer: coordinated Motus.NET + Motus.Grasshopper (+ yak `motus`) identity **2.0.0**.
+- Supported vs advanced surface declaration: [`docs/supported-surface.md`](docs/supported-surface.md) (UR pick/place + LIN/RRT supported; Stewart / legged / SE2 advanced; aerial / H2 / Go2 experimental).
+
+### Changed
+
+- Package/`Directory.Build.props` / `motus-net.version` aligned to **2.0.0** (coordinated cut after **1.9.0**).
+- Roadmap Milestone 13 identity prepared; first production Yak push remains a separate pack/auth step (not this PR).
+
 ## [1.9.0] - 2026-09-19
 
 ### Changed
@@ -517,7 +529,8 @@ Initial public release.
 - **Motus.Presets** — JSON preset loader with bundled UR and KUKA defaults
   (approximate public datasheet values for planning/visualization only).
 
-[Unreleased]: https://github.com/lasaths/Motus.NET/compare/v1.9.0...HEAD
+[Unreleased]: https://github.com/lasaths/Motus.NET/compare/v2.0.0...HEAD
+[2.0.0]: https://github.com/lasaths/Motus.NET/compare/v1.9.0...v2.0.0
 [1.9.0]: https://github.com/lasaths/Motus.NET/compare/v1.8.0...v1.9.0
 [1.8.0]: https://github.com/lasaths/Motus.NET/compare/v0.17.0...v1.8.0
 [0.17.0]: https://github.com/lasaths/Motus.NET/compare/v0.16.0...v0.17.0
