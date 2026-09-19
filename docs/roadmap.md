@@ -101,15 +101,16 @@ Prove 0.17-class behavior is shippable. Few new features — polish and hardenin
 - [ ] Drive Motus.Grasshopper regression matrix green on real Rhino (serial, Stewart, SE2, Tool, Walk/Plan legged, Example 10). See sibling Motus.Grasshopper `docs/regression-matrix.md`
 - [x] Expand Motus.NET automated coverage for matrix rows that cannot run Rhino GUI in CI (`RegressionMatrixLogicTests`)
 - [ ] Fix defects found in that Rhino pass
-- [x] Package identity / CHANGELOG for **1.8.0**; docs reflect SemVer jump after shipped **0.17.0**
-- [x] Coordinated Motus.NET + Motus.Grasshopper **1.8.0** release (NuGet + GitHub tags); Yak not required yet
+- [x] Package identity / CHANGELOG prepared for **1.8.0**; docs reflect SemVer jump after shipped **0.17.0**
+- [x] Coordinated Motus.NET + Motus.Grasshopper **1.8.0** release (NuGet + GitHub tags [v1.8.0](https://github.com/lasaths/Motus.NET/releases/tag/v1.8.0)); Yak not required
 
 ## Milestone 12 — Host product · 1.9.0
 
-- [ ] Grasshopper UX / Program / Pick Place / Preview edge cases from 1.8 QA (Touch fail-closed landed; Program Tr-keep / experimental Robot / family handoff in Motus.Grasshopper follow-up)
+- [x] Pick Place empty-`TouchBodies` fail-closed (`PickPlaceCycle`); GH empty **Touch** gate landed in Motus.Grasshopper
+- [ ] Remaining GH UX from 1.8 QA: Program Tr-keep / experimental Robot Status / family handoff (Motus.Grasshopper follow-up; not blocking 1.9.0 SemVer cut)
 - [x] Motus.Grasshopper NuGet-default integration path (`UseMotusNetProjectReference` defaults false; pin via `MotusNetPackages.props`). Remaining “all hosts” = other consumers / docs only — see Future optional.
-- [ ] Small additive APIs only if needed before the stability promise
-- [ ] Coordinated **1.9.0** NuGet + GitHub tags; still no requirement to publish Yak
+- [x] Small additive API: empty-`TouchBodies` throw before stability promise
+- [x] Package identity / CHANGELOG prepared for **1.9.0** (this cut); NuGet + tags on `v1.9.0` after merge — Yak still unpublished (first public Yak **2.0.0**)
 - [ ] Still no live control / ROS / vendor SDKs
 
 ## Milestone 13 — Public product · 2.0.0
