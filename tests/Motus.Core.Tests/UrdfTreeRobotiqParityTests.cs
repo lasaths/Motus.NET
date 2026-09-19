@@ -3,19 +3,32 @@ using Motus.Presets;
 
 namespace Motus.Core.Tests;
 
-/// <summary>Full-tree LoadTree + mimic on sibling Motus.Grasshopper bundled UR10e+Robotiq.</summary>
+/// <summary>
+/// Full-tree LoadTree + mimic on Motus.NET meshless UR10e+Robotiq fixture
+/// (optional sibling Motus.Grasshopper mesh bundle as fallback).
+/// </summary>
 public class UrdfTreeRobotiqParityTests
 {
-    private static string? FindBundledUr10eRobotiq()
+    private static string FixturePath(string relative) =>
+        Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "fixtures", relative));
+
+    private static string? FindUr10eRobotiqUrdf()
     {
-        // tests/Motus.Core.Tests/bin/Release/net8.0 → repo root → sibling Grasshopper
+        var fixture = FixturePath("ur10e_robotiq/ur10e_robotiq_minimal.urdf");
+        if (File.Exists(fixture))
+            return fixture;
+
+        // Optional: full mesh bundle from sibling Grasshopper checkout
         var testBin = AppContext.BaseDirectory;
         var motusNet = Path.GetFullPath(Path.Combine(testBin, "..", "..", "..", "..", ".."));
-        var sibling = Path.GetFullPath(Path.Combine(motusNet, "..", "Motus.Grasshopper",
-            "resources", "robots", "ur10e_robotiq", "ur10e_robotiq.urdf"));
-        if (File.Exists(sibling)) return sibling;
+        foreach (var siblingName in new[] { "Motus.Grasshopper", "motus.grasshopper" })
+        {
+            var sibling = Path.GetFullPath(Path.Combine(motusNet, "..", siblingName,
+                "resources", "robots", "ur10e_robotiq", "ur10e_robotiq.urdf"));
+            if (File.Exists(sibling))
+                return sibling;
+        }
 
-        // walk up as fallback
         var dir = testBin;
         for (var i = 0; i < 14 && dir is not null; i++)
         {
@@ -23,6 +36,7 @@ public class UrdfTreeRobotiqParityTests
                      {
                          Path.Combine("resources", "robots", "ur10e_robotiq", "ur10e_robotiq.urdf"),
                          Path.Combine("Motus.Grasshopper", "resources", "robots", "ur10e_robotiq", "ur10e_robotiq.urdf"),
+                         Path.Combine("motus.grasshopper", "resources", "robots", "ur10e_robotiq", "ur10e_robotiq.urdf"),
                      })
             {
                 var c = Path.GetFullPath(Path.Combine(dir, rel));
@@ -36,10 +50,9 @@ public class UrdfTreeRobotiqParityTests
     [Fact]
     public void LoadTree_BundledRobotiq_MimicDriverAndFingerMoves()
     {
-        var path = FindBundledUr10eRobotiq();
-        // CI Motus.NET checkout has no sibling Grasshopper; local/dev runs exercise the full URDF.
-        if (path is null)
-            return;
+        var path = FindUr10eRobotiqUrdf();
+        Assert.True(path is not null && File.Exists(path),
+            "Expected tests/fixtures/ur10e_robotiq/ur10e_robotiq_minimal.urdf (or sibling GH mesh URDF).");
 
         var tree = UrdfRobotLoader.LoadTree(path);
         Assert.True(tree.DriverCount >= 7, $"expected arm+knuckle drivers, got {tree.DriverCount}");
