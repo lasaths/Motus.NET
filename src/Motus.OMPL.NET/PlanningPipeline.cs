@@ -39,13 +39,17 @@ internal static class PlanningPipeline
     {
         space = default;
         if (request.Options.Mobility is not null &&
-            request.Options.Mobility is not MobilityModel.HolonomicSE2)
+            request.Options.Mobility is not MobilityModel.HolonomicSE2 &&
+            request.Options.Mobility is not MobilityModel.HolonomicSE3)
         {
             return InvalidOptions(
-                $"Unsupported Mobility model '{request.Options.Mobility.GetType().Name}'. Managed planners support HolonomicSE2 only.");
+                $"Unsupported Mobility model '{request.Options.Mobility.GetType().Name}'. " +
+                "Managed planners support HolonomicSE2 and HolonomicSE3 only.");
         }
 
         var jointSpace = BuildJointPlanSpace(request);
+        if (request.Options.Mobility is MobilityModel.HolonomicSE3 goalSe3)
+            return TryBuildHolonomicSe3PlanSpace(request, jointSpace, goalSe3, out space);
         if (request.Options.Mobility is not MobilityModel.HolonomicSE2 goalBase)
         {
             space = jointSpace;
@@ -96,8 +100,66 @@ internal static class PlanningPipeline
             q => new BaseFrame(new MobilityModel.HolonomicSE2(
                 q[jointDims + 0],
                 q[jointDims + 1],
-                NormalizeYaw(q[jointDims + 2]),
+                NormalizeAngle(q[jointDims + 2]),
                 startBase.Z).BaseFrame),
+            HasMobility: true);
+        return null;
+    }
+
+    private static PlanningResult? TryBuildHolonomicSe3PlanSpace(
+        PlanningRequest request,
+        PlanSpace jointSpace,
+        MobilityModel.HolonomicSE3 goalBase,
+        out PlanSpace space)
+    {
+        space = default;
+        var bounds = request.Options.MobilityBoundsSE3 ?? MobilityBoundsSE3.Default;
+        if (!MobilityModel.HolonomicSE3.TryFromFrame(
+                request.Robot.Preset.BaseFrame.Frame, out var startBase, out var fromFrameStatus))
+            return InvalidOptions(fromFrameStatus ?? "HolonomicSE3 start base is invalid.");
+
+        if (bounds.Validate(startBase, "Start") is { } startErr)
+            return InvalidOptions(startErr);
+        if (bounds.Validate(goalBase, "Goal") is { } goalErr)
+            return InvalidOptions(goalErr);
+
+        var jointDims = jointSpace.Start.Length;
+        var start = new double[jointDims + 6];
+        var goal = new double[jointDims + 6];
+        Array.Copy(jointSpace.Start, start, jointDims);
+        Array.Copy(jointSpace.Goal, goal, jointDims);
+        start[jointDims + 0] = startBase.X;
+        start[jointDims + 1] = startBase.Y;
+        start[jointDims + 2] = startBase.Z;
+        start[jointDims + 3] = startBase.RollRadians;
+        start[jointDims + 4] = startBase.PitchRadians;
+        start[jointDims + 5] = startBase.YawRadians;
+        goal[jointDims + 0] = goalBase.X;
+        goal[jointDims + 1] = goalBase.Y;
+        goal[jointDims + 2] = goalBase.Z;
+        goal[jointDims + 3] = goalBase.RollRadians;
+        goal[jointDims + 4] = goalBase.PitchRadians;
+        goal[jointDims + 5] = goalBase.YawRadians;
+
+        var limits = jointSpace.Limits.Concat(bounds.ToJointLimits()).ToList();
+        space = new PlanSpace(
+            request.Start,
+            start,
+            goal,
+            limits,
+            q =>
+            {
+                var joints = new double[jointDims];
+                Array.Copy(q, joints, jointDims);
+                return jointSpace.ToFull(joints);
+            },
+            q => new BaseFrame(new MobilityModel.HolonomicSE3(
+                q[jointDims + 0],
+                q[jointDims + 1],
+                q[jointDims + 2],
+                NormalizeAngle(q[jointDims + 3]),
+                q[jointDims + 4],
+                NormalizeAngle(q[jointDims + 5])).BaseFrame),
             HasMobility: true);
         return null;
     }
@@ -142,14 +204,14 @@ internal static class PlanningPipeline
         var q = Transforms.NormalizeQuat(frame.Qw, frame.Qx, frame.Qy, frame.Qz);
         if (Math.Abs(q.x) > 1e-9 || Math.Abs(q.y) > 1e-9)
             throw new InvalidOperationException("HolonomicSE2 start base must be yaw-only (no roll/pitch).");
-        return new MobilityModel.HolonomicSE2(frame.X, frame.Y, NormalizeYaw(2.0 * Math.Atan2(q.z, q.w)), frame.Z);
+        return new MobilityModel.HolonomicSE2(frame.X, frame.Y, NormalizeAngle(2.0 * Math.Atan2(q.z, q.w)), frame.Z);
     }
 
-    private static double NormalizeYaw(double yaw)
+    private static double NormalizeAngle(double angle)
     {
-        while (yaw > Math.PI) yaw -= 2.0 * Math.PI;
-        while (yaw < -Math.PI) yaw += 2.0 * Math.PI;
-        return yaw;
+        while (angle > Math.PI) angle -= 2.0 * Math.PI;
+        while (angle < -Math.PI) angle += 2.0 * Math.PI;
+        return angle;
     }
 
     internal static PlanningResult? TryBuildConstraintContext(
@@ -237,7 +299,7 @@ internal static class PlanningPipeline
         if (!space.HasMobility || checker is null || checker is IBaseFrameCollisionChecker)
             return null;
         return InvalidOptions(
-            $"HolonomicSE2 planning requires an {nameof(IBaseFrameCollisionChecker)} when collision checking is enabled; " +
+            $"Holonomic mobility planning requires an {nameof(IBaseFrameCollisionChecker)} when collision checking is enabled; " +
             $"got {checker.GetType().Name}.");
     }
 
@@ -324,7 +386,10 @@ internal static class PlanningPipeline
             return BuildTrajectory(robot, fullWaypoints, opts, checker, usedNative, plannerLabel);
 
         var warnings = BuildSamplingWarnings(checker, usedNative, plannerLabel);
-        warnings.Add(MobilityMethodRefs.DescribeHolonomicSe2());
+        if (opts.Mobility is MobilityModel.HolonomicSE3)
+            warnings.Add(MobilityMethodRefs.DescribeHolonomicSe3());
+        else
+            warnings.Add(MobilityMethodRefs.DescribeHolonomicSe2());
         if (waypoints.Count < 2)
             return PlanningResult.Failed(new[] { "Sampling path has insufficient waypoints." });
 

@@ -12,4 +12,9 @@ public static class MobilityMethodRefs
     public static string DescribeHolonomicSe2() =>
         "Mobility=HolonomicSE2 sampled as x/y/yaw (SE(2)); bounds in meters/radians. " +
         "Reference: LaValle, Planning Algorithms (2006), " + LaVallePlanningAlgorithmsUrl + ".";
+
+    public static string DescribeHolonomicSe3() =>
+        "Mobility=HolonomicSE3 sampled as x/y/z/roll/pitch/yaw (SE(3) free-flyer); " +
+        "RPY fixed-axis XYZ with singularity Status near pitch ±π/2; not a flight controller. " +
+        "Reference: LaValle, Planning Algorithms (2006), " + LaVallePlanningAlgorithmsUrl + ".";
 }

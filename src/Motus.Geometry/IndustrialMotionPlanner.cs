@@ -325,7 +325,8 @@ public sealed class IndustrialMotionPlanner
             ConstraintChecker = baseOpts.ConstraintChecker,
             GroupMap = baseOpts.GroupMap,
             Mobility = baseOpts.Mobility,
-            MobilityBounds = baseOpts.MobilityBounds
+            MobilityBounds = baseOpts.MobilityBounds,
+            MobilityBoundsSE3 = baseOpts.MobilityBoundsSE3
         };
     }
 

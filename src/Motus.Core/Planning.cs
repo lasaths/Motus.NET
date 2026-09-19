@@ -54,12 +54,15 @@ public sealed class PlanningOptions
     /// <summary>When set, planners vary only mapped joints; others stay at <see cref="PlanningRequest.Start"/>.</summary>
     public JointIndexMap? GroupMap { get; init; }
     /// <summary>
-    /// Optional goal/base mobility target. Managed sampling planners currently support
-    /// <see cref="MobilityModel.HolonomicSE2"/> by appending x/y/yaw to the sampled space.
+    /// Optional goal/base mobility target. Managed sampling planners support
+    /// <see cref="MobilityModel.HolonomicSE2"/> (+3 x/y/yaw) and
+    /// <see cref="MobilityModel.HolonomicSE3"/> (+6 x/y/z/RPY).
     /// </summary>
     public MobilityModel? Mobility { get; init; }
-    /// <summary>Bounds for <see cref="Mobility"/> x/y/yaw; defaults are ±2 m and ±π rad.</summary>
+    /// <summary>Bounds for <see cref="MobilityModel.HolonomicSE2"/> x/y/yaw; defaults are ±2 m and ±π rad.</summary>
     public MobilityBounds? MobilityBounds { get; init; }
+    /// <summary>Bounds for <see cref="MobilityModel.HolonomicSE3"/>; defaults fence a local aerial cell.</summary>
+    public MobilityBoundsSE3? MobilityBoundsSE3 { get; init; }
     public bool RetimeTrajectory { get; init; }
 }
 
