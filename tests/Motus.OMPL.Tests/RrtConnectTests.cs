@@ -358,6 +358,117 @@ public class RrtConnectTests
     Assert.Contains(singular.Errors, e => e.Contains("singular", StringComparison.OrdinalIgnoreCase));
   }
 
+  [Fact]
+  public void HolonomicSe3_CollisionClear_PlansAroundFreeFlyerHullObstacle()
+  {
+    var robot = AerialSmokeRobot();
+    var start = new JointState(Array.Empty<double>());
+    var goal = new JointState(Array.Empty<double>());
+    var targetBase = new MobilityModel.HolonomicSE3(1.4, 0, 0.5, 0, 0, 0);
+    var checker = FreeFlyerHullCollisionChecker.ForFreeFlyerBox(robot.Preset.BaseFrame);
+    // Pillar between start (0,0,0.5) and goal (1.4,0,0.5) — planner must detour in Y.
+    var pillar = CollisionObject.Box("pillar", new Frame(0.7, 0, 0.5), halfX: 0.12, halfY: 0.35, halfZ: 0.35);
+    var scene = new CollisionScene(new[] { pillar });
+
+    Assert.True(checker.IsCollisionFree(start, scene, robot.Preset.BaseFrame));
+    Assert.True(checker.IsCollisionFree(goal, scene, new BaseFrame(targetBase.BaseFrame)));
+    Assert.False(checker.IsCollisionFree(start, scene, new BaseFrame(new Frame(0.7, 0, 0.5))));
+
+    var planner = new SamplingPlanner(robot.Preset, new SamplingPlannerOptions
+    {
+      PreferManaged = true,
+      MaxIterations = 8000,
+      StepRadians = 0.15,
+      ConnectThresholdRadians = 0.2,
+      GoalBias = 0.15,
+      RandomSeed = 7
+    });
+    var result = planner.Plan(new PlanningRequest(
+      robot,
+      start,
+      goal,
+      new PlanningOptions
+      {
+        Mobility = targetBase,
+        MobilityBoundsSE3 = MobilityBoundsSE3.Default,
+        CollisionScene = scene,
+        CollisionChecker = checker,
+        MaxJointStepRadians = 0.05
+      }));
+
+    Assert.True(result.Success, string.Join("; ", result.Errors));
+    Assert.True(result.Trajectory!.Points.Count >= 2);
+    foreach (var pt in result.Trajectory.Points)
+    {
+      Assert.NotNull(pt.BaseFrameOverride);
+      Assert.True(checker.IsCollisionFree(pt.JointState, scene, pt.BaseFrameOverride!));
+    }
+  }
+
+  [Fact]
+  public void HolonomicSe3_CollisionBlocked_GoalInsideObstacleFails()
+  {
+    var robot = AerialSmokeRobot();
+    var checker = FreeFlyerHullCollisionChecker.ForFreeFlyerBox(robot.Preset.BaseFrame);
+    var targetBase = new MobilityModel.HolonomicSE3(1.0, 0, 0.5, 0, 0, 0);
+    var wall = CollisionObject.Box("wall", new Frame(1.0, 0, 0.5), halfX: 0.4, halfY: 0.4, halfZ: 0.4);
+    var scene = new CollisionScene(new[] { wall });
+
+    var planner = new SamplingPlanner(robot.Preset, new SamplingPlannerOptions
+    {
+      PreferManaged = true,
+      MaxIterations = 200
+    });
+    var result = planner.Plan(new PlanningRequest(
+      robot,
+      new JointState(Array.Empty<double>()),
+      new JointState(Array.Empty<double>()),
+      new PlanningOptions
+      {
+        Mobility = targetBase,
+        CollisionScene = scene,
+        CollisionChecker = checker
+      }));
+
+    Assert.False(result.Success);
+    Assert.Contains(result.Errors, e =>
+      e.Contains("collision", StringComparison.OrdinalIgnoreCase) ||
+      e.Contains("Goal", StringComparison.OrdinalIgnoreCase));
+  }
+
+  [Fact]
+  public void HolonomicSe3_RejectsNonBaseFrameChecker()
+  {
+    var robot = AerialSmokeRobot();
+    var planner = new SamplingPlanner(robot.Preset, new SamplingPlannerOptions
+    {
+      PreferManaged = true,
+      MaxIterations = 10
+    });
+    var result = planner.Plan(new PlanningRequest(
+      robot,
+      new JointState(Array.Empty<double>()),
+      new JointState(Array.Empty<double>()),
+      new PlanningOptions
+      {
+        Mobility = new MobilityModel.HolonomicSE3(0.5, 0, 0.5, 0, 0, 0),
+        CollisionScene = new CollisionScene(new[]
+        {
+          CollisionObject.Box("box", new Frame(0.25, 0, 0.5), 0.05, 0.05, 0.05)
+        }),
+        CollisionChecker = new JointIgnoreCollisionChecker()
+      }));
+
+    Assert.False(result.Success);
+    Assert.Contains(result.Errors, e => e.Contains(nameof(IBaseFrameCollisionChecker), StringComparison.Ordinal));
+  }
+
+  /// <summary>ICollisionChecker that is not <see cref="IBaseFrameCollisionChecker"/>.</summary>
+  private sealed class JointIgnoreCollisionChecker : ICollisionChecker
+  {
+    public bool IsCollisionFree(JointState state, CollisionScene scene) => true;
+  }
+
   private static RobotModel MobileSmokeRobot() =>
     new(new RobotPreset
     {

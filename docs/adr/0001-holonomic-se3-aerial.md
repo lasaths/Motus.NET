@@ -30,4 +30,5 @@ Motus already plans holonomic **SE(2)** mobile bases (`MobilityModel.HolonomicSE
 
 - SE(2) API unchanged; planners accept SE2 **or** SE3, not mixed.
 - Serial / Stewart / legged planning paths untouched when `Mobility` is null.
-- Full “Motus drone” exit = SE3 plan + base-frame collision + honest Waypoints + METHODS (this ADR). Autopilot remains forever out of Motus.
+- Full “Motus drone” exit = SE3 plan + base-frame collision (`FreeFlyerHullCollisionChecker` / `IBaseFrameCollisionChecker`) + honest Waypoints/export (`Family=aerial`, bodyPose not MoveJ) + METHODS (this ADR). Autopilot remains forever out of Motus.
+- Collision clear/blocked RRT smoke and aerial JSON/CSV export honesty are part of the deepen slice after the foundation.
