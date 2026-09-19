@@ -107,7 +107,7 @@ Prove 0.17-class behavior is shippable. Few new features — polish and hardenin
 ## Milestone 12 — Host product · 1.9.0
 
 - [x] Pick Place empty-`TouchBodies` fail-closed (`PickPlaceCycle`); GH empty **Touch** gate landed in Motus.Grasshopper
-- [ ] Remaining GH UX from 1.8 QA: Program Tr-keep / experimental Robot Status / family handoff (Motus.Grasshopper follow-up; not blocking 1.9.0 SemVer cut)
+- [x] Remaining GH UX from 1.8 QA: Program Tr-keep / experimental Robot Status / family handoff (Motus.Grasshopper #27)
 - [x] Motus.Grasshopper NuGet-default integration path (`UseMotusNetProjectReference` defaults false; pin via `MotusNetPackages.props`). Remaining “all hosts” = other consumers / docs only — see Future optional.
 - [x] Small additive API: empty-`TouchBodies` throw before stability promise
 - [x] Package identity / CHANGELOG prepared for **1.9.0** (this cut); NuGet + tags on `v1.9.0` after merge — Yak still unpublished (first public Yak **2.0.0**)
@@ -115,11 +115,12 @@ Prove 0.17-class behavior is shippable. Few new features — polish and hardenin
 
 ## Milestone 13 — Public product · 2.0.0
 
-- [ ] Align Motus.NET + Motus.Grasshopper (+ yak `motus`) to **2.0.0**
-- [ ] First public Yak Package Manager push
-- [ ] Declare supported vs advanced surface (e.g. UR pick/place + LIN/RRT supported; stewart/legged advanced unless proven in 1.8)
-- [ ] SemVer major = supported product / Yak GA; breaking changes only if banked from 1.8/1.9
-- [ ] Release checklist: dual-TFM pack, yak build/push, docs
+- [x] Package identity / CHANGELOG prepared for **2.0.0** (this cut); NuGet + tags on `v2.0.0` after merge
+- [ ] Align Motus.Grasshopper (+ yak `motus` pack identity) to **2.0.0** (sibling cut)
+- [ ] First public Yak Package Manager push (human auth on Rhino host — not this PR)
+- [x] Declare supported vs advanced surface — [docs/supported-surface.md](supported-surface.md)
+- [x] SemVer major = supported product / Yak GA identity; breaking changes only if banked from 1.8/1.9
+- [ ] Release checklist complete: dual-TFM pack, yak build/push, docs claim published
 
 ## Related repos
 

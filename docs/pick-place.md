@@ -1,4 +1,4 @@
-# Pick/place programs (1.9.0)
+# Pick/place programs (2.0.0)
 
 A cycle travels to pickup hover, approaches with LIN, closes, attaches, lifts with LIN,
 travels to placement hover, approaches with LIN, opens, detaches, and retracts with LIN.
@@ -83,4 +83,4 @@ Motus Pick Place appends `RRT` (default false) and `Touch` (list of collision bo
 names). Wire the full source/obstacle scene to Motus Program. Program supplies the
 RRT-Connect factory and maintains attached objects automatically. Preview uses the
 release pose after detach, and Export retains the timeline, including after retiming.
-Motus.NET package identity targets **1.9.0** (NuGet publish on tag). Empty `TouchBodies` fails closed (`ArgumentException`). Until **1.9.0** is on nuget.org, build GH with `-UseLocal` / `-p:UseMotusNetProjectReference=true` against sibling Motus.NET tip. Motus.Core **1.8.0** is live on nuget.org.
+Motus.NET package identity targets **2.0.0** (NuGet publish on tag). Empty `TouchBodies` fails closed (`ArgumentException`). Until **2.0.0** is on nuget.org, build GH with `-UseLocal` / `-p:UseMotusNetProjectReference=true` against sibling Motus.NET tip.
