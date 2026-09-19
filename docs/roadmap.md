@@ -76,7 +76,7 @@ Host-agnostic library (Grasshopper, CLI, services). MoveIt-shaped seams without 
 - [x] Legged full-driver Plan adapter (`ValidateForPlan`) over `TryBuild` output: SSM/collision validation only.
 - [x] Legged Motus Plan synthesis (`LeggedGait.PlanBodyPath`): body-path polyline → `TryBuild` + hard SSM `ValidateForPlan` (Walk remains rich UI).
 
-## Milestone 10 — Reliable pick/place · 0.17.0 (unreleased)
+## Milestone 10 — Reliable pick/place · 0.17.0 (ready to cut; not on nuget.org yet)
 
 - [x] Detach at placement before retract; explicit segment-local gripper contact pairs
 - [x] Multi-object scene regression, including already placed objects

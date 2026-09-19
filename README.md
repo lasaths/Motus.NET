@@ -4,7 +4,7 @@
 
 | Motus.NET | [Motus.Grasshopper](https://github.com/lasaths/Motus.Grasshopper) |
 |-----------|-------------------------------------------------------------------|
-| Libraries on [nuget.org](https://www.nuget.org/profiles/lasaths); development version `0.17.0` | Rhino/GH UI that calls these APIs |
+| Libraries on [nuget.org](https://www.nuget.org/profiles/lasaths) (latest published **0.13.2**); next release **0.17.0** (not published yet) | Rhino/GH UI that calls these APIs |
 | Owns math, units, Status contracts, method DOIs | Thin components + examples |
 
 No UI, no vendor runtime, no live robot I/O. Algorithm catalog: [docs/METHODS.md](docs/METHODS.md) · citations: [docs/REFERENCES.bib](docs/REFERENCES.bib).
@@ -178,7 +178,7 @@ Benchmarks: `benchmarks/Motus.Benchmarks` (BenchmarkDotNet).
 
 Tag `vX.Y.Z` → [release workflow](.github/workflows/release.yml) builds, tests, packs, publishes to [nuget.org](https://www.nuget.org/profiles/lasaths), and creates a GitHub Release.
 
-Changelog: [CHANGELOG.md](CHANGELOG.md). Current development version and Grasshopper pin: **0.17.0** (unreleased). Use sibling project references until packages are published.
+Changelog: [CHANGELOG.md](CHANGELOG.md). Package/`Directory.Build.props` version and Grasshopper pin target **0.17.0**; nuget.org still tops out at **0.13.2** until this release is tagged and published. Use sibling project references until then.
 
 ## Safety
 

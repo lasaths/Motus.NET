@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-09-19
+
 ### Added
 
 - `TransferSegment` and `MotionProgramRequest.TransferPlannerFactory`: inject RRT-Connect for joint-space travel between Cartesian hover poses while keeping precise LIN approaches/retracts.
@@ -23,7 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- Development package/version files and Grasshopper pin aligned to **0.17.0** (unreleased).
+- Development package/version files and Grasshopper pin aligned to **0.17.0**.
 
 ## [0.16.0] - 2026-09-03
 
@@ -488,7 +490,12 @@ Initial public release.
 - **Motus.Presets** — JSON preset loader with bundled UR and KUKA defaults
   (approximate public datasheet values for planning/visualization only).
 
-[Unreleased]: https://github.com/lasaths/Motus.NET/compare/v0.13.1...HEAD
+[Unreleased]: https://github.com/lasaths/Motus.NET/compare/v0.17.0...HEAD
+[0.17.0]: https://github.com/lasaths/Motus.NET/compare/v0.16.0...v0.17.0
+[0.16.0]: https://github.com/lasaths/Motus.NET/compare/v0.15.0...v0.16.0
+[0.15.0]: https://github.com/lasaths/Motus.NET/compare/v0.14.0...v0.15.0
+[0.14.0]: https://github.com/lasaths/Motus.NET/compare/v0.13.2...v0.14.0
+[0.13.2]: https://github.com/lasaths/Motus.NET/compare/v0.13.1...v0.13.2
 [0.13.1]: https://github.com/lasaths/Motus.NET/compare/v0.13.0...v0.13.1
 [0.13.0]: https://github.com/lasaths/Motus.NET/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/lasaths/Motus.NET/compare/v0.11.0...v0.12.0
