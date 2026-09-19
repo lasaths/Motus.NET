@@ -94,8 +94,13 @@ Reach samples: `ReachSampling.FillTcpPointsInto` (Halton over driver limits, cap
 | `tests/fixtures/kr210_r3100_ultra/kr210_r3100_ultra.urdf` | KUKA KR 210 R3100 ultra (meshed) | Run `npm run fetch-assets` in `tools/urdf-viewer` |
 | `tests/fixtures/kr210_r3100_ultra/kr210_r3100_ultra_minimal.urdf` | Same kinematics, no meshes | CI / lightweight import |
 | `tests/fixtures/ur_description_style/minimal_ur_style.urdf.xacro` | Tiny UR-description-style xacro | Include/property/macro/`${arg}` coverage with tip + `tool0` link |
+| `tests/fixtures/unitree_h2/h2_minimal.urdf` | Unitree H2 (~31 R, meshless) | **Experimental** pelvis-rooted tree FK / optional arm `PlanningGroup`. Not biped walk/balance; not H1-2. Floating base stripped (Motus rejects `floating`). BSD-3 upstream. |
 
 Grasshopper examples mirror these under `Motus.Grasshopper/examples/ur10e/` and `examples/kr210_r3100_ultra/`.
+
+### Experimental humanoid (H2)
+
+`unitree_h2/h2_minimal.urdf` is a **CI fixture**, not a GA robot family. Use `LoadTree` for full-driver FK; one-arm tips via `ExtractSerialTip("torso_link", "left_hand_link")` + `PlanningGroup`. Do **not** claim locomotion, balance, or `Family=legged` Walk. Prefer official tree `H2.urdf` kinematics over `H2_loop` (MuJoCo equality loops).
 
 ## Visual verification
 
