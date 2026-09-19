@@ -285,6 +285,79 @@ public class RrtConnectTests
     Assert.Contains(result.Errors, e => e.Contains("HolonomicSE2 X", StringComparison.OrdinalIgnoreCase));
   }
 
+  [Fact]
+  public void HolonomicSe3_AppendsSixBaseDofAndReturnsBaseFrames()
+  {
+    var robot = AerialSmokeRobot();
+    var start = new JointState(Array.Empty<double>());
+    var goal = new JointState(Array.Empty<double>());
+    var targetBase = new MobilityModel.HolonomicSE3(0.4, -0.15, 1.2, 0.05, -0.1, 0.25);
+
+    var planner = new SamplingPlanner(robot.Preset, new SamplingPlannerOptions
+    {
+      PreferManaged = true,
+      MaxIterations = 1200,
+      StepRadians = 0.2,
+      ConnectThresholdRadians = 0.2,
+      GoalBias = 1.0,
+      RandomSeed = 21
+    });
+    var result = planner.Plan(new PlanningRequest(
+      robot,
+      start,
+      goal,
+      new PlanningOptions
+      {
+        Mobility = targetBase,
+        MobilityBoundsSE3 = MobilityBoundsSE3.Default,
+        MaxJointStepRadians = 0.05
+      }));
+
+    Assert.True(result.Success, string.Join("; ", result.Errors));
+    Assert.NotNull(result.Trajectory!.Points[^1].BaseFrameOverride);
+    var end = result.Trajectory.Points[^1].BaseFrameOverride!.Frame;
+    Assert.True(MobilityModel.HolonomicSE3.TryFromFrame(end, out var endPose, out var status), status);
+    Assert.InRange(endPose.X - targetBase.X, -1e-5, 1e-5);
+    Assert.InRange(endPose.Y - targetBase.Y, -1e-5, 1e-5);
+    Assert.InRange(endPose.Z - targetBase.Z, -1e-5, 1e-5);
+    Assert.Contains(result.Warnings, w => w.Contains("HolonomicSE3", StringComparison.Ordinal));
+    Assert.Contains(result.Warnings, w => w.Contains(MobilityMethodRefs.LaVallePlanningAlgorithmsUrl, StringComparison.Ordinal));
+  }
+
+  [Fact]
+  public void HolonomicSe3_RejectsBoundViolationAndSingularityWithStatus()
+  {
+    var robot = AerialSmokeRobot();
+    var planner = new SamplingPlanner(robot.Preset, new SamplingPlannerOptions
+    {
+      PreferManaged = true,
+      MaxIterations = 10
+    });
+
+    var oob = planner.Plan(new PlanningRequest(
+      robot,
+      new JointState(Array.Empty<double>()),
+      new JointState(Array.Empty<double>()),
+      new PlanningOptions
+      {
+        Mobility = new MobilityModel.HolonomicSE3(0, 0, 5.0, 0, 0, 0)
+      }));
+    Assert.False(oob.Success);
+    Assert.Contains(oob.Messages, m => m.Code == PlanningMessageCodes.InvalidOptions);
+    Assert.Contains(oob.Errors, e => e.Contains("HolonomicSE3 Z", StringComparison.OrdinalIgnoreCase));
+
+    var singular = planner.Plan(new PlanningRequest(
+      robot,
+      new JointState(Array.Empty<double>()),
+      new JointState(Array.Empty<double>()),
+      new PlanningOptions
+      {
+        Mobility = new MobilityModel.HolonomicSE3(0, 0, 1.0, 0, Math.PI / 2, 0)
+      }));
+    Assert.False(singular.Success);
+    Assert.Contains(singular.Errors, e => e.Contains("singular", StringComparison.OrdinalIgnoreCase));
+  }
+
   private static RobotModel MobileSmokeRobot() =>
     new(new RobotPreset
     {
@@ -293,5 +366,16 @@ public class RrtConnectTests
       Family = "mobile",
       AxisCount = 1,
       JointLimits = new[] { JointLimit.Radians(-1.0, 1.0, maxVelocity: 1.0) }
+    });
+
+  private static RobotModel AerialSmokeRobot() =>
+    new(new RobotPreset
+    {
+      Manufacturer = RobotManufacturer.Unknown,
+      ModelName = "free_flyer_smoke",
+      Family = Units.AerialFamily,
+      AxisCount = 0,
+      JointLimits = Array.Empty<JointLimit>(),
+      BaseFrame = new BaseFrame(new Frame(0, 0, 0.5))
     });
 }

@@ -81,7 +81,8 @@ public sealed class PlanningContext
             ConstraintChecker = opts.ConstraintChecker,
             GroupMap = ActiveGroup is not null ? JointIndexMap.Resolve(Robot, ActiveGroup) : opts.GroupMap,
             Mobility = opts.Mobility,
-            MobilityBounds = opts.MobilityBounds
+            MobilityBounds = opts.MobilityBounds,
+            MobilityBoundsSE3 = opts.MobilityBoundsSE3
         };
     }
 }
