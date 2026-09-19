@@ -107,7 +107,7 @@ Prove 0.17-class behavior is shippable. Few new features — polish and hardenin
 ## Milestone 12 — Host product · 1.9.0
 
 - [ ] Grasshopper UX / Program / Pick Place / Preview edge cases from 1.8 QA
-- [ ] Finish “NuGet as default integration path for all hosts” (move off Future optional)
+- [x] Motus.Grasshopper NuGet-default integration path (`UseMotusNetProjectReference` defaults false; pin via `MotusNetPackages.props`). Remaining “all hosts” = other consumers / docs only — see Future optional.
 - [ ] Small additive APIs only if needed before the stability promise
 - [ ] Coordinated **1.9.0** NuGet + GitHub tags; still no requirement to publish Yak
 - [ ] Still no live control / ROS / vendor SDKs
@@ -127,7 +127,7 @@ Rhino / Grasshopper UI lives in **Motus.Grasshopper** and consumes this core via
 ## Future optional
 
 - [x] Native OMPL C++ in CI when OMPL is available (`MOTUS_USE_OMPL=ON`)
-- NuGet as default integration path for all hosts *(target: Milestone 12 / 1.9.0)*
+- [ ] NuGet as default for remaining non-GH hosts *(Motus.Grasshopper done — Milestone 12)*
 
 ## Out of scope through 2.0
 
