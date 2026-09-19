@@ -83,5 +83,5 @@ Motus Pick Place appends `RRT` (default false) and `Touch` (list of collision bo
 names). Wire the full source/obstacle scene to Motus Program. Program supplies the
 RRT-Connect factory and maintains attached objects automatically. Preview uses the
 release pose after detach, and Export retains the timeline, including after retiming.
-Build against sibling Motus.NET with `-p:UseMotusNetProjectReference=true` until
-0.17.0 packages are published.
+Motus.NET **0.17.0** is on nuget.org; build GH with the default NuGet pin, or
+`-p:UseMotusNetProjectReference=true` for sibling Motus.NET tip.
