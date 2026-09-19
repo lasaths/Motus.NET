@@ -1,5 +1,7 @@
 # Methods catalog
 
+Product tiers (Supported / Advanced / Experimental) for the 2.0 Yak GA surface: [supported-surface.md](supported-surface.md).
+
 Motus.NET keeps method provenance close to API contracts. Units are explicit at the call surface: joint coordinates use each `JointLimit.Unit` (`Radians` or `Meters`), TCP positions are meters, orientations are quaternions with tolerances in radians, and times are seconds.
 
 | Area | API | Method / status | Units and failure surface | References |
