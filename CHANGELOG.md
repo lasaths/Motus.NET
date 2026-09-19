@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.0] - 2026-09-19
+
+### Added
+
+- Public product / Yak GA SemVer line: Motus.NET **2.0.0** coordinated with Motus.Grasshopper + yak `motus` **2.0.0**.
+- Supported vs advanced surface documented (`docs/supported-surface.md`).
+
+### Changed
+
+- Package identity **1.9.0 → 2.0.0** after host-product 1.9.0.
+
+
 ## [1.9.0] - 2026-09-19
 
 ### Changed

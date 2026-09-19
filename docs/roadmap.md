@@ -90,7 +90,7 @@ Host-agnostic library (Grasshopper, CLI, services). MoveIt-shaped seams without 
 
 Public package SemVer is **aligned** across Motus.NET (NuGet), Motus.Grasshopper, and yak `motus`.
 
-After **0.17.0**, the next public package versions are **1.8.0 → 1.9.0 → 2.0.0**. There is no empty 1.0–1.7 NuGet/Yak upload series; those numbers are not published package lines. Milestone names match the coordinated release tags.
+After **0.17.0**, the next public package versions are **1.8.0 → 2.0.0 → 2.0.0**. There is no empty 1.0–1.7 NuGet/Yak upload series; those numbers are not published package lines. Milestone names match the coordinated release tags.
 
 First public Yak Package Manager release is **2.0.0**.
 
@@ -104,13 +104,13 @@ Prove 0.17-class behavior is shippable. Few new features — polish and hardenin
 - [x] Package identity / CHANGELOG prepared for **1.8.0**; docs reflect SemVer jump after shipped **0.17.0**
 - [x] Coordinated Motus.NET + Motus.Grasshopper **1.8.0** release (NuGet + GitHub tags [v1.8.0](https://github.com/lasaths/Motus.NET/releases/tag/v1.8.0)); Yak not required
 
-## Milestone 12 — Host product · 1.9.0
+## Milestone 12 — Host product · 2.0.0
 
 - [x] Pick Place empty-`TouchBodies` fail-closed (`PickPlaceCycle`); GH empty **Touch** gate landed in Motus.Grasshopper
-- [ ] Remaining GH UX from 1.8 QA: Program Tr-keep / experimental Robot Status / family handoff (Motus.Grasshopper follow-up; not blocking 1.9.0 SemVer cut)
+- [ ] Remaining GH UX from 1.8 QA: Program Tr-keep / experimental Robot Status / family handoff (Motus.Grasshopper follow-up; not blocking 2.0.0 SemVer cut)
 - [x] Motus.Grasshopper NuGet-default integration path (`UseMotusNetProjectReference` defaults false; pin via `MotusNetPackages.props`). Remaining “all hosts” = other consumers / docs only — see Future optional.
 - [x] Small additive API: empty-`TouchBodies` throw before stability promise
-- [x] Package identity / CHANGELOG prepared for **1.9.0** (this cut); NuGet + tags on `v1.9.0` after merge — Yak still unpublished (first public Yak **2.0.0**)
+- [x] Package identity / CHANGELOG prepared for **2.0.0** (this cut); NuGet + tags on `v2.0.0` after merge — Yak still unpublished (first public Yak **2.0.0**)
 - [ ] Still no live control / ROS / vendor SDKs
 
 ## Milestone 13 — Public product · 2.0.0
