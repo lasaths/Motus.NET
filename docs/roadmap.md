@@ -76,7 +76,7 @@ Host-agnostic library (Grasshopper, CLI, services). MoveIt-shaped seams without 
 - [x] Legged full-driver Plan adapter (`ValidateForPlan`) over `TryBuild` output: SSM/collision validation only.
 - [x] Legged Motus Plan synthesis (`LeggedGait.PlanBodyPath`): body-path polyline → `TryBuild` + hard SSM `ValidateForPlan` (Walk remains rich UI).
 
-## Milestone 10 — Reliable pick/place · 0.17.0 (ready to cut; not on nuget.org yet)
+## Milestone 10 — Reliable pick/place · 0.17.0 (shipped)
 
 - [x] Detach at placement before retract; explicit segment-local gripper contact pairs
 - [x] Multi-object scene regression, including already placed objects
@@ -84,6 +84,40 @@ Host-agnostic library (Grasshopper, CLI, services). MoveIt-shaped seams without 
 - [x] Attachment timeline on Trajectory, preserved by all retimers and JSON/CSV export
 - [x] SET/WAIT dwell preservation and single-pass export retiming
 - [x] Version metadata aligned across core and Grasshopper
+- [x] NuGet + GitHub release [v0.17.0](https://github.com/lasaths/Motus.NET/releases/tag/v0.17.0)
+
+## Path to 2.0 — Versioning
+
+Public package SemVer is **aligned** across Motus.NET (NuGet), Motus.Grasshopper, and yak `motus`.
+
+After **0.17.0**, the next public package versions are **1.8.0 → 1.9.0 → 2.0.0**. There is no empty 1.0–1.7 NuGet/Yak upload series; those numbers are not published package lines. Milestone names match the coordinated release tags.
+
+First public Yak Package Manager release is **2.0.0**.
+
+## Milestone 11 — Trust & polish · 1.8.0
+
+Prove 0.17-class behavior is shippable. Few new features — polish and hardening.
+
+- [ ] Drive Motus.Grasshopper regression matrix green on real Rhino (serial, Stewart, SE2, Tool, Walk/Plan legged, Example 10). See sibling Motus.Grasshopper `docs/regression-matrix.md`
+- [ ] Fix defects found in that pass
+- [ ] Docs / examples / `.ghx` metadata match pins (NuGet default; no stale UseLocal-only claims once 1.8 ships)
+- [ ] Coordinated Motus.NET + Motus.Grasshopper **1.8.0** release (NuGet + GitHub tags); Yak not required yet
+
+## Milestone 12 — Host product · 1.9.0
+
+- [ ] Grasshopper UX / Program / Pick Place / Preview edge cases from 1.8 QA
+- [ ] Finish “NuGet as default integration path for all hosts” (move off Future optional)
+- [ ] Small additive APIs only if needed before the stability promise
+- [ ] Coordinated **1.9.0** NuGet + GitHub tags; still no requirement to publish Yak
+- [ ] Still no live control / ROS / vendor SDKs
+
+## Milestone 13 — Public product · 2.0.0
+
+- [ ] Align Motus.NET + Motus.Grasshopper (+ yak `motus`) to **2.0.0**
+- [ ] First public Yak Package Manager push
+- [ ] Declare supported vs advanced surface (e.g. UR pick/place + LIN/RRT supported; stewart/legged advanced unless proven in 1.8)
+- [ ] SemVer major = supported product / Yak GA; breaking changes only if banked from 1.8/1.9
+- [ ] Release checklist: dual-TFM pack, yak build/push, docs
 
 ## Related repos
 
@@ -92,9 +126,11 @@ Rhino / Grasshopper UI lives in **Motus.Grasshopper** and consumes this core via
 ## Future optional
 
 - [x] Native OMPL C++ in CI when OMPL is available (`MOTUS_USE_OMPL=ON`)
-- NuGet as default integration path for all hosts
+- NuGet as default integration path for all hosts *(target: Milestone 12 / 1.9.0)*
 
-## Out of scope (v1)
+## Out of scope through 2.0
+
+Unless scope expands, these remain out through the **2.0.0** public product:
 
 - Physical robot control
 - ROS / MoveIt runtime dependency
