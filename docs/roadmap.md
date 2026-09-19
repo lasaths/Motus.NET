@@ -135,3 +135,29 @@ Unless scope expands, these remain out through the **2.0.0** public product:
 - Physical robot control
 - ROS / MoveIt runtime dependency
 - Vendor SDKs
+
+## Experimental mobility (post-1.8 / parallel track)
+
+**Not shipped.** Docs-only intent for aerial / humanoid / mammal-quadruped work that stays outside the 2.0 Yak GA surface unless product scope explicitly expands. Physical control, ROS, and vendor SDKs remain out (see above / Path to 2.0 when present).
+
+Honest Motus meanings (planning / preview / export only):
+
+| Track | Verdict | In Motus | Not Motus |
+|-------|---------|----------|-----------|
+| **Drone (full)** | Conditional — offline SE(3) | Holonomic SE(3) body planning, collision, export; recommended `Family=aerial` | ArduPilot/PX4, battery, MAVLink, live SITL |
+| **Humanoid** | Partial experimental | Fixed-base / tree arm groups on **Unitree H2** URDF first; optional kinematic biped without balance | Walking balance, loco-manipulation GA |
+| **Quadruped** | Partial experimental | Mammal stance/IK on Go2/ANYmal-class URDF; distinct from insectoid `Family=legged` Walk | Spot-class loco product equivalence |
+
+Suggested phasing (does **not** change 1.8 → 1.9 → 2.0 supported promises):
+
+- **1.9 (optional):** Family string helpers / experimental flags + skipped tests only — no GH GA components
+- **Post-2.0 parallel track:** SE(3) aerial Motus-full; humanoid upper-body (H2); quadruped stance/IK fixtures
+
+Candidate fixtures ([awesome-robot-descriptions](https://github.com/robot-descriptions/awesome-robot-descriptions) / Unitree):
+
+1. **Crazyflie 2.0** (`cf2_description`) — aerial / SE(3) body proxy
+2. **Unitree H2** (`h2_description`) — **first humanoid fixture** ([unitree_ros/robots/h2_description](https://github.com/unitreerobotics/unitree_ros/tree/master/robots/h2_description)); prefer over G1
+3. **Unitree Go2** (`go2_description`) — mammal quadruped stance/IK
+4. Optional visual: Skydio X2; G1 only if H2 meshless strip fails CI
+
+Do not claim shipped support in release notes until ADR + METHODS + fixtures land.
