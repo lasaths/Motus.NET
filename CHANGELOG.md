@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- `PickPlaceCycle.Expand` / `ExpandMany`: empty `TouchBodies` throws `ArgumentException` (fail-closed; Detach-at-place needs gripper contact names).
+- Roadmap Milestone 12: Motus.Grasshopper NuGet-default path marked done; remaining “all hosts” narrowed to non-GH consumers.
+
 ## [1.8.0] - 2026-09-19
 
 ### Added

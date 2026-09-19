@@ -158,15 +158,10 @@ public class AttachPlanningTests
             MaxJointStepRadians = 0.05
         };
 
-        // Detach-at-place restores the brick into the gripper; without Touch, Tr is null.
-        var noTouch = PickPlaceCycle.Expand(grasp, place, approachMeters: 0.05, open, close, brick);
-        var failed = planner.Plan(new MotionProgramRequest(robot, home, noTouch, opts)
-        {
-            InitialToolState = open,
-            ToolCapabilities = caps
-        });
-        Assert.False(failed.Success);
-        Assert.Null(failed.Trajectory);
+        // Empty TouchBodies must fail closed (no silent plan with Tr null after Detach-at-place).
+        var noTouch = Assert.Throws<ArgumentException>(() =>
+            PickPlaceCycle.Expand(grasp, place, approachMeters: 0.05, open, close, brick));
+        Assert.Contains("TouchBodies", noTouch.Message, StringComparison.Ordinal);
 
         // Explicit gripper contact is allowed only during grasp/release (GH Touch = robotiq_2f85).
         var segments = PickPlaceCycle.Expand(grasp, place, approachMeters: 0.05, open, close, brick,
@@ -205,7 +200,8 @@ public class AttachPlanningTests
             new[] { b0, b1 },
             0.08,
             open,
-            close);
+            close,
+            options: new PickPlaceOptions { TouchBodies = new[] { "robotiq_2f85" } });
         Assert.Equal(2, segs.OfType<AttachSegment>().Count());
         Assert.Equal(2, segs.OfType<DetachSegment>().Count());
 
@@ -235,7 +231,8 @@ public class AttachPlanningTests
         var obj = CollisionObject.Box("brick", new Frame(0.5, 0, 0.18), 0.04, 0.02, 0.01);
         var open = new EndEffectorState(new Dictionary<string, double> { ["width"] = 0.085 });
         var close = new EndEffectorState(new Dictionary<string, double> { ["width"] = 0.04 });
-        var segs = PickPlaceCycle.Expand(grasp, place, 0.08, open, close, obj);
+        var segs = PickPlaceCycle.Expand(grasp, place, 0.08, open, close, obj,
+            options: new PickPlaceOptions { TouchBodies = new[] { "gripper" } });
         Assert.Contains(segs, s => s is AttachSegment a && a.Name == "brick" && a.Geometry.Name == "brick");
         Assert.Contains(segs, s => s is DetachSegment d && d.Name == "brick");
         Assert.Equal(10, segs.Count);

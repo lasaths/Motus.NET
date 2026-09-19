@@ -41,6 +41,10 @@ public static class PickPlaceCycle
             throw new ArgumentOutOfRangeException(nameof(setDurationSeconds));
 
         options ??= new PickPlaceOptions();
+        if (options.TouchBodies.Count == 0)
+            throw new ArgumentException(
+                "TouchBodies required for Detach-at-place (gripper collision body names, e.g. robotiq_2f85).",
+                nameof(options));
         if (options.TouchBodies.Any(string.IsNullOrWhiteSpace))
             throw new ArgumentException("Touch body names must not be empty.", nameof(options));
         var contacts = options.TouchBodies.Select(name => (name, obj.Name)).ToArray();
