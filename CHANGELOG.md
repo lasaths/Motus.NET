@@ -7,11 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.9.0] - 2026-09-19
+
 ### Changed
 
 - Roadmap experimental mobility: document tip-shipped HolonomicSE3 / H2 / Go2 (not GH GA); NuGet publish may lag.
 - `PickPlaceCycle.Expand / `ExpandMany`: empty `TouchBodies` throws `ArgumentException` (fail-closed; Detach-at-place needs gripper contact names).
 - Roadmap Milestone 12: Motus.Grasshopper NuGet-default path marked done; remaining “all hosts” narrowed to non-GH consumers.
+- Package/`Directory.Build.props` / `motus-net.version` aligned to **1.9.0** (coordinated cut after shipped **1.8.0**).
 
 ## [1.8.0] - 2026-09-19
 
@@ -514,7 +517,8 @@ Initial public release.
 - **Motus.Presets** — JSON preset loader with bundled UR and KUKA defaults
   (approximate public datasheet values for planning/visualization only).
 
-[Unreleased]: https://github.com/lasaths/Motus.NET/compare/v1.8.0...HEAD
+[Unreleased]: https://github.com/lasaths/Motus.NET/compare/v1.9.0...HEAD
+[1.9.0]: https://github.com/lasaths/Motus.NET/compare/v1.8.0...v1.9.0
 [1.8.0]: https://github.com/lasaths/Motus.NET/compare/v0.17.0...v1.8.0
 [0.17.0]: https://github.com/lasaths/Motus.NET/compare/v0.16.0...v0.17.0
 [0.16.0]: https://github.com/lasaths/Motus.NET/compare/v0.15.0...v0.16.0
