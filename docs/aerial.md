@@ -14,3 +14,5 @@ Offline **planning / preview / export** for a free-flying rigid body in **SE(3)*
 - Not a claim that Motus missions are hardware-flyable
 
 Fixture: `tests/fixtures/aerial/free_flyer_box.urdf` (meshless box hull).
+
+Managed sampling with a scene requires an `IBaseFrameCollisionChecker` (same contract as SE2). Trajectory warnings state body SE(3) ≠ UR MoveJ.

@@ -358,6 +358,122 @@ public class RrtConnectTests
     Assert.Contains(singular.Errors, e => e.Contains("singular", StringComparison.OrdinalIgnoreCase));
   }
 
+  [Fact]
+  public void HolonomicSe3_RequiresBaseFrameCollisionCheckerWhenScenePresent()
+  {
+    var robot = AerialSmokeRobot();
+    var scene = new CollisionScene(new[]
+    {
+      CollisionObject.Box("wall", new Frame(0.2, 0, 1.0), 0.025, 0.5, 0.5)
+    });
+    var nonBaseChecker = new NeverBaseFrameChecker();
+    var planner = new SamplingPlanner(robot.Preset, new SamplingPlannerOptions
+    {
+      PreferManaged = true,
+      MaxIterations = 50
+    });
+    var result = planner.Plan(new PlanningRequest(
+      robot,
+      new JointState(Array.Empty<double>()),
+      new JointState(Array.Empty<double>()),
+      new PlanningOptions
+      {
+        Mobility = new MobilityModel.HolonomicSE3(0.4, 0, 1.0, 0, 0, 0),
+        CollisionScene = scene,
+        CollisionChecker = nonBaseChecker,
+        MaxJointStepRadians = 0.1
+      }));
+    Assert.False(result.Success);
+    Assert.Contains(result.Errors, e => e.Contains(nameof(IBaseFrameCollisionChecker), StringComparison.Ordinal));
+  }
+
+  [Fact]
+  public void HolonomicSe3_PlansAroundObstacleWithBaseFrameChecker()
+  {
+    var robot = AerialSmokeRobot();
+    // Sphere wall between start (0,0,0.5) and goal (0.5,0,0.5).
+    var scene = new CollisionScene(new[]
+    {
+      CollisionObject.Sphere("wall", new Frame(0.25, 0, 0.5), 0.12)
+    });
+    var checker = new BodySphereBaseFrameChecker(radiusMeters: 0.05);
+    var planner = new SamplingPlanner(robot.Preset, new SamplingPlannerOptions
+    {
+      PreferManaged = true,
+      MaxIterations = 4000,
+      StepRadians = 0.15,
+      ConnectThresholdRadians = 0.15,
+      GoalBias = 0.15,
+      RandomSeed = 42
+    });
+    var result = planner.Plan(new PlanningRequest(
+      robot,
+      new JointState(Array.Empty<double>()),
+      new JointState(Array.Empty<double>()),
+      new PlanningOptions
+      {
+        Mobility = new MobilityModel.HolonomicSE3(0.5, 0, 0.5, 0, 0, 0),
+        CollisionScene = scene,
+        CollisionChecker = checker,
+        MaxJointStepRadians = 0.08
+      }));
+    Assert.True(result.Success, string.Join("; ", result.Errors));
+    Assert.Contains(result.Warnings, w => w.Contains("MoveJ", StringComparison.Ordinal));
+    foreach (var pt in result.Trajectory!.Points)
+    {
+      Assert.NotNull(pt.BaseFrameOverride);
+      Assert.True(
+        checker.IsCollisionFree(pt.JointState, scene, pt.BaseFrameOverride!),
+        "Trajectory point collides with scene.");
+    }
+  }
+
+  /// <summary>Body = sphere at base origin; implements <see cref="IBaseFrameCollisionChecker"/>.</summary>
+  private sealed class BodySphereBaseFrameChecker : IBaseFrameCollisionChecker
+  {
+    private readonly double _r;
+    public BodySphereBaseFrameChecker(double radiusMeters) => _r = radiusMeters;
+
+    public bool IsCollisionFree(JointState state, CollisionScene scene) =>
+      IsCollisionFree(state, scene, new BaseFrame(new Frame(0, 0, 0.5)));
+
+    public bool IsCollisionFree(JointState state, CollisionScene scene, BaseFrame baseFrame)
+    {
+      var px = baseFrame.Frame.X;
+      var py = baseFrame.Frame.Y;
+      var pz = baseFrame.Frame.Z;
+      foreach (var obj in scene.Objects)
+      {
+        if (obj.Shape != CollisionShape.Sphere) continue;
+        var dx = px - obj.Pose.X;
+        var dy = py - obj.Pose.Y;
+        var dz = pz - obj.Pose.Z;
+        var minDist = _r + obj.ExtentX;
+        if (dx * dx + dy * dy + dz * dz < minDist * minDist)
+          return false;
+      }
+      return true;
+    }
+
+    public bool SegmentCollisionFree(
+      IReadOnlyList<double> from,
+      IReadOnlyList<double> to,
+      CollisionScene scene,
+      double stepRadians) => true;
+  }
+
+  /// <summary>Collision checker that is intentionally *not* <see cref="IBaseFrameCollisionChecker"/>.</summary>
+  private sealed class NeverBaseFrameChecker : ICollisionChecker
+  {
+    public bool IsCollisionFree(JointState state, CollisionScene scene) => true;
+
+    public bool SegmentCollisionFree(
+      IReadOnlyList<double> from,
+      IReadOnlyList<double> to,
+      CollisionScene scene,
+      double stepRadians) => true;
+  }
+
   private static RobotModel MobileSmokeRobot() =>
     new(new RobotPreset
     {

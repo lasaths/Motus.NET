@@ -15,6 +15,7 @@ public static class MobilityMethodRefs
 
     public static string DescribeHolonomicSe3() =>
         "Mobility=HolonomicSE3 sampled as x/y/z/roll/pitch/yaw (SE(3) free-flyer); " +
-        "RPY fixed-axis XYZ with singularity Status near pitch ±π/2; not a flight controller. " +
+        "RPY fixed-axis XYZ with singularity Status near pitch ±π/2; not a flight controller; " +
+        "body poses ≠ UR MoveJ — trajectory Q is empty or unused for pure aerial. " +
         "Reference: LaValle, Planning Algorithms (2006), " + LaVallePlanningAlgorithmsUrl + ".";
 }
