@@ -256,6 +256,18 @@ public sealed class MobilityBoundsSE3
 
     public static MobilityBoundsSE3 Default { get; } = new();
 
+    /// <summary>
+    /// Tighter roll/pitch for hover / pass-off station-keep (Motus 2.1 ADR 0002).
+    /// Same XYZ/yaw fence as <see cref="Default"/>; roll ±0.35 rad, pitch ±0.35 rad.
+    /// </summary>
+    public static MobilityBoundsSE3 HoverHandoff { get; } = new()
+    {
+        MinRollRadians = -0.35,
+        MaxRollRadians = 0.35,
+        MinPitchRadians = -0.35,
+        MaxPitchRadians = 0.35
+    };
+
     public IReadOnlyList<JointLimit> ToJointLimits() =>
     [
         JointLimit.Meters(MinX, MaxX),

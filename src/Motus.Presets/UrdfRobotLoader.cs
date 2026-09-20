@@ -111,9 +111,18 @@ public static class UrdfRobotLoader
         }
 
         var robotEl = doc.Root ?? throw new InvalidOperationException("URDF has no root element.");
-        var linkCollision = UrdfCollisionLoader.Load(robotEl, linkNames, urdfDirectory);
-        var toolGeom = UrdfCollisionLoader.LoadTipLinkGeometry(robotEl, options.TipLink, urdfDirectory);
-        var collision = UrdfCollisionLoader.WithToolGeometry(linkCollision, toolGeom);
+        RobotCollisionModel? collision;
+        if (tip.Chain.Joints.Length == 0)
+        {
+            // Meshless free-flyer: tip == base, AxisCount=0 — hull lives on the tip link, not a serial chain.
+            collision = UrdfCollisionLoader.Load(robotEl, new[] { options.TipLink }, urdfDirectory);
+        }
+        else
+        {
+            var linkCollision = UrdfCollisionLoader.Load(robotEl, linkNames, urdfDirectory);
+            var toolGeom = UrdfCollisionLoader.LoadTipLinkGeometry(robotEl, options.TipLink, urdfDirectory);
+            collision = UrdfCollisionLoader.WithToolGeometry(linkCollision, toolGeom);
+        }
 
         return new UrdfRobot(preset, tip.Chain, tip.JointNames, collision, tree);
     }

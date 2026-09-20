@@ -1,9 +1,15 @@
 namespace Motus.Core;
 
-/// <summary>Runtime grasped object geometry in TCP-local frame.</summary>
+/// <summary>
+/// Runtime grasped / carried object geometry in parent-local frame.
+/// Serial planners: <see cref="TcpLocalPose"/> is TCP-local.
+/// HolonomicSE3 / free-flyer (ADR 0002 Phase B): same field is <b>base-local</b> when used with
+/// <c>BaseFrameAttachCollisionChecker</c> / <c>FreeFlyerHullCollisionChecker.WithAttached</c>.
+/// </summary>
 public sealed class AttachedBody
 {
     public string Name { get; }
+    /// <summary>Parent-local pose (TCP for serial; base for aerial free-flyer).</summary>
     public Frame TcpLocalPose { get; }
     public CollisionObject Geometry { get; }
     /// <summary>When set, this scene obstacle name is hidden while attached.</summary>

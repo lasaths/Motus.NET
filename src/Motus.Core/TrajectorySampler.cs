@@ -65,6 +65,34 @@ public static class TrajectorySampler
         return pts[^1].ToolState;
     }
 
+    /// <summary>
+    /// Sample <see cref="TrajectoryPoint.BaseFrameOverride"/> at elapsed time (HolonomicSE3 / free-flyer).
+    /// Holds first/last; no orientation lerp (piecewise-constant between samples).
+    /// </summary>
+    public static BaseFrame? AtTimeBaseFrame(Trajectory trajectory, double elapsedSeconds)
+    {
+        var pts = trajectory.Points;
+        if (pts.Count == 0) return null;
+        if (pts.Count == 1 || elapsedSeconds <= pts[0].TimeSeconds)
+            return pts[0].BaseFrameOverride;
+        if (elapsedSeconds >= pts[^1].TimeSeconds)
+            return pts[^1].BaseFrameOverride;
+
+        for (var i = 0; i < pts.Count - 1; i++)
+        {
+            var t1 = pts[i + 1].TimeSeconds;
+            if (elapsedSeconds < t1 || i == pts.Count - 2)
+            {
+                // Prefer the later sample once past the midpoint (hold-friendly for station poses).
+                var t0 = pts[i].TimeSeconds;
+                var mid = t0 + 0.5 * (t1 - t0);
+                return elapsedSeconds >= mid ? pts[i + 1].BaseFrameOverride : pts[i].BaseFrameOverride;
+            }
+        }
+
+        return pts[^1].BaseFrameOverride;
+    }
+
     private static JointState Lerp(JointState a, JointState b, double alpha)
     {
         var n = a.AxisCount;

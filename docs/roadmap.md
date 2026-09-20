@@ -166,3 +166,15 @@ Fixtures ([awesome-robot-descriptions](https://github.com/robot-descriptions/awe
 4. Optional later: Crazyflie 2.0 / Skydio X2 visuals; G1 only if H2 path regresses
 
 Do not promote experimental tracks to Supported / Yak headline in release notes without ADR + METHODS + Rhino matrix proof.
+
+## Milestone 14 — Aerial ↔ arm pass-off · 2.1.0 (in progress)
+
+Offline dual-agent tower demo: HolonomicSE3 drone delivers a brick; serial arm finishes the tower (example 10 contracts). See [ADR 0002](adr/0002-aerial-arm-pass-off.md).
+
+- [x] `MobilityBoundsSE3.HoverHandoff` + SE3 approach/hold Status honesty (tighter roll/pitch for station-keep)
+- [x] Phase B: base-frame attach on FreeFlyerHull (`WithAttached` / `BaseFrameAttachCollisionChecker`)
+- [x] `AerialStationHold.AppendHold` + GH Plan aerial station-hold (1 s) for One Play
+- [x] Motus.NET `AerialArmPassOffTests` (hover → PickPlace + ExpandMany mini-tower ×4)
+- [x] GH example `11_aerial_arm_pass_off` (generated mini-tower ×4 + One Play scrub; `layout.cs` for full 5×4)
+- [x] Docs: `aerial.md` pass-off; METHODS; ADRs 0002 / GH 0006
+- [ ] Coordinated **2.1.0** NuGet / GH / tags when green (Yak GA still explicit product call); **Rhino Auto Plan pass on example 11**

@@ -33,7 +33,20 @@ public sealed class FreeFlyerHullCollisionChecker : IBaseFrameCollisionChecker
     public static FreeFlyerHullCollisionChecker ForFreeFlyerBox(BaseFrame? defaultBase = null) =>
         new(FreeFlyerBoxCircumscribedRadiusMeters, defaultBase);
 
+    /// <summary>
+    /// Hull plus base-local attached payloads (Motus 2.1 ADR 0002 Phase B).
+    /// <see cref="AttachedBody.TcpLocalPose"/> is base-local on the free-flyer.
+    /// </summary>
+    public static IBaseFrameCollisionChecker WithAttached(
+        IReadOnlyList<AttachedBody> attached,
+        BaseFrame? defaultBase = null)
+    {
+        var hull = ForFreeFlyerBox(defaultBase);
+        return new BaseFrameAttachCollisionChecker(hull, attached, hull.DefaultBase);
+    }
+
     public double RadiusMeters => _radiusMeters;
+    public BaseFrame DefaultBase => _defaultBase;
 
     public bool IsCollisionFree(JointState state, CollisionScene scene) =>
         IsCollisionFree(state, scene, _defaultBase);

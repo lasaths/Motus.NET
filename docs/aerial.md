@@ -16,3 +16,15 @@ Collision uses `FreeFlyerHullCollisionChecker` (sphere envelope at the per-sampl
 - Not a claim that Motus missions are hardware-flyable
 
 Fixture: `tests/fixtures/aerial/free_flyer_box.urdf` (meshless box hull; circumscribed sphere ≈ 0.146 m).
+
+## Pass-off with a serial arm (2.1)
+
+**ADR:** [0002-aerial-arm-pass-off.md](adr/0002-aerial-arm-pass-off.md)
+
+GH ships **drone-only** first (`11_aerial_hover`) until HolonomicSE3 Plan → Preview is trusted. Sequential dual-program (no multi-robot state space) remains the Motus.NET contract:
+
+1. Plan the free-flyer with `HolonomicSE3` + `FreeFlyerHullCollisionChecker` (or `.WithAttached` for payload); prefer `MobilityBoundsSE3.HoverHandoff` for approach/hover; optional `AerialStationHold.AppendHold`.
+2. Carry the brick as a **base-local** `AttachedBody` (Phase B). Scene-brick relocate remains valid for hosts that only hide/show obstacles.
+3. Run serial `PickPlaceCycle` (example 10: Touch + SET open/close) from the handoff grasp to finish the tower.
+4. Export aerial `bodyPose` and serial joints separately — never MoveJ aerial `Q`.
+5. **One Play** (GH, later): Preview list = aerial `Tr` then arm `Tr` (shared scrub; hold outside each window).

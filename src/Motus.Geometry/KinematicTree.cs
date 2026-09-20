@@ -271,9 +271,6 @@ public sealed class KinematicTree
             }
         }
 
-        if (merged.Count == 0)
-            throw new InvalidOperationException($"No actuated joints between '{baseLink}' and '{tipLink}'.");
-
         Frame? tipOffset = null;
         if (pendingFixed is not null)
         {
@@ -281,6 +278,14 @@ public sealed class KinematicTree
                 pendingFixed.OriginX, pendingFixed.OriginY, pendingFixed.OriginZ,
                 pendingFixed.Roll, pendingFixed.Pitch, pendingFixed.Yaw);
             tipOffset = Transforms.ToFrame(t);
+        }
+
+        // AxisCount=0 free-flyer / single-link body: base == tip, no actuated joints.
+        if (merged.Count == 0)
+        {
+            if (baseIdx == tipIdx)
+                return new SerialTipExtraction(new SerialJointChain([]), tipOffset, names);
+            throw new InvalidOperationException($"No actuated joints between '{baseLink}' and '{tipLink}'.");
         }
 
         return new SerialTipExtraction(new SerialJointChain(merged.ToArray()), tipOffset, names);

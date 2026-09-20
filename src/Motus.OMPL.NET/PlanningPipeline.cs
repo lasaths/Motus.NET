@@ -29,9 +29,19 @@ internal static class PlanningPipeline
     internal static ICollisionChecker? ResolveChecker(PlanningRequest request, ICollisionChecker? defaultChecker)
     {
         var checker = request.Options.CollisionChecker
-            ?? (request.Options.AttachedBodies is { Count: > 0 }
+            ?? (request.Options.AttachedBodies is { Count: > 0 } && request.Options.Mobility is null
                 ? CollisionCheckerFactory.Create(request.Robot, null, request.Options.AttachedBodies)
                 : defaultChecker);
+
+        // Holonomic mobility: AttachedBodies ride BaseFrameOverride (ADR 0002 Phase B).
+        // Do not wrap serial TCP checkers when Mobility is null.
+        if (request.Options.Mobility is not null &&
+            checker is IBaseFrameCollisionChecker baseChecker and not BaseFrameAttachCollisionChecker &&
+            request.Options.AttachedBodies is { Count: > 0 })
+        {
+            checker = new BaseFrameAttachCollisionChecker(baseChecker, request.Options.AttachedBodies);
+        }
+
         return checker is null ? null : PlanningDiagnostics.Wrap(checker);
     }
 
