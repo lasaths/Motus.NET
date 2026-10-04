@@ -83,14 +83,14 @@ public class TotgRetimerTests
 
     var retimed = TrajectoryRetimer.Retime(trajectory, new TrajectoryRetimerOptions { Algorithm = RetimerAlgorithm.Totg });
 
-    // The retimer should use meter-appropriate defaults (~0.5 m/s), not radian defaults (1.5 rad/s).
-    // For 0.01 m motion at ~0.5 m/s max velocity, duration should be ~0.04-0.10 s.
-    // If it incorrectly used 1.5 rad/s as 1.5 m/s, duration would be ~0.01-0.02 s (too fast).
+    // The retimer should use meter-appropriate defaults (0.5 m/s, 1.0 m/s²), not radian defaults (1.5 rad/s as m/s).
+    // For 0.01 m motion with amax=1.0 m/s², triangular profile: v_peak=sqrt(a*d)=0.1 m/s, duration=2*sqrt(d/a)=0.2 s.
+    // If it incorrectly used 1.5 rad/s as 1.5 m/s, duration would be ~0.01 s (too fast).
     Assert.True(retimed.DurationSeconds > 0.02, 
       $"Stewart leg retime duration {retimed.DurationSeconds:F4} s is too short; " +
       $"likely using radian velocity default (1.5) as m/s instead of meter default.");
-    Assert.True(retimed.DurationSeconds < 0.20,
-      $"Retimed duration {retimed.DurationSeconds:F4} s unexpectedly high.");
+    Assert.True(retimed.DurationSeconds <= 0.25,
+      $"Retimed duration {retimed.DurationSeconds:F4} s unexpectedly high (expected ~0.2 s triangular profile).");
   }
 
   private static Trajectory DemoTrajectory()
