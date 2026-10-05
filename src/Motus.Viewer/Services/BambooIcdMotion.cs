@@ -163,6 +163,61 @@ public static class BambooIcdMotion
         return sols;
     }
 
+    /// <summary>
+    /// Spatial IK for a viewer-frame TCP at (x,y,z) with pitch about X: solve the planar arm at
+    /// radial distance r = hypot(x,z), then yaw θ1 so the working plane faces the target.
+    /// θ5 is aligned so the jaw Z matches the strut axis of a placement with the same pitch
+    /// (PlacementWorld uses Rx(pitch) only — axis (0, −sin pitch, cos pitch)). When x = 0 and
+    /// z ≥ 0 this matches <see cref="IkSolve"/> (θ5 stays 0).
+    /// </summary>
+    public static List<double[]> IkSolveSpatial(double x, double y, double z, double pitchDeg)
+    {
+        var r = Math.Sqrt(x * x + z * z);
+        if (r < 1e-9) return new List<double[]>();
+        var planar = IkSolve(y, r, pitchDeg);
+        var yawDeg = Math.Atan2(x, z) / Deg;
+        var pitch = pitchDeg * Deg;
+        // Expected jaw/strut Z for PlacementWorld(Rx(pitch)).
+        var axis = new[] { 0.0, -Math.Sin(pitch), Math.Cos(pitch) };
+        var sols = new List<double[]>();
+        foreach (var s in planar)
+        {
+            var q = s.ToArray();
+            q[0] = Math.Clamp(-90.0 + yawDeg, LimitsDeg[0].Min, LimitsDeg[0].Max);
+            AlignWristToAxis(q, axis);
+            var f = FkJaw(q);
+            if (Math.Sqrt((f.Pos[0] - x) * (f.Pos[0] - x) + (f.Pos[1] - y) * (f.Pos[1] - y) + (f.Pos[2] - z) * (f.Pos[2] - z)) > 0.005)
+                continue;
+            sols.Add(q);
+        }
+        return sols;
+    }
+
+    /// <summary>Set θ5 (about jaw Y) so jaw Z is closest to ±<paramref name="axis"/>.</summary>
+    static void AlignWristToAxis(double[] q, double[] axis)
+    {
+        var best = q[4];
+        var bestDot = -1.0;
+        for (var t5 = LimitsDeg[4].Min; t5 <= LimitsDeg[4].Max; t5 += 2.5)
+        {
+            q[4] = t5;
+            var z = FkJaw(q).Z;
+            var dot = Math.Abs(z[0] * axis[0] + z[1] * axis[1] + z[2] * axis[2]);
+            if (dot > bestDot) { bestDot = dot; best = t5; }
+        }
+        // Refine ±2.5°
+        var lo = Math.Max(LimitsDeg[4].Min, best - 2.5);
+        var hi = Math.Min(LimitsDeg[4].Max, best + 2.5);
+        for (var t5 = lo; t5 <= hi; t5 += 0.5)
+        {
+            q[4] = t5;
+            var z = FkJaw(q).Z;
+            var dot = Math.Abs(z[0] * axis[0] + z[1] * axis[1] + z[2] * axis[2]);
+            if (dot > bestDot) { bestDot = dot; best = t5; }
+        }
+        q[4] = best;
+    }
+
     public readonly struct FkResult
     {
         public double[] Pos { get; init; }

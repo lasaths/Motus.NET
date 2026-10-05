@@ -22,11 +22,15 @@
   var look, theta, phi, dist;
   var j1, j2, j3, j4, j5, jaw, mount;
   var lNeg, lPos, rNeg, rPos, strut;
+  var strutPool = [];
+  var footprintRoot = null;
   var axisGroups = [];
   var frameRoot;
   var colliderByName = {};
   var dragging = false, lx = 0, ly = 0;
   var ready = false;
+  var strutGeoTemplate = null;
+  var strutNodeOffsets = [-0.09, 0, 0.09];
 
   function metal(hex, rough, metalness) {
     return new THREE.MeshStandardMaterial({ color: hex, roughness: rough, metalness: metalness });
@@ -206,6 +210,40 @@
     }
   }
 
+  function makeStrutMesh() {
+    var mesh = new THREE.Mesh(strutGeoTemplate, mats.strut.clone());
+    var sr = 0.007;
+    strutNodeOffsets.forEach(function (z) {
+      var n = new THREE.Mesh(new THREE.TorusGeometry(sr + 0.0005, 0.0012, 6, 16), mats.node);
+      n.position.z = z;
+      mesh.add(n);
+    });
+    return mesh;
+  }
+
+  function drawFootprint(fp) {
+    while (footprintRoot.children.length) footprintRoot.remove(footprintRoot.children[0]);
+    var edgeMat = new THREE.LineBasicMaterial({ color: 0xd7c392 });
+    (fp.edges || []).forEach(function (e) {
+      var geo = new THREE.BufferGeometry().setFromPoints([
+        new THREE.Vector3(e.ax, 0.002, e.az),
+        new THREE.Vector3(e.bx, 0.002, e.bz)
+      ]);
+      footprintRoot.add(new THREE.Line(geo, edgeMat));
+    });
+    (fp.nodes || []).forEach(function (n) {
+      var dot = new THREE.Mesh(
+        new THREE.SphereGeometry(0.006, 12, 10),
+        new THREE.MeshBasicMaterial({ color: 0xe8d5a3 })
+      );
+      dot.position.set(n.x, 0.006, n.z);
+      footprintRoot.add(dot);
+      var lab = makePlaneLabel(String(n.name));
+      lab.position.set(n.x, 0.028, n.z);
+      footprintRoot.add(lab);
+    });
+  }
+
   window.initThreeJs = function (cellJson) {
     if (typeof THREE === 'undefined') {
       throw new Error('Three.js is not loaded (check lib/three/three.min.js).');
@@ -306,17 +344,30 @@
     rNeg = byName['R-grip jaw-']; rPos = byName['R-grip jaw+'];
 
     var sr = cell.strut.radius, sl = cell.strut.length;
-    var strutGeo = new THREE.CylinderGeometry(sr, sr, sl, cell.strut.segments);
-    strutGeo.rotateX(Math.PI / 2);
-    strut = new THREE.Mesh(strutGeo, mats.strut);
-    [-0.09, 0, 0.09].forEach(function (z) {
-      var n = new THREE.Mesh(new THREE.TorusGeometry(sr + 0.0005, 0.0012, 6, 16), mats.node);
-      n.position.z = z;
-      strut.add(n);
-    });
+    strutGeoTemplate = new THREE.CylinderGeometry(sr, sr, sl, cell.strut.segments);
+    strutGeoTemplate.rotateX(Math.PI / 2);
+    strut = makeStrutMesh();
     strut.position.set(PICK.x, PICK.y, PICK.z);
     scene.add(strut);
     registerCollider('strut', [strut]);
+    strutPool = [strut];
+
+    footprintRoot = new THREE.Group();
+    scene.add(footprintRoot);
+    if (cell.footprint && cell.footprint.edges) {
+      drawFootprint(cell.footprint);
+    }
+    if (cell.store && cell.store.slots) {
+      cell.store.slots.forEach(function (slot, idx) {
+        if (idx === 0) return; // primary strut mesh covers first / active
+        var mesh = makeStrutMesh();
+        mesh.position.set(slot.x, slot.y, slot.z);
+        mesh.rotation.x = (slot.pitch || 0) * DEG;
+        scene.add(mesh);
+        strutPool.push(mesh);
+        registerCollider('store-' + (slot.id || idx), [mesh]);
+      });
+    }
 
     frameRoot = new THREE.Group();
     scene.add(frameRoot);
@@ -359,7 +410,7 @@
 
   /**
    * Apply pose from Motus.NET / Blazor.
-   * payload: { q:[5], gL, gR, strut:[x,y,z,qx,qy,qz,qw], axesVisible, hitParts?:[string] }
+   * payload: { q:[5], gL, gR, strut:[...], struts?:[{name,pose:[7]}], axesVisible, hitParts?:[string] }
    * hitParts are Motus contact body names (URDF collision names, 'pole', 'strut', 'ground', mount parts).
    */
   window.setBambooPose = function (payloadJson) {
@@ -368,13 +419,43 @@
     if (p.q && p.q.length >= 5) applyJoints(p.q);
     if (typeof p.gL === 'number') setOpening(lNeg, lPos, p.gL);
     if (typeof p.gR === 'number') setOpening(rNeg, rPos, p.gR);
-    setStrutPose(p.strut);
+    if (p.struts && p.struts.length) {
+      ensureStrutPool(p.struts.length);
+      for (var i = 0; i < strutPool.length; i++) {
+        if (i < p.struts.length) {
+          var s = p.struts[i];
+          strutPool[i].visible = true;
+          applyPose7(strutPool[i], s.pose);
+          if (s.name) registerCollider(s.name, [strutPool[i]]);
+        } else {
+          strutPool[i].visible = false;
+        }
+      }
+    } else {
+      setStrutPose(p.strut);
+      for (var j = 1; j < strutPool.length; j++) strutPool[j].visible = false;
+      if (strutPool[0]) strutPool[0].visible = true;
+    }
     if (typeof p.axesVisible === 'boolean') {
       axisGroups.forEach(function (g) { g.visible = p.axesVisible; });
     }
     if (p.hitParts && p.hitParts.length) showHits(p.hitParts);
     else clearTints();
   };
+
+  function applyPose7(mesh, pose) {
+    if (!pose || pose.length < 7) return;
+    mesh.position.set(pose[0], pose[1], pose[2]);
+    mesh.quaternion.set(pose[3], pose[4], pose[5], pose[6]);
+  }
+
+  function ensureStrutPool(n) {
+    while (strutPool.length < n) {
+      var mesh = makeStrutMesh();
+      scene.add(mesh);
+      strutPool.push(mesh);
+    }
+  }
 
   /** tasksJson: [{ id, planes:[{name,x,y0,z,pitch,yMm}] }] */
   window.setBambooFrames = function (tasksJson) {

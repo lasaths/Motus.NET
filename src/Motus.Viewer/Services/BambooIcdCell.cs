@@ -167,8 +167,8 @@ public sealed class BambooIcdCell
             Transforms.FromAxisAngle(1, 0, 0, p.PitchDeg * Math.PI / 180.0)));
 
     /// <summary>Strut mesh at a Motus world pose (scene obstacle).</summary>
-    public CollisionObject StrutAt(double[] motusWorld) =>
-        CollisionObject.Mesh(Strut, Transforms.ToFrame(motusWorld), _strutVerts, _strutIdx);
+    public CollisionObject StrutAt(double[] motusWorld, string? name = null) =>
+        CollisionObject.Mesh(name ?? Strut, Transforms.ToFrame(motusWorld), _strutVerts, _strutIdx);
 
     /// <summary>Strut held in the R-grip at its true jaw-local offset (captured when the jaws close).</summary>
     public AttachedBody HeldStrut(Frame tcpLocal) =>
@@ -256,23 +256,32 @@ public sealed class BambooIcdCell
     /// (then it rides on the checker as an <see cref="AttachedBody"/>). <paramref name="gripping"/> allows only
     /// the two R-grip jaw plates to touch the strut (the clamp contact); neck, rail, carriage and links still collide.
     /// </summary>
-    public CollisionScene Scene(StrutTrack track, int hold, bool gripping, double gLmm, IReadOnlyList<double> qDeg)
+    public CollisionScene Scene(StrutTrack track, int hold, bool gripping, double gLmm, IReadOnlyList<double> qDeg,
+        IReadOnlyList<(string Name, StrutPlacement Pose)>? extras = null)
     {
-        // Scenes only depend on (track, hold, gripping, gL): the strut is static unless held, and held = attached.
-        var key = (track, hold, gripping, (int)Math.Round(gLmm * 10));
+        // Scenes only depend on (track, hold, gripping, gL, extras): the strut is static unless held, and held = attached.
+        var extraKey = extras is null || extras.Count == 0
+            ? 0
+            : extras.Aggregate(0, (acc, e) => HashCode.Combine(acc, e.Name,
+                Math.Round(e.Pose.X, 5), Math.Round(e.Pose.Y, 5), Math.Round(e.Pose.Z, 5), Math.Round(e.Pose.PitchDeg, 3)));
+        var key = (track, hold, gripping, (int)Math.Round(gLmm * 10), extraKey);
         if (_scenes.TryGetValue(key, out var cached)) return cached;
         if (_scenes.Count > 64) _scenes.Clear();
-        return _scenes[key] = BuildScene(track, hold, gripping, gLmm, qDeg);
+        return _scenes[key] = BuildScene(track, hold, gripping, gLmm, qDeg, extras);
     }
 
-    private readonly Dictionary<(StrutTrack, int, bool, int), CollisionScene> _scenes = new();
+    private readonly Dictionary<(StrutTrack, int, bool, int, int), CollisionScene> _scenes = new();
 
-    private CollisionScene BuildScene(StrutTrack track, int hold, bool gripping, double gLmm, IReadOnlyList<double> qDeg)
+    private CollisionScene BuildScene(StrutTrack track, int hold, bool gripping, double gLmm, IReadOnlyList<double> qDeg,
+        IReadOnlyList<(string Name, StrutPlacement Pose)>? extras)
     {
         var objects = new List<CollisionObject> { _poleObj, _groundObj };
         objects.AddRange(MountObjects(gLmm));
         var held = hold == 1 && track.Captured;
         if (!held) objects.Add(StrutAt(StrutWorld(track, hold, qDeg)));
+        if (extras is not null)
+            foreach (var (name, pose) in extras)
+                objects.Add(StrutAt(PlacementWorld(pose), name));
 
         var allowed = new List<(string, string)>
         {
@@ -318,16 +327,18 @@ public sealed class BambooIcdCell
 
     /// <summary>All Motus contacts for one pose. Empty = clear.</summary>
     public IReadOnlyList<CollisionContact> Contacts(
-        IReadOnlyList<double> qDeg, double gRmm, double gLmm, int hold, string label, StrutTrack track, int maxContacts = 32)
+        IReadOnlyList<double> qDeg, double gRmm, double gLmm, int hold, string label, StrutTrack track,
+        IReadOnlyList<(string Name, StrutPlacement Pose)>? extras = null, int maxContacts = 32)
     {
-        var scene = Scene(track, hold, IsGripping(track, hold, label), gLmm, qDeg);
+        var scene = Scene(track, hold, IsGripping(track, hold, label), gLmm, qDeg, extras);
         var checker = Checker(gRmm, hold == 1 ? track.HeldOffset : null);
         return checker.FindContacts(new JointState(RadFromDeg(qDeg)), scene, maxContacts);
     }
 
-    public bool IsClear(IReadOnlyList<double> qDeg, double gRmm, double gLmm, int hold, string label, StrutTrack track)
+    public bool IsClear(IReadOnlyList<double> qDeg, double gRmm, double gLmm, int hold, string label, StrutTrack track,
+        IReadOnlyList<(string Name, StrutPlacement Pose)>? extras = null)
     {
-        var scene = Scene(track, hold, IsGripping(track, hold, label), gLmm, qDeg);
+        var scene = Scene(track, hold, IsGripping(track, hold, label), gLmm, qDeg, extras);
         return Checker(gRmm, hold == 1 ? track.HeldOffset : null).IsCollisionFree(new JointState(RadFromDeg(qDeg)), scene);
     }
 

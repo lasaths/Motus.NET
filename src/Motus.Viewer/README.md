@@ -69,7 +69,15 @@ cd src/Motus.Viewer
 dotnet run --urls http://127.0.0.1:5268
 ```
 
-Open `http://127.0.0.1:5268/bamboo`.
+Open `http://127.0.0.1:5268/bamboo` (single strut pick/place) or
+`http://127.0.0.1:5268/bamboo-truss` (material store → two-triangle truss).
+
+### `/bamboo-truss` layout
+
+- **Store:** rack/stack of five bamboo struts near the arm (first slot = default ICD pick).
+- **Footprint:** two triangles on the ground sharing the middle upright (nodes A–B–D bottom, C apex, shared edge B–C).
+- **Tasks:** Motus string-identity pick/place pairs (`object` = member id) build members in order.
+- **Collision:** Motus.NET vs pole, ground, mount, store leftovers, placed members, held strut, and self.
 
 ## What still differs from the HTML preview
 
