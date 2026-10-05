@@ -57,7 +57,10 @@ public static class UrdfCollisionLoader
                 var rpy = ParseTriple(origin?.Attribute("rpy")?.Value);
                 var pose = FrameFromRpy(xyz.x, xyz.y, xyz.z, rpy.x, rpy.y, rpy.z);
                 var geom = collision.Element("geometry") ?? throw new InvalidOperationException($"collision on {linkName} missing geometry");
-                var objName = $"{linkName}_col{collisionIdx++}";
+                // URDF <collision name="..."> when present (stable, human-readable hit reports); else {link}_col{i}.
+                var declared = collision.Attribute("name")?.Value;
+                var objName = string.IsNullOrWhiteSpace(declared) ? $"{linkName}_col{collisionIdx}" : declared;
+                collisionIdx++;
                 var obj = ParseGeometry(objName, pose, geom, urdfDirectory);
                 if (obj is not null)
                     geometries.Add(new LinkCollisionGeometry(index, linkName, obj));

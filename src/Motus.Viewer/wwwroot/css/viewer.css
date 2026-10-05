@@ -1,0 +1,192 @@
+/* Motus.Viewer — visual/UX aligned with retired bamboo-viewer/next.html */
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; background: #000; color: #e8e8e8; }
+body {
+  display: flex;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  overflow: hidden;
+}
+#app { display: flex; width: 100%; height: 100%; }
+.viewer-container {
+  display: flex;
+  width: 100%;
+  height: 100vh;
+  overflow: hidden;
+}
+.viewport-wrap {
+  flex: 1;
+  position: relative;
+  min-width: 0;
+  cursor: grab;
+  background: #000;
+}
+.viewport-wrap.drag, #viewport.drag { cursor: grabbing; }
+#viewport { width: 100%; height: 100%; }
+#viewport canvas { display: block; }
+
+.controls {
+  width: 340px;
+  flex: none;
+  background: #111;
+  border-left: 1px solid #2a2a2a;
+  overflow: auto;
+  padding: 18px 16px 28px;
+}
+.controls h1 {
+  font-family: Menlo, Monaco, "Courier New", monospace;
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #aaa;
+  font-weight: 700;
+}
+.controls h1:focus { outline: none; }
+.sub { color: #777; font-size: 12px; line-height: 1.45; margin: 8px 0 14px; }
+.phase {
+  font-family: Menlo, Monaco, "Courier New", monospace;
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #fff;
+  margin-bottom: 12px;
+}
+.phase.err { color: #e07a55; }
+.row { margin: 8px 0 4px; }
+.row label {
+  display: flex;
+  justify-content: space-between;
+  font-family: Menlo, Monaco, "Courier New", monospace;
+  font-size: 11px;
+  color: #bbb;
+  margin-bottom: 3px;
+}
+.row label span { color: #fff; }
+input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 2px;
+  background: #333;
+  outline: none;
+  cursor: pointer;
+}
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 12px; height: 12px;
+  border-radius: 6px;
+  background: #fff;
+  cursor: pointer;
+}
+input[type="range"]::-moz-range-thumb {
+  width: 12px; height: 12px;
+  border-radius: 6px;
+  background: #fff;
+  border: none;
+  cursor: pointer;
+}
+.btns { display: flex; gap: 8px; margin-top: 12px; }
+button {
+  font-family: Menlo, Monaco, "Courier New", monospace;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  padding: 8px 14px;
+  background: transparent;
+  color: #ccc;
+  border: 1px solid #444;
+  border-radius: 16px;
+  cursor: pointer;
+}
+button:hover:not(:disabled) { color: #fff; border-color: #888; }
+button.active { background: #c4552a; border-color: #c4552a; color: #fff; }
+button:disabled { opacity: 0.35; cursor: default; }
+button.mini { padding: 5px 10px; }
+.check {
+  display: flex; align-items: center; gap: 8px;
+  margin-top: 14px;
+  font-family: Menlo, Monaco, "Courier New", monospace;
+  font-size: 11px; color: #aaa;
+}
+.note { margin-top: 16px; color: #666; font-size: 11px; line-height: 1.45; }
+.warn {
+  margin-top: 8px;
+  color: #e07a55;
+  font-family: Menlo, Monaco, "Courier New", monospace;
+  font-size: 11px;
+  line-height: 1.4;
+  min-height: 1.2em;
+}
+#tasks { margin-top: 16px; }
+.task {
+  border: 1px solid #2c2c2c;
+  border-radius: 8px;
+  padding: 8px 8px 10px;
+  margin-top: 8px;
+}
+.taskhead {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 6px;
+  font-family: Menlo, Monaco, "Courier New", monospace;
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #888;
+}
+.used { color: #d7c392; letter-spacing: 0.08em; min-height: 1em; }
+.field {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 4px 0;
+}
+.field span {
+  flex: none;
+  width: 74px;
+  font-family: Menlo, Monaco, "Courier New", monospace;
+  font-size: 10px;
+  color: #999;
+}
+.field input {
+  flex: 1;
+  min-width: 0;
+  background: #0c0c0c;
+  color: #fff;
+  border: 1px solid #333;
+  border-radius: 4px;
+  font-family: Menlo, Monaco, "Courier New", monospace;
+  font-size: 12px;
+  padding: 4px 6px;
+  color-scheme: dark;
+}
+.field em {
+  flex: none;
+  font-style: normal;
+  font-family: Menlo, Monaco, "Courier New", monospace;
+  font-size: 10px;
+  color: #777;
+  width: 20px;
+}
+.joint-loading {
+  padding: 8px 0;
+  color: #aaa;
+  font-size: 12px;
+  font-family: Menlo, Monaco, "Courier New", monospace;
+}
+#blazor-error-ui {
+  display: none;
+  position: fixed;
+  bottom: 0; left: 0; width: 100%;
+  z-index: 1000;
+  padding: 0.6rem 1.25rem;
+  background: lightyellow;
+  color: #222;
+}
+#blazor-error-ui .dismiss {
+  cursor: pointer;
+  position: absolute;
+  right: 0.75rem;
+  top: 0.5rem;
+}
