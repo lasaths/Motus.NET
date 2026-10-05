@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Motus.NET Bamboo Viewer</title>
+    <base href="/" />
+    <link rel="stylesheet" href="css/viewer.css" />
+    <link rel="icon" type="image/png" href="favicon.png" />
+    <link href="Motus.Viewer.styles.css" rel="stylesheet" />
+</head>
+
+<body>
+    <div id="app">
+        <div style="position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); color: #4a9eff; font-size: 18px;">
+            Loading Motus.NET...
+        </div>
+    </div>
+
+    <div id="blazor-error-ui">
+        An unhandled error has occurred.
+        <a href="." class="reload">Reload</a>
+        <span class="dismiss">🗙</span>
+    </div>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <script src="js/viewer.js"></script>
+    <script src="_framework/blazor.webassembly.js"></script>
+</body>
+
+</html>

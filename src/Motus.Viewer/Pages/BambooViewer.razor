@@ -1,0 +1,248 @@
+@page "/bamboo"
+@inject IJSRuntime JS
+@using Motus.Core
+@using Motus.Geometry
+@using Motus.Presets
+@using System.Text.Json
+@using System.Xml.Linq
+
+<PageTitle>Bamboo ICD Arm Viewer</PageTitle>
+
+<div class="viewer-container">
+    <div class="viewport-wrap">
+        <div id="viewport"></div>
+        <div class="overlay">
+            <div class="overlay-top">
+                <h1>Bamboo ICD 5-DoF Arm</h1>
+                <div class="status @(_collision ? "error" : "ok")">
+                    @if (_collision)
+                    {
+                        <text>⚠ Collision: @_collisionMessage</text>
+                    }
+                    else
+                    {
+                        <text>✓ Collision-free</text>
+                    }
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <aside class="controls">
+        <div class="panel-header">
+            <h2>Joint Controls</h2>
+            <div class="button-group">
+                <button @onclick="ResetJoints" class="btn-secondary">Reset</button>
+                <button @onclick="() => PlayTask()" disabled="@_isPlaying" class="btn-primary">
+                    @(_isPlaying ? "Playing..." : "Play Task")
+                </button>
+            </div>
+        </div>
+
+        <div class="joint-controls">
+            @for (int i = 0; i < _jointCount; i++)
+            {
+                var index = i;
+                var limits = _jointLimits[i];
+                <div class="joint-row">
+                    <label>Joint @(i + 1)</label>
+                    <span class="joint-value">@_currentJoints[index].ToString("F3") rad</span>
+                    <input type="range" 
+                           min="@limits.Min" 
+                           max="@limits.Max" 
+                           step="0.01" 
+                           value="@_currentJoints[index]" 
+                           @oninput="@(e => UpdateJoint(index, e))" />
+                </div>
+            }
+        </div>
+
+        <div class="task-info">
+            <h3>Task: Pick & Place Strut</h3>
+            <div class="task-steps">
+                <div class="task-step">1. Pick approach</div>
+                <div class="task-step">2. Grasp strut from ground</div>
+                <div class="task-step">3. Place upright</div>
+                <div class="task-step">4. Release</div>
+            </div>
+        </div>
+    </aside>
+</div>
+
+@code {
+    private RobotModel? _robot;
+    private IFkSolver? _fk;
+    private ICollisionChecker? _checker;
+    private CollisionScene _scene = new();
+    private TaskPath? _taskPath;
+
+    private int _jointCount = 5;
+    private double[] _currentJoints = new double[5];
+    private JointLimit[] _jointLimits = Array.Empty<JointLimit>();
+    
+    private bool _collision = false;
+    private string _collisionMessage = "";
+    private bool _isPlaying = false;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            await InitializeRobot();
+            await InitializeThreeJs();
+            await UpdateVisualization();
+        }
+    }
+
+    private async Task InitializeRobot()
+    {
+        try
+        {
+            var urdfPath = "/fixtures/bamboo_icd/bamboo_icd.urdf";
+            var urdfContent = await JS.InvokeAsync<string>("fetchFile", urdfPath);
+            
+            var robot = UrdfRobotLoader.Load(
+                XDocument.Parse(urdfContent), 
+                new UrdfLoadOptions
+                {
+                    BaseLink = "base_link",
+                    TipLink = "tool0"
+                });
+
+            _robot = robot.ToModel();
+            _fk = KinematicsResolver.CreateFkSolver(robot.Preset, robot.Chain);
+            _checker = new MeshCollisionChecker(robot.Preset);
+            _jointCount = robot.Preset.AxisCount;
+            _currentJoints = new double[_jointCount];
+            _jointLimits = robot.Preset.JointLimits.ToArray();
+
+            CreateScene();
+            CreateTaskPath();
+        }
+        catch (Exception ex)
+        {
+            _collisionMessage = $"Init error: {ex.Message}";
+            _collision = true;
+        }
+    }
+
+    private void CreateScene()
+    {
+        var ground = CollisionObject.Box("ground", new Frame(0.3, 0, -0.025), 0.6, 0.6, 0.05);
+        _scene = new CollisionScene(new[] { ground });
+    }
+
+    private void CreateTaskPath()
+    {
+        if (_robot == null) return;
+
+        var pickApproach = new Frame(0.25, 0, 0.1, qw: 1, qx: 0, qy: 0, qz: 0);
+        var pickGrasp = new Frame(0.25, 0, 0.05, qw: 1, qx: 0, qy: 0, qz: 0);
+        var pick = new TaskInstance("pick",
+            new Dictionary<string, Frame>
+            {
+                ["approach"] = pickApproach,
+                ["grasp"] = pickGrasp
+            },
+            new Dictionary<string, object>
+            {
+                ["object"] = "bamboo_strut",
+                ["jaw_mm"] = 8.0
+            });
+
+        var placeUpright = new Frame(0.2, 0.3, 0.4, qw: 0.707, qx: 0.707, qy: 0, qz: 0);
+        var placeRelease = new Frame(0.2, 0.3, 0.35, qw: 0.707, qx: 0.707, qy: 0, qz: 0);
+        var place = new TaskInstance("place",
+            new Dictionary<string, Frame>
+            {
+                ["upright"] = placeUpright,
+                ["release"] = placeRelease
+            },
+            new Dictionary<string, object>
+            {
+                ["jaw_mm"] = 40.0
+            });
+
+        _taskPath = new TaskPath(pick, place);
+    }
+
+    private async Task InitializeThreeJs()
+    {
+        await JS.InvokeVoidAsync("initThreeJs");
+    }
+
+    private async Task UpdateJoint(int index, ChangeEventArgs e)
+    {
+        if (double.TryParse(e.Value?.ToString(), out var value))
+        {
+            _currentJoints[index] = value;
+            await UpdateVisualization();
+        }
+    }
+
+    private async Task ResetJoints()
+    {
+        Array.Clear(_currentJoints);
+        await UpdateVisualization();
+    }
+
+    private async Task UpdateVisualization()
+    {
+        if (_fk == null || _robot == null || _checker == null) return;
+
+        var state = new JointState(_currentJoints);
+        var linkOrigins = _fk.ComputeLinkOrigins(_currentJoints, Frame.Identity);
+
+        _collision = !_checker.IsCollisionFree(state, _scene);
+        _collisionMessage = _collision ? "Robot collides with scene" : "";
+
+        var linkPoses = linkOrigins.Select(p => new
+        {
+            position = new { x = p.X, y = p.Y, z = p.Z },
+            quaternion = new { 
+                x = p.Qx, 
+                y = p.Qy, 
+                z = p.Qz, 
+                w = p.Qw 
+            }
+        }).ToArray();
+
+        await JS.InvokeVoidAsync("updateRobot", JsonSerializer.Serialize(linkPoses));
+    }
+
+    private async Task PlayTask()
+    {
+        if (_taskPath == null || _robot == null || _checker == null || _isPlaying) return;
+
+        _isPlaying = true;
+        StateHasChanged();
+
+        try
+        {
+            var ik = KinematicsResolver.CreateInverseKinematics(_robot.Preset);
+            var result = TaskPathValidator.Validate(_taskPath, _robot, ik, _checker, _scene);
+
+            if (!result.IsValid)
+            {
+                _collision = true;
+                _collisionMessage = string.Join("; ", result.Errors);
+                return;
+            }
+
+            foreach (var state in result.ReachableStates)
+            {
+                for (int i = 0; i < _jointCount; i++)
+                {
+                    _currentJoints[i] = state.Positions[i];
+                }
+                await UpdateVisualization();
+                await Task.Delay(1000);
+            }
+        }
+        finally
+        {
+            _isPlaying = false;
+            StateHasChanged();
+        }
+    }
+}
