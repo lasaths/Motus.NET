@@ -18,7 +18,7 @@
     <aside class="controls">
         <h1>ICD / LIS bamboo arm</h1>
         <p class="sub">5-DoF kinematic preview. Parallel-jaw grippers. Left jaw stays closed on the support pole during the task. Motus.NET owns FK/tasks/collision; Three.js only draws.</p>
-        <div class="phase @(!string.IsNullOrEmpty(_motionError) || _collision ? "err" : "")">@_phase</div>
+        <div class="phase @(!string.IsNullOrEmpty(_motionError) || _collision ? "err" : "")" data-motus="@_motusState">@_phase</div>
 
         <div class="row">
             <label>Motion <span>@_scrubPct%</span></label>
@@ -63,7 +63,7 @@
                         var pname = plane.Name;
                         <div class="field">
                             <span>@pname</span>
-                            <input type="number" step="1" title="Nudge @pname along world Y, millimetres"
+                            <input type="number" step="0.5" title="Nudge @pname along world Y, millimetres"
                                    value="@plane.YMm"
                                    @oninput="e => OnPlaneYMm(index, pname, e)" />
                             <em>mm</em>
@@ -78,6 +78,10 @@
         </div>
 
         <p class="warn">@_motionError</p>
+        @if (!string.IsNullOrEmpty(_motusNote))
+        {
+            <p class="warn motus-hit">@_motusNote</p>
+        }
 
         <div>
             @if (!IsRobotReady)
@@ -117,28 +121,31 @@
             Drag the view to orbit. Moving a joint or gripper slider pauses playback and drives the arm from C#.
             Play follows the first task named pick and the first named place. Lengths: pole→θ1 30, then 80, 88, 88, 88, θ5→jaw 46 mm.
             Bend axes local X, wrists local Y, jaws local X. Viewer is Three.js Y-up; Motus.NET URDF is Z-up (shared θ).
-            Collision: Motus.NET checkers decide.
+            Collision: Motus.NET <code>RobotMeshCollisionChecker</code> (exact OBB / triangle tests) on the URDF's own
+            collision boxes, against pole, strut, ground, mount, and the arm itself. Play and scrub stop on the last
+            clear sample before the first Motus contact; hit parts are named by Motus and tinted red.
         </p>
     </aside>
 </div>
 
 @code {
-    private RobotModel? _robot;
-    private IFkSolver? _fk;
-    private SerialJointChain? _chain;
-    private ICollisionChecker? _checker;
-    private CollisionScene _scene = new();
+    private BambooIcdCell? _cell;
+    private BambooMotionScan? _scan;
+    private CancellationTokenSource? _scanCts;
 
     private List<BambooIcdMotion.TaskEdit> _tasks = BambooIcdMotion.DefaultTasks();
     private List<BambooIcdMotion.MotionKey> _keys = new();
     private string _motionError = "";
+    private string _motusNote = "";
 
     private double[] _qDeg = BambooIcdMotion.HomeDeg.ToArray();
     private double _gL = 24;
     private double _gR = 40;
     private int _hold;
+    private string _label = "Home";
     private bool _axesVisible = true;
     private bool _collision;
+    private IReadOnlyList<CollisionContact> _contacts = Array.Empty<CollisionContact>();
     private string _phase = "Home";
     private int _scrub;
     private int _scrubPct => (int)Math.Round(_scrub / 10.0);
@@ -149,7 +156,8 @@
     private bool _threeReady;
     private CancellationTokenSource? _playCts;
 
-    private static readonly string[] JointNames = { "θ1", "θ2", "θ3", "θ4", "θ5" };
+    /// <summary>Plain-text status for automation / screenshots: clear | stopped | manual-hit.</summary>
+    private string _motusState = "clear";
 
     private bool IsRobotReady =>
         _robotReady && _qDeg.Length >= 5 && _threeReady;
@@ -158,15 +166,18 @@
     {
         if (!firstRender) return;
         await InitializeRobot();
-        try
+        if (_cell is not null)
         {
-            await JS.InvokeVoidAsync("initThreeJs");
-            _threeReady = true;
-        }
-        catch (JSException ex)
-        {
-            _initError = $"Three.js init failed: {ex.Message}";
-            _robotReady = false;
+            try
+            {
+                await JS.InvokeVoidAsync("initThreeJs", JsonSerializer.Serialize(_cell.CellDescription()));
+                _threeReady = true;
+            }
+            catch (JSException ex)
+            {
+                _initError = $"Three.js init failed: {ex.Message}";
+                _robotReady = false;
+            }
         }
         RefreshMotion(apply: true);
         StateHasChanged();
@@ -179,19 +190,8 @@
         try
         {
             var urdfContent = await JS.InvokeAsync<string>("fetchFile", "/fixtures/bamboo_icd/bamboo_icd.urdf");
-            var robot = UrdfRobotLoader.Load(
-                XDocument.Parse(urdfContent),
-                new UrdfLoadOptions { BaseLink = "base_link", TipLink = "tool0" });
-
-            _robot = robot.ToModel();
-            _chain = robot.Chain;
-            _fk = KinematicsResolver.CreateFkSolver(robot.Preset, robot.Chain);
-            _checker = new RobotMeshCollisionChecker(_robot, robot.Chain);
-
-            // Motus URDF is Z-up floor-serial; ICD visual is Y-up hang. Use empty Motus
-            // scene so checkers decide self-collision only until URDF matches the ICD hang.
-            _scene = new CollisionScene();
-
+            // Hung arm + pole/strut/ground/mount CollisionScene; URDF link frames == drawn groups.
+            _cell = BambooIcdCell.Load(urdfContent);
             _robotReady = true;
             _initError = null;
         }
@@ -208,72 +208,123 @@
         var built = BambooIcdMotion.BuildMotion(_tasks);
         _motionError = built.Error;
         _keys = built.Keys;
+        _scanCts?.Cancel();
+        _scan = null;
+        _motusNote = "";
+        if (_cell is not null)
+        {
+            _scan = new BambooMotionScan(_cell, _keys, BambooIcdCell.StrutRest(_tasks), _gL, BambooViewerScanStepDeg);
+            if (_scan.Track.Miss is { } miss) _motusNote = $"Motus: {miss} — strut stays on the ground.";
+            _scanCts = new CancellationTokenSource();
+            _ = BackgroundScan(_scan, _scanCts.Token);
+        }
         if (apply && !_manual)
             ApplyTask(_scrub / 1000.0);
         else if (_manual)
-            _phase = _collision ? $"Manual · {_phase}" : "Manual";
+            RunManualCollision();
+    }
+
+    /// <summary>Joint step between Motus checks along the motion (degrees). 0.5° keeps every part from tunnelling.</summary>
+    private const double BambooViewerScanStepDeg = 0.5;
+
+    /// <summary>Verify the whole motion with Motus in small chunks so the UI stays responsive.</summary>
+    private async Task BackgroundScan(BambooMotionScan scan, CancellationToken token)
+    {
+        try
+        {
+            while (!token.IsCancellationRequested && !scan.Complete)
+            {
+                scan.Step(40);
+                await Task.Delay(1, token);
+            }
+            if (token.IsCancellationRequested || !ReferenceEquals(scan, _scan)) return;
+            UpdateScanNote();
+            StateHasChanged();
+        }
+        catch (TaskCanceledException) { }
+    }
+
+    private void UpdateScanNote()
+    {
+        if (_scan is null) return;
+        var miss = _scan.Track.Miss is { } m ? $"Motus: {m} — strut stays on the ground. " : "";
+        if (_scan.FirstHit is { } hit)
+            _motusNote = $"{miss}Motus: path collides at {hit.T * 100:F1}% ({hit.Label}): {hit.Describe()}. Play/scrub stop at {Math.Max(0, hit.LastClearT) * 100:F1}%.";
+        else
+            _motusNote = miss.TrimEnd();
     }
 
     private void ApplyTask(double t)
     {
         t = Math.Clamp(t, 0, 1);
+        BambooMotionScan.Hit? stop = null;
+        if (_scan is not null && string.IsNullOrEmpty(_motionError))
+        {
+            _scan.AdvanceTo(t);
+            if (_scan.FirstHit is { } hit && t >= hit.T)
+            {
+                stop = hit;
+                t = Math.Max(0, hit.LastClearT);
+            }
+        }
         var sample = BambooIcdMotion.Sample(_keys, t);
         _qDeg = sample.Q;
         _gL = 24;
         _gR = sample.GR;
         _hold = sample.Hold;
+        _label = sample.Label;
         _scrub = (int)Math.Round(t * 1000);
-        RunMotusCollision();
-        _phase = string.IsNullOrEmpty(_motionError)
-            ? (_collision ? $"{sample.Label} · collision" : sample.Label)
-            : _motionError;
-    }
-
-    private void RunMotusCollision()
-    {
-        if (_checker is null || _robot is null) { _collision = false; return; }
-        var rad = _qDeg.Select(d => d * Math.PI / 180.0).ToArray();
-        // Pad/truncate to Motus axis count.
-        var n = _robot.Preset.AxisCount;
-        var q = new double[n];
-        for (var i = 0; i < n; i++) q[i] = i < rad.Length ? rad[i] : 0;
-        try
+        if (stop is not null)
         {
-            _collision = !_checker.IsCollisionFree(new JointState(q), _scene);
+            // Show the last clear pose; tint the parts Motus reports at the first colliding sample.
+            _collision = true;
+            _contacts = stop.Contacts;
+            _motusState = "stopped";
+            UpdateScanNote();
+            _phase = $"Motus stop · {stop.Label} · {stop.Describe()}";
         }
-        catch
+        else
         {
+            _contacts = Array.Empty<CollisionContact>();
             _collision = false;
+            _motusState = "clear";
+            _phase = string.IsNullOrEmpty(_motionError) ? sample.Label : _motionError;
         }
     }
 
-    private sealed record PlaneXYZ(double x, double y, double z, double a);
+    /// <summary>Manual joint/grip poses: ask Motus directly (current hold state, strut where it is).</summary>
+    private void RunManualCollision()
+    {
+        if (_cell is null || _scan is null) { _collision = false; return; }
+        _contacts = _cell.Contacts(_qDeg, _gR, _gL, _hold, "Manual", _scan.Track);
+        _collision = _contacts.Count > 0;
+        _motusState = _collision ? "manual-hit" : "clear";
+        _phase = _collision ? $"Manual · Motus collision · {BambooIcdCell.Describe(_contacts)}" : "Manual";
+    }
+
+    private string[] HitParts()
+    {
+        var names = new List<string>();
+        foreach (var c in _contacts) { names.Add(c.BodyA); names.Add(c.BodyB); }
+        return names.Distinct().ToArray();
+    }
 
     private async Task PushPoseAsync()
     {
-        if (!_threeReady) return;
-        var grasp = PlaneWorld("pick", "grasp") ?? new PlaneXYZ(BambooIcdMotion.Pick.X, BambooIcdMotion.Pick.Y, BambooIcdMotion.Pick.Z, 0);
-        var release = PlaneWorld("place", "release") ?? new PlaneXYZ(BambooIcdMotion.Place.X, BambooIcdMotion.Place.Y, BambooIcdMotion.Place.Z, -90);
+        if (!_threeReady || _cell is null) return;
+        var strut = _scan is null
+            ? null
+            : BambooIcdCell.ToViewerPose(_cell.StrutWorld(_scan.Track, _hold, _qDeg));
         var payload = new
         {
             q = _qDeg,
             gL = _gL,
             gR = _gR,
-            hold = _hold,
+            strut,
             axesVisible = _axesVisible,
-            grasp,
-            release,
-            hitParts = _collision ? new[] { "θ2", "θ3", "θ4", "R-grip" } : Array.Empty<string>()
+            hitParts = HitParts()
         };
         await JS.InvokeVoidAsync("setBambooPose", JsonSerializer.Serialize(payload));
-    }
-
-    private PlaneXYZ? PlaneWorld(string identity, string plane)
-    {
-        var t = _tasks.FirstOrDefault(x => x.Identity == identity);
-        var p = t?.Planes.FirstOrDefault(x => x.Name == plane);
-        if (p is null) return null;
-        return new PlaneXYZ(p.X, p.Y0 + p.YMm / 1000.0, p.Z, p.PitchDeg);
     }
 
     private async Task PushFramesAsync()
@@ -295,37 +346,37 @@
         await JS.InvokeVoidAsync("setBambooFrames", JsonSerializer.Serialize(frames));
     }
 
+    private static bool TryParse(ChangeEventArgs e, out double v) =>
+        double.TryParse(e.Value?.ToString(), System.Globalization.NumberStyles.Float,
+            System.Globalization.CultureInfo.InvariantCulture, out v);
+
     private async Task OnJoint(int index, ChangeEventArgs e)
     {
-        if (!double.TryParse(e.Value?.ToString(), System.Globalization.NumberStyles.Float,
-                System.Globalization.CultureInfo.InvariantCulture, out var v)) return;
+        if (!TryParse(e, out var v)) return;
         StopPlay();
         _manual = true;
         _qDeg[index] = v;
-        RunMotusCollision();
-        _phase = _collision ? $"Manual · Motus collision" : "Manual";
+        RunManualCollision();
         await PushPoseAsync();
     }
 
     private async Task OnGripL(ChangeEventArgs e)
     {
-        if (!double.TryParse(e.Value?.ToString(), System.Globalization.NumberStyles.Float,
-                System.Globalization.CultureInfo.InvariantCulture, out var v)) return;
+        if (!TryParse(e, out var v)) return;
         StopPlay();
         _manual = true;
         _gL = v;
-        _phase = "Manual";
+        RunManualCollision();
         await PushPoseAsync();
     }
 
     private async Task OnGripR(ChangeEventArgs e)
     {
-        if (!double.TryParse(e.Value?.ToString(), System.Globalization.NumberStyles.Float,
-                System.Globalization.CultureInfo.InvariantCulture, out var v)) return;
+        if (!TryParse(e, out var v)) return;
         StopPlay();
         _manual = true;
         _gR = v;
-        _phase = "Manual";
+        RunManualCollision();
         await PushPoseAsync();
     }
 
@@ -353,7 +404,8 @@
             return;
         }
         _manual = false;
-        if (_scrub >= 1000) _scrub = 0;
+        // Restart from the beginning when at the end or parked on a Motus stop.
+        if (_scrub >= 1000 || _motusState == "stopped") _scrub = 0;
         _isPlaying = true;
         _playCts = new CancellationTokenSource();
         var token = _playCts.Token;
@@ -372,26 +424,17 @@
                 var now = DateTime.UtcNow;
                 var dt = Math.Min(0.05, (now - last).TotalSeconds);
                 last = now;
-                var t = _scrub / 1000.0 + dt / duration;
-                if (t >= 1)
-                {
-                    ApplyTask(1);
-                    await PushPoseAsync();
-                    StopPlay();
-                    StateHasChanged();
-                    break;
-                }
+                var t = Math.Min(1, _scrub / 1000.0 + dt / duration);
+                // ApplyTask advances the Motus scan through every sample up to t and parks on the
+                // last clear one if Motus reports a contact in between.
                 ApplyTask(t);
-                // Motus collision stop during play
-                if (_collision)
+                await PushPoseAsync();
+                if (_motusState == "stopped" || t >= 1)
                 {
-                    _phase = $"{_phase} (Motus stop)";
-                    await PushPoseAsync();
                     StopPlay();
                     StateHasChanged();
                     break;
                 }
-                await PushPoseAsync();
                 StateHasChanged();
                 await Task.Delay(16, token);
             }
@@ -412,6 +455,7 @@
         _manual = false;
         _tasks = BambooIcdMotion.DefaultTasks();
         _scrub = 0;
+        _gL = 24;
         RefreshMotion(apply: true);
         await PushFramesAsync();
         await PushPoseAsync();
@@ -451,26 +495,27 @@
             }).ToList()
         };
         _tasks.Insert(index + 1, copy);
-        RefreshMotion(apply: !_manual);
-        await PushFramesAsync();
-        if (!_manual) await PushPoseAsync();
+        await AfterTaskEdit(frames: true);
     }
 
     private async Task DeleteTask(int index)
     {
         if (!CanDelete(_tasks[index])) return;
         _tasks.RemoveAt(index);
+        await AfterTaskEdit(frames: true);
+    }
+
+    private async Task AfterTaskEdit(bool frames)
+    {
         RefreshMotion(apply: !_manual);
-        await PushFramesAsync();
-        if (!_manual) await PushPoseAsync();
+        if (frames) await PushFramesAsync();
+        await PushPoseAsync();
     }
 
     private async Task OnIdentity(int index, ChangeEventArgs e)
     {
         _tasks[index].Identity = e.Value?.ToString() ?? "";
-        RefreshMotion(apply: !_manual);
-        await PushFramesAsync();
-        if (!_manual) await PushPoseAsync();
+        await AfterTaskEdit(frames: true);
     }
 
     private Task OnObject(int index, ChangeEventArgs e)
@@ -481,28 +526,24 @@
 
     private async Task OnJawMm(int index, ChangeEventArgs e)
     {
-        if (!double.TryParse(e.Value?.ToString(), System.Globalization.NumberStyles.Float,
-                System.Globalization.CultureInfo.InvariantCulture, out var v)) return;
+        if (!TryParse(e, out var v)) return;
         _tasks[index].JawMm = v;
-        RefreshMotion(apply: !_manual);
-        if (!_manual) await PushPoseAsync();
+        await AfterTaskEdit(frames: false);
     }
 
     private async Task OnPlaneYMm(int index, string planeName, ChangeEventArgs e)
     {
-        if (!double.TryParse(e.Value?.ToString(), System.Globalization.NumberStyles.Float,
-                System.Globalization.CultureInfo.InvariantCulture, out var v)) return;
+        if (!TryParse(e, out var v)) return;
         var plane = _tasks[index].Planes.FirstOrDefault(p => p.Name == planeName);
         if (plane is null) return;
         plane.YMm = v;
-        RefreshMotion(apply: !_manual);
-        await PushFramesAsync();
-        if (!_manual) await PushPoseAsync();
+        await AfterTaskEdit(frames: true);
     }
 
     public async ValueTask DisposeAsync()
     {
         StopPlay();
+        _scanCts?.Cancel();
         await Task.CompletedTask;
     }
 }

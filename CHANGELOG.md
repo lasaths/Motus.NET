@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `ICollisionContactReporter` / `CollisionContact`: `RobotMeshCollisionChecker.FindContacts` names every colliding
+  body pair (self, scene, tool, attached) by collision-geometry / scene-object name.
+- `RobotMeshCollisionChecker(robot, chain, attached, selfCollisionMinLinkGap)` — configurable self-collision gap
+  (default 4 unchanged).
+- URDF `<collision name="...">` is used as the collision-geometry name when present.
+- Motus.Viewer `/bamboo`: full Motus collision for the hung ICD bamboo arm (`BambooIcdCell`, `BambooMotionScan`,
+  `BambooIcdIk`); URDF regenerated to hang under the pole with the drawn collision boxes.
+
+### Changed
+
+- Exact narrow phase in `CollisionGeometry`: box–box (OBB SAT), box/mesh (triangle–OBB SAT), mesh vs
+  box/sphere/capsule/plane per triangle, denser capsule sampling. Previously boxes were a corner/centre sphere
+  cloud (over-reporting by up to a half-extent) and meshes vs primitives sampled vertices with 1 cm spheres.
+- Allowed pairs may name individual collision geometries as well as `link:i` aliases (self, scene, attached).
+
 ## [2.0.0] - 2026-09-19
 
 ### Added

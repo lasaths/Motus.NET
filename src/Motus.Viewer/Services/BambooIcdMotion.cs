@@ -4,10 +4,11 @@ namespace Motus.Viewer.Services;
 
 /// <summary>
 /// ICD/LIS bamboo-arm planar IK and pick/place motion keys for the Motus.Viewer page.
-/// Matches the retired HTML preview kinematics (SEG lengths, axes, HOME_Q).
-/// Motus.NET still owns collision decisions; this class only builds joint-space keys.
-/// Frame: Three.js Y-up viewer space (pole along +X at y=POLE_Y). Motus.NET URDF is Z-up;
-/// joint angles are shared 1:1 (same θ vector). See Motus.Viewer README.
+/// Matches the retired HTML preview kinematics (SEG lengths, axes, HOME_Q) and the bamboo URDF
+/// (tests assert Motus FK == <see cref="FkJaw"/>). The planner's floor heuristics only pick IK branches;
+/// collision is decided by Motus.NET (<see cref="BambooIcdCell"/>, <see cref="BambooMotionScan"/>).
+/// Frame: Three.js Y-up viewer space (pole along +X at y=POLE_Y). Motus world is Z-up,
+/// Motus = Rx(+90°)·viewer; joint angles are shared 1:1 (same θ vector).
 /// </summary>
 public static class BambooIcdMotion
 {
@@ -55,6 +56,9 @@ public static class BambooIcdMotion
         public List<MotionKey> Keys { get; set; } = new();
     }
 
+    /// <summary>Open R-grip opening used by a motion (the widest gR in its keys).</summary>
+    public static double OpenJawMm(IReadOnlyList<MotionKey> keys) => keys.Count == 0 ? 40 : keys.Max(k => k.GR);
+
     public static List<TaskEdit> DefaultTasks() =>
     [
         new TaskEdit
@@ -88,11 +92,7 @@ public static class BambooIcdMotion
         {
             var frames = new Dictionary<string, Frame>();
             foreach (var p in t.Planes)
-            {
-                var y = p.Y0 + p.YMm / 1000.0;
-                // Store viewer Y-up plane as Motus Z-up-ish Frame: (x, -z, y) documented conversion.
-                frames[p.Name] = new Frame(p.X, -p.Z, y, qw: 1, qx: 0, qy: 0, qz: 0);
-            }
+                frames[p.Name] = PlaneToMotusFrame(p.X, p.Y0 + p.YMm / 1000.0, p.Z, p.PitchDeg);
             list.Add(new TaskInstance(t.Identity, frames, new Dictionary<string, object>
             {
                 ["object"] = t.Object,
@@ -100,6 +100,17 @@ public static class BambooIcdMotion
             }));
         }
         return new TaskPath(list);
+    }
+
+    /// <summary>
+    /// Task plane (viewer Y-up position + pitch about X) → Motus Z-up TCP frame.
+    /// Viewer jaw orientation at a plane is Rx(pitch); Motus = Rx(+90°)·viewer ⇒ Motus rotation Rx(90° + pitch),
+    /// position (x, −z, y). This is exactly the bamboo URDF tool0 pose when the arm grasps the plane.
+    /// </summary>
+    public static Frame PlaneToMotusFrame(double x, double y, double z, double pitchDeg)
+    {
+        var half = (90.0 + pitchDeg) * Deg / 2;
+        return new Frame(x, -z, y, qw: Math.Cos(half), qx: Math.Sin(half), qy: 0, qz: 0);
     }
 
     static double Wrap180(double a)
@@ -201,25 +212,35 @@ public static class BambooIcdMotion
          R[6] * v[0] + R[7] * v[1] + R[8] * v[2]];
     static double[] Add(double[] a, double[] b) => [a[0] + b[0], a[1] + b[1], a[2] + b[2]];
 
-    static bool SegOk(double[] a, double[] b, bool carrying)
+    /// <summary>Cost added per segment that breaks the floor heuristics (branch preference, not a veto).</summary>
+    public const double FloorPenalty = 1e6;
+
+    /// <summary>
+    /// Joint limits are a hard veto (kinematic feasibility). The point-model floor / carried-strut checks
+    /// from the retired HTML preview only steer IK branch choice via <see cref="FloorPenalty"/>: they never
+    /// reject a path, so a colliding request still plays and Motus.NET stops it on the first hit.
+    /// </summary>
+    static (bool Ok, double Penalty) SegCheck(double[] a, double[] b, bool carrying)
     {
+        var floorBad = false;
         for (var s = 0; s <= 20; s++)
         {
             var u = s / 20.0;
             var q = a.Select((v, k) => v + (b[k] - v) * u).ToArray();
             for (var i = 0; i < 5; i++)
-                if (q[i] < LimitsDeg[i].Min - 0.05 || q[i] > LimitsDeg[i].Max + 0.05) return false;
+                if (q[i] < LimitsDeg[i].Min - 0.05 || q[i] > LimitsDeg[i].Max + 0.05) return (false, 0);
+            if (floorBad) continue;
             var f = FkJaw(q);
             foreach (var pt in f.Pts)
-                if (pt[1] < -0.002) return false;
+                if (pt[1] < -0.002) floorBad = true;
             if (carrying)
             {
                 var ay = f.Z[1];
                 var bot = f.Pos[1] - 0.15 * Math.Abs(ay) - 0.007 * Math.Sqrt(Math.Max(0, 1 - ay * ay));
-                if (bot < -0.004) return false;
+                if (bot < -0.004) floorBad = true;
             }
         }
-        return true;
+        return (true, floorBad ? FloorPenalty : 0);
     }
 
     sealed class Stage { public string Name = ""; public List<double[]> Sols = new(); }
@@ -230,7 +251,10 @@ public static class BambooIcdMotion
         var cost = stages.Select(st => st.Sols.Select(_ => 1e18).ToArray()).ToArray();
         var prev = stages.Select(st => st.Sols.Select(_ => -1).ToArray()).ToArray();
         for (var i = 0; i < stages[0].Sols.Count; i++)
-            if (SegOk(HomeDeg, stages[0].Sols[i], false)) cost[0][i] = 0;
+        {
+            var (ok0, pen0) = SegCheck(HomeDeg, stages[0].Sols[i], false);
+            if (ok0) cost[0][i] = pen0;
+        }
         for (var s = 1; s < n; s++)
         {
             var carry = s >= 2 && stages[s].Name != "Retract" && stages[s].Name != "Depart";
@@ -238,7 +262,8 @@ public static class BambooIcdMotion
             for (var i = 0; i < stages[s - 1].Sols.Count; i++)
             {
                 if (cost[s - 1][i] >= 1e17) continue;
-                if (!SegOk(stages[s - 1].Sols[i], stages[s].Sols[j], carry)) continue;
+                var (segOk, pen) = SegCheck(stages[s - 1].Sols[i], stages[s].Sols[j], carry);
+                if (!segOk) continue;
                 var jump = 0.0;
                 var qa = stages[s - 1].Sols[i];
                 var qb = stages[s].Sols[j];
@@ -247,7 +272,7 @@ public static class BambooIcdMotion
                     var d = Wrap180(qb[k] - qa[k]);
                     jump += d * d;
                 }
-                var c = cost[s - 1][i] + jump;
+                var c = cost[s - 1][i] + jump + pen;
                 if (c < cost[s][j]) { cost[s][j] = c; prev[s][j] = i; }
             }
         }
@@ -404,6 +429,7 @@ public static class BambooIcdMotion
             ("Pitch", 0.20, 0.26, -75)
         };
         var viaOk = true;
+        (double Cost, List<(string Name, double[] Q)> Seq)? tunedFallback = null;
         foreach (var vp in viaPts)
         {
             var vs = ElbowSols(vp.Y, vp.Z, vp.A);
@@ -418,11 +444,12 @@ public static class BambooIcdMotion
             if (dep.Count > 0) tuned.Add(new Stage { Name = "Depart", Sols = dep });
             tuned.Add(new Stage { Name = "Retract", Sols = [HomeDeg.ToArray()] });
             var tunedChain = LinkStages(tuned);
-            if (tunedChain.Ok)
+            if (tunedChain.Ok && tunedChain.Cost < FloorPenalty)
             {
                 var keys = Stamp(ChainItems(tunedChain.Seq, place.JawMm, pick.JawMm));
                 return new MotionBuild { Error = "", Keys = keys };
             }
+            if (tunedChain.Ok) tunedFallback = (tunedChain.Cost, tunedChain.Seq);
         }
 
         var lifts = new List<( (double Y, double Z, double A) P, List<double[]> Sols)>();
@@ -434,7 +461,11 @@ public static class BambooIcdMotion
             if (ls.Count > 0) lifts.Add((lp, ls));
         }
         if (lifts.Count == 0)
+        {
+            if (tunedFallback is { } tf0)
+                return new MotionBuild { Error = "", Keys = Stamp(ChainItems(tf0.Seq, place.JawMm, pick.JawMm)) };
             return new MotionBuild { Error = "lift toward place:hold unreachable", Keys = HomeKeys(place.JawMm) };
+        }
 
         var candidates = new List<(bool Ok, double Cost, List<(string Name, double[] Q)> Seq)>();
         var failFar = -1; var failNext = "";
@@ -475,6 +506,7 @@ public static class BambooIcdMotion
             }
             candidates.Add((true, chained.Cost, chained.Seq));
         }
+        if (tunedFallback is { } tf) candidates.Add((true, tf.Cost, tf.Seq));
         if (candidates.Count == 0)
         {
             var msg = "lift toward place:hold unreachable";

@@ -31,6 +31,11 @@
     <ProjectReference Include="..\..\src\Motus.Presets\Motus.Presets.csproj" />
   </ItemGroup>
 
+  <!-- Bamboo viewer services compiled verbatim so tests exercise the exact code /bamboo runs. -->
+  <ItemGroup>
+    <Compile Include="..\..\src\Motus.Viewer\Services\Bamboo*.cs" Link="BambooViewer\%(Filename)%(Extension)" />
+  </ItemGroup>
+
   <Import Project="..\..\src\Motus.Native\buildTransitive\Motus.Native.targets" />
 
 </Project>

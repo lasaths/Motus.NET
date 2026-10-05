@@ -1,10 +1,12 @@
 /**
  * Motus.Viewer Three.js draw layer for the ICD/LIS bamboo arm.
  * Visual/UX ported from the retired standalone HTML preview (bamboo-viewer/next.html).
- * Joint angles, grips, strut hold, task frames, and collision tint names come from C#;
+ * Joint angles, grips, the strut pose, task frames, and collision tint names come from C#;
  * this file does not decide kinematics or collision.
  *
- * Frame: native Three.js Y-up (matches HTML). Motus.NET URDF is Z-up; shared θ vector.
+ * Geometry: every arm box, the pole, strut and ground are built from the cell description C#
+ * hands to initThreeJs (read from bamboo_icd.urdf + BambooIcdCell) — the exact shapes Motus.NET
+ * collides. Frame: native Three.js Y-up; Motus.NET world is Z-up (Motus = Rx(+90°)·viewer).
  */
 (function () {
   'use strict';
@@ -12,6 +14,7 @@
   var DEG = Math.PI / 180;
   var SEG = [0.030, 0.080, 0.088, 0.088, 0.088, 0.046];
   var POLE_Y = 0.40;
+  var groundMesh = null;
   var PICK = { x: 0, y: 0.00778, z: 0.09194 };
   var PLACE = { x: 0, y: 0.1506, z: 0.2000 };
 
@@ -97,41 +100,12 @@
     colliderByName[name] = meshes;
   }
 
-  function addTube(parent, span, colName) {
-    var L = Math.max(0.008, span - 0.016);
-    var mesh = new THREE.Mesh(new THREE.BoxGeometry(0.012, L, 0.016), mats.tube);
-    mesh.position.y = -span / 2;
-    parent.add(mesh);
-    if (colName) {
-      if (!colliderByName[colName]) colliderByName[colName] = [];
-      colliderByName[colName].push(mesh);
-    }
-    return mesh;
-  }
-
-  function housing(parent, size, mat, colName) {
-    var mesh = new THREE.Mesh(new THREE.BoxGeometry(size[0], size[1], size[2]), mat);
-    parent.add(mesh);
-    if (colName) {
-      if (!colliderByName[colName]) colliderByName[colName] = [];
-      colliderByName[colName].push(mesh);
-    }
-    return mesh;
-  }
-
-  function jawPlate(w, h, d, mat) {
-    return new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
-  }
-
-  function setOpening(neg, pos, mm, yLift) {
-    var half = (mm / 1000) / 2;
-    var shift = half + 0.002;
+  // Same formula as BambooIcdCell.PlateShift (C#): plate centre at ±(opening/2 + 2 mm).
+  function setOpening(neg, pos, mm) {
+    if (!neg || !pos) return;
+    var shift = (mm / 1000) / 2 + 0.002;
     neg.position.x = -shift;
     pos.position.x = shift;
-    if (typeof yLift === 'number') {
-      neg.position.y = yLift;
-      pos.position.y = yLift;
-    }
   }
 
   function applyJoints(deg) {
@@ -142,22 +116,21 @@
     j5.rotation.y = deg[4] * DEG;
   }
 
-  function setStrut(hold, grasp, release) {
-    var g = grasp || PICK;
-    var r = release || PLACE;
-    if (hold === 1) {
-      if (strut.parent !== jaw) jaw.attach(strut);
-      strut.position.set(0, 0, 0);
-      strut.rotation.set(0, 0, 0);
-    } else if (hold === 2) {
-      if (strut.parent !== scene) scene.attach(strut);
-      strut.position.set(r.x, r.y, r.z);
-      strut.rotation.set((r.a || -90) * DEG, 0, 0);
-    } else {
-      if (strut.parent !== scene) scene.attach(strut);
-      strut.position.set(g.x, g.y, g.z);
-      strut.rotation.set((g.a || 0) * DEG, 0, 0);
-    }
+  /** pose = [x, y, z, qx, qy, qz, qw] in viewer world, computed by Motus FK in C#. */
+  function setStrutPose(pose) {
+    if (!pose || pose.length < 7) return;
+    strut.position.set(pose[0], pose[1], pose[2]);
+    strut.quaternion.set(pose[3], pose[4], pose[5], pose[6]);
+  }
+
+  function partMaterial(name) {
+    if (/^L-grip body|^R-grip carriage/.test(name)) return mats.carriage;
+    if (/rail$/.test(name)) return mats.rail;
+    if (/jaw[-+]$/.test(name)) return mats.jaw;
+    if (/^link |^base tube|^neck/.test(name)) return mats.tube;
+    if (name === 'θ1' || name === 'θ5') return mats.wrist;
+    if (name === 'θ3') return mats.shoulder;
+    return mats.elbow;
   }
 
   function updateCamera() {
@@ -233,11 +206,15 @@
     }
   }
 
-  window.initThreeJs = function () {
+  window.initThreeJs = function (cellJson) {
     if (typeof THREE === 'undefined') {
       throw new Error('Three.js is not loaded (check lib/three/three.min.js).');
     }
     if (ready) return;
+    var cell = typeof cellJson === 'string' ? JSON.parse(cellJson) : cellJson;
+    if (!cell || !cell.parts) throw new Error('initThreeJs needs the Motus cell description.');
+    SEG = cell.seg || SEG;
+    POLE_Y = cell.poleY || POLE_Y;
 
     view = document.getElementById('viewport');
     if (!view) throw new Error('#viewport element not found.');
@@ -262,12 +239,13 @@
     scene.add(fill);
 
     var ground = new THREE.Mesh(
-      new THREE.PlaneGeometry(2.2, 2.2),
+      new THREE.PlaneGeometry(cell.ground.size, cell.ground.size),
       new THREE.MeshStandardMaterial({ color: 0x070707, roughness: 1, metalness: 0 })
     );
     ground.rotation.x = -Math.PI / 2;
     scene.add(ground);
     registerCollider('ground', [ground]);
+    groundMesh = ground;
 
     var grid = new THREE.GridHelper(1.4, 14, 0x3a3a3a, 0x242424);
     grid.position.y = 0.0006;
@@ -281,7 +259,7 @@
     ring.position.set(PLACE.x, 0.0016, PLACE.z);
     scene.add(ring);
 
-    var pole = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.66, 24), mats.pole);
+    var pole = new THREE.Mesh(new THREE.CylinderGeometry(cell.pole.radius, cell.pole.radius, cell.pole.length, cell.pole.segments), mats.pole);
     pole.rotation.z = Math.PI / 2;
     pole.position.set(0, POLE_Y, 0);
     scene.add(pole);
@@ -297,94 +275,55 @@
     mount.position.set(0, POLE_Y, 0);
     mount.rotation.y = Math.PI / 2;
     scene.add(mount);
-
-    var lbody = new THREE.Mesh(new THREE.BoxGeometry(0.020, 0.016, 0.026), mats.carriage);
-    lbody.position.y = 0.020;
-    mount.add(lbody);
-    var lrail = new THREE.Mesh(new THREE.BoxGeometry(0.080, 0.004, 0.004), mats.rail);
-    lrail.position.y = 0.014;
-    mount.add(lrail);
-    lNeg = jawPlate(0.0045, 0.030, 0.024, mats.jaw);
-    lPos = jawPlate(0.0045, 0.030, 0.024, mats.jaw);
-    mount.add(lNeg); mount.add(lPos);
-    registerCollider('L-grip', [lbody, lrail, lNeg, lPos]);
     mount.add(track(axisX(0x3ddc6a, '#3ddc6a', 'L-grip')));
 
-    addTube(mount, SEG[0], 'base link');
-    j1 = new THREE.Group();
-    j1.position.y = -SEG[0];
-    mount.add(j1);
-    housing(j1, [0.046, 0.029, 0.034], mats.wrist, 'θ1');
+    j1 = new THREE.Group(); j1.position.y = -SEG[0]; mount.add(j1);
     j1.add(track(axisY(0x33e0e0, '#33e0e0', 'θ1')));
-
-    addTube(j1, SEG[1], 'link θ2');
-    j2 = new THREE.Group();
-    j2.position.y = -SEG[1];
-    j1.add(j2);
-    housing(j2, [0.041, 0.061, 0.040], mats.elbow, 'θ2');
+    j2 = new THREE.Group(); j2.position.y = -SEG[1]; j1.add(j2);
     j2.add(track(axisX(0xff8800, '#ff8800', 'θ2')));
-
-    addTube(j2, SEG[2], 'link θ3');
-    j3 = new THREE.Group();
-    j3.position.y = -SEG[2];
-    j2.add(j3);
-    housing(j3, [0.041, 0.061, 0.040], mats.shoulder, 'θ3');
+    j3 = new THREE.Group(); j3.position.y = -SEG[2]; j2.add(j3);
     j3.add(track(axisX(0xffffff, '#ffffff', 'θ3')));
-
-    addTube(j3, SEG[3], 'link θ4');
-    j4 = new THREE.Group();
-    j4.position.y = -SEG[3];
-    j3.add(j4);
-    housing(j4, [0.041, 0.061, 0.040], mats.elbow, 'θ4');
+    j4 = new THREE.Group(); j4.position.y = -SEG[3]; j3.add(j4);
     j4.add(track(axisX(0xff8800, '#ff8800', 'θ4')));
-
-    addTube(j4, SEG[4], 'link θ5');
-    j5 = new THREE.Group();
-    j5.position.y = -SEG[4];
-    j4.add(j5);
-    housing(j5, [0.046, 0.029, 0.034], mats.wrist, 'θ5');
+    j5 = new THREE.Group(); j5.position.y = -SEG[4]; j4.add(j5);
     j5.add(track(axisY(0x33e0e0, '#33e0e0', 'θ5')));
-
-    var neck = new THREE.Mesh(new THREE.BoxGeometry(0.012, 0.028, 0.016), mats.tube);
-    neck.position.y = -0.024;
-    j5.add(neck);
-    registerCollider('neck', [neck]);
-
-    jaw = new THREE.Group();
-    jaw.position.y = -SEG[5];
-    j5.add(jaw);
-    var carriage = new THREE.Mesh(new THREE.BoxGeometry(0.018, 0.018, 0.022), mats.carriage);
-    carriage.position.y = 0.022;
-    jaw.add(carriage);
-    var rrail = new THREE.Mesh(new THREE.BoxGeometry(0.080, 0.004, 0.004), mats.rail);
-    rrail.position.set(0, 0.012, 0);
-    jaw.add(rrail);
-    rNeg = jawPlate(0.0045, 0.020, 0.022, mats.jaw);
-    rPos = jawPlate(0.0045, 0.020, 0.022, mats.jaw);
-    rNeg.position.y = 0.005;
-    rPos.position.y = 0.005;
-    jaw.add(rNeg); jaw.add(rPos);
-    registerCollider('R-grip', [carriage, rrail, rNeg, rPos]);
+    jaw = new THREE.Group(); jaw.position.y = -SEG[5]; j5.add(jaw);
     jaw.add(track(axisX(0x3ddc6a, '#3ddc6a', 'R-grip')));
 
-    var strutGeo = new THREE.CylinderGeometry(0.007, 0.007, 0.30, 20);
+    // Arm boxes straight from the URDF <collision> entries Motus.NET checks (link frame == group frame).
+    var linkGroup = { mount: mount, link_1: j1, link_2: j2, link_3: j3, link_4: j4, link_5: j5 };
+    var byName = {};
+    cell.parts.forEach(function (p) {
+      var parent = linkGroup[p.link];
+      if (!parent) return;
+      var mesh = new THREE.Mesh(new THREE.BoxGeometry(p.size[0], p.size[1], p.size[2]), partMaterial(p.name));
+      mesh.position.set(p.pos[0], p.pos[1], p.pos[2]);
+      parent.add(mesh);
+      registerCollider(p.name, [mesh]);
+      byName[p.name] = mesh;
+    });
+    lNeg = byName['L-grip jaw-']; lPos = byName['L-grip jaw+'];
+    rNeg = byName['R-grip jaw-']; rPos = byName['R-grip jaw+'];
+
+    var sr = cell.strut.radius, sl = cell.strut.length;
+    var strutGeo = new THREE.CylinderGeometry(sr, sr, sl, cell.strut.segments);
     strutGeo.rotateX(Math.PI / 2);
     strut = new THREE.Mesh(strutGeo, mats.strut);
     [-0.09, 0, 0.09].forEach(function (z) {
-      var n = new THREE.Mesh(new THREE.TorusGeometry(0.0075, 0.0012, 6, 16), mats.node);
+      var n = new THREE.Mesh(new THREE.TorusGeometry(sr + 0.0005, 0.0012, 6, 16), mats.node);
       n.position.z = z;
       strut.add(n);
     });
+    strut.position.set(PICK.x, PICK.y, PICK.z);
     scene.add(strut);
     registerCollider('strut', [strut]);
 
     frameRoot = new THREE.Group();
     scene.add(frameRoot);
 
-    setOpening(lNeg, lPos, 24, 0);
-    setOpening(rNeg, rPos, 40, 0.005);
+    setOpening(lNeg, lPos, 24);
+    setOpening(rNeg, rPos, 40);
     applyJoints([-90, -72, -80, -24, 0]);
-    setStrut(0, null, null);
 
     view.addEventListener('mousedown', function (e) {
       dragging = true; lx = e.clientX; ly = e.clientY;
@@ -420,15 +359,16 @@
 
   /**
    * Apply pose from Motus.NET / Blazor.
-   * payload: { q:[5], gL, gR, hold, axesVisible, grasp?:{x,y,z,a}, release?:{x,y,z,a}, hitParts?:[string] }
+   * payload: { q:[5], gL, gR, strut:[x,y,z,qx,qy,qz,qw], axesVisible, hitParts?:[string] }
+   * hitParts are Motus contact body names (URDF collision names, 'pole', 'strut', 'ground', mount parts).
    */
   window.setBambooPose = function (payloadJson) {
     if (!ready) return;
     var p = typeof payloadJson === 'string' ? JSON.parse(payloadJson) : payloadJson;
     if (p.q && p.q.length >= 5) applyJoints(p.q);
-    if (typeof p.gL === 'number') setOpening(lNeg, lPos, p.gL, 0);
-    if (typeof p.gR === 'number') setOpening(rNeg, rPos, p.gR, 0.005);
-    setStrut(p.hold || 0, p.grasp, p.release);
+    if (typeof p.gL === 'number') setOpening(lNeg, lPos, p.gL);
+    if (typeof p.gR === 'number') setOpening(rNeg, rPos, p.gR);
+    setStrutPose(p.strut);
     if (typeof p.axesVisible === 'boolean') {
       axisGroups.forEach(function (g) { g.visible = p.axesVisible; });
     }
