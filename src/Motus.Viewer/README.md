@@ -74,10 +74,19 @@ Open `http://127.0.0.1:5268/bamboo` (single strut pick/place) or
 
 ### `/bamboo-truss` layout
 
-- **Store:** rack/stack of five bamboo struts near the arm (first slot = default ICD pick).
-- **Footprint:** two triangles on the ground sharing the middle upright (nodes A–B–D bottom, C apex, shared edge B–C).
+- **Store:** single feed at the default ICD pick pose; one cane is presented per cycle (waiting stock is
+  not in the Motus scene).
+- **Truss:** two equilateral triangles A–B–C and B–D–C lying flat on the ground, sharing the middle edge
+  B–C (bottoms A–B / B–D, diagonals A–C / D–C). Each member is a horizontal cane lying on its edge,
+  ending a small node gap short of every node so canes never touch.
+- **Cane length:** 0.10 m (the 0.30 m ICD strut cannot form a flat two-triangle truss inside the hung
+  arm's ground reach: ≈0.095 m gripping straight down, ≈0.128 m fully stretched). The page loads the
+  cell with this length, so the drawn cane is the collided cane.
+- **Motion:** grip straight down, lift vertically, swing at transit height, lower vertically, release,
+  back off vertically, return Home. θ5 rolls the jaw onto each cane's direction.
 - **Tasks:** Motus string-identity pick/place pairs (`object` = member id) build members in order.
-- **Collision:** Motus.NET vs pole, ground, mount, store leftovers, placed members, held strut, and self.
+- **Collision:** Motus.NET vs pole, ground, mount, placed members, the active cane, held cane, and self.
+  The full five-cycle path is Motus-clear (`BambooTrussTests.FullTruss_PathIsCollisionFree_UnderMotus`).
 
 ## What still differs from the HTML preview
 

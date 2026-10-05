@@ -30,6 +30,8 @@ public static class BambooIcdMotion
         public double Y0 { get; set; }
         public double Z { get; set; }
         public double PitchDeg { get; set; }
+        /// <summary>Yaw of the gripped strut axis about viewer Y (degrees). 0 = the planar ICD convention.</summary>
+        public double YawDeg { get; set; }
         public double YMm { get; set; }
     }
 
@@ -92,7 +94,7 @@ public static class BambooIcdMotion
         {
             var frames = new Dictionary<string, Frame>();
             foreach (var p in t.Planes)
-                frames[p.Name] = PlaneToMotusFrame(p.X, p.Y0 + p.YMm / 1000.0, p.Z, p.PitchDeg);
+                frames[p.Name] = PlaneToMotusFrame(p.X, p.Y0 + p.YMm / 1000.0, p.Z, p.PitchDeg, p.YawDeg);
             list.Add(new TaskInstance(t.Identity, frames, new Dictionary<string, object>
             {
                 ["object"] = t.Object,
@@ -107,10 +109,27 @@ public static class BambooIcdMotion
     /// Viewer jaw orientation at a plane is Rx(pitch); Motus = Rx(+90°)·viewer ⇒ Motus rotation Rx(90° + pitch),
     /// position (x, −z, y). This is exactly the bamboo URDF tool0 pose when the arm grasps the plane.
     /// </summary>
-    public static Frame PlaneToMotusFrame(double x, double y, double z, double pitchDeg)
+    public static Frame PlaneToMotusFrame(double x, double y, double z, double pitchDeg, double yawDeg = 0)
     {
         var half = (90.0 + pitchDeg) * Deg / 2;
-        return new Frame(x, -z, y, qw: Math.Cos(half), qx: Math.Sin(half), qy: 0, qz: 0);
+        // Rx(90°+pitch) as a quaternion, then (optionally) pre-multiplied by the viewer yaw Ry(yaw),
+        // which is a rotation about Motus +Z (viewer Y → Motus Z).
+        double qw = Math.Cos(half), qx = Math.Sin(half), qy = 0, qz = 0;
+        if (Math.Abs(yawDeg) > 1e-12)
+        {
+            var hy = yawDeg * Deg / 2;
+            double cw = Math.Cos(hy), cz = Math.Sin(hy);
+            (qw, qx, qy, qz) = (cw * qw - cz * qz, cw * qx - cz * qy, cw * qy + cz * qx, cw * qz + cz * qw);
+        }
+        return new Frame(x, -z, y, qw: qw, qx: qx, qy: qy, qz: qz);
+    }
+
+    /// <summary>Unit strut axis (viewer) for a placement Ry(yaw)·Rx(pitch): Ry(yaw)·(0, −sin pitch, cos pitch).</summary>
+    public static (double X, double Y, double Z) StrutAxis(double pitchDeg, double yawDeg = 0)
+    {
+        var p = pitchDeg * Deg; var w = yawDeg * Deg;
+        var c = Math.Cos(p);
+        return (Math.Sin(w) * c, -Math.Sin(p), Math.Cos(w) * c);
     }
 
     static double Wrap180(double a)
@@ -188,6 +207,42 @@ public static class BambooIcdMotion
             var f = FkJaw(q);
             if (Math.Sqrt((f.Pos[0] - x) * (f.Pos[0] - x) + (f.Pos[1] - y) * (f.Pos[1] - y) + (f.Pos[2] - z) * (f.Pos[2] - z)) > 0.005)
                 continue;
+            sols.Add(q);
+        }
+        return sols;
+    }
+
+    /// <summary>
+    /// Spatial IK that grips a strut whose axis is an arbitrary viewer direction. The jaw approach
+    /// (tool −Y) is tilted by <paramref name="tiltDeg"/> in the arm's radial plane (0 = straight down, the
+    /// ICD pick posture; the planar <see cref="IkSolve"/> α), θ1 faces the target and θ5 rolls the jaw Z
+    /// onto ±<paramref name="axis"/>. Solutions whose jaw Z misses the axis by more than
+    /// <paramref name="maxAxisErrDeg"/> are dropped (the jaw would not be across the strut).
+    /// </summary>
+    public static List<double[]> IkSolveAxis(double x, double y, double z, double tiltDeg,
+        (double X, double Y, double Z) axis, double maxAxisErrDeg = 2.0)
+    {
+        var r = Math.Sqrt(x * x + z * z);
+        var sols = new List<double[]>();
+        if (r < 1e-9) return sols;
+        var yawDeg = Math.Atan2(x, z) / Deg;
+        var ax = new[] { axis.X, axis.Y, axis.Z };
+        var minDot = Math.Cos(maxAxisErrDeg * Deg);
+        // Face the target (planar reach +r), or turn θ1 half a revolution and reach back through the
+        // plane (planar −r, mirrored tilt) when the facing yaw is outside the θ1 limits.
+        var branches = new List<(double Theta1, double R, double Tilt)>();
+        foreach (var (t1, rr, tt) in new[] { (-90.0 + yawDeg, r, tiltDeg), (-90.0 + yawDeg + 180, -r, -tiltDeg), (-90.0 + yawDeg - 180, -r, -tiltDeg) })
+            if (t1 >= LimitsDeg[0].Min - 1e-9 && t1 <= LimitsDeg[0].Max + 1e-9) branches.Add((t1, rr, tt));
+        foreach (var (theta1, rr, tilt) in branches)
+        foreach (var s in IkSolve(y, rr, tilt))
+        {
+            var q = s.ToArray();
+            q[0] = theta1;
+            AlignWristToAxis(q, ax);
+            var f = FkJaw(q);
+            if (Math.Sqrt((f.Pos[0] - x) * (f.Pos[0] - x) + (f.Pos[1] - y) * (f.Pos[1] - y) + (f.Pos[2] - z) * (f.Pos[2] - z)) > 0.005)
+                continue;
+            if (Math.Abs(f.Z[0] * ax[0] + f.Z[1] * ax[1] + f.Z[2] * ax[2]) < minDot) continue;
             sols.Add(q);
         }
         return sols;

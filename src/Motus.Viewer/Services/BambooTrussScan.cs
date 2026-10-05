@@ -3,9 +3,9 @@ using Motus.Core;
 namespace Motus.Viewer.Services;
 
 /// <summary>
-/// Motus collision scan for a multi-member store→truss motion. Each cycle picks one store strut and
-/// places it at its truss member pose; remaining store slots and already-placed members stay in the
-/// scene as named obstacles.
+/// Motus collision scan for a multi-member store→truss motion. Each cycle feeds one strut at the
+/// shared store pose and places it at its truss member pose. Already-placed members stay in the
+/// scene as named obstacles; waiting stock is not presented until its cycle (single-feed store).
 /// </summary>
 public sealed class BambooTrussScan
 {
@@ -62,10 +62,15 @@ public sealed class BambooTrussScan
         var c = _cycles[index];
         var span = Math.Max(1e-9, c.T1 - c.T0);
         var list = new List<BambooIcdMotion.MotionKey>();
+        // Cycle joins share a boundary T (the next Home is stamped 1e-6 after the previous Retract), so
+        // the T window alone would hand this cycle its neighbour's Retract/Home. Keys are labelled
+        // "memberId:Label" — keep only this member's keys inside the window.
+        var prefix = c.MemberId + ":";
         foreach (var k in _keys)
         {
             if (k.T < c.T0 - 1e-9) continue;
             if (k.T > c.T1 + 1e-9) break;
+            if (!k.Label.StartsWith(prefix, StringComparison.Ordinal)) continue;
             list.Add(new BambooIcdMotion.MotionKey
             {
                 T = (k.T - c.T0) / span,
@@ -128,7 +133,7 @@ public sealed class BambooTrussScan
         return this;
     }
 
-    /// <summary>Scene extras (named store leftovers + already placed members) and the active strut track for time t.</summary>
+    /// <summary>Scene extras (already placed members) and the active strut track for time t.</summary>
     public (BambooIcdCell.StrutTrack Track, List<(string Name, BambooIcdCell.StrutPlacement Pose)> Extras, int MemberIndex)
         WorldAt(double t, int hold)
     {
@@ -137,17 +142,17 @@ public sealed class BambooTrussScan
         for (var i = 0; i < _members.Count; i++)
         {
             var m = _members[i];
-            if (i > mi)
-                extras.Add(($"store-{m.Id}", m.Store));
-            else if (i < mi)
+            // Waiting stock is not Motus-present yet (single feed). Only prior placements collide.
+            if (i < mi)
                 extras.Add(($"placed-{m.Id}", m.Place));
             // i == mi: active Track owns rest / held / released (named "strut" in the scene).
+            // i > mi: not yet fed from the store.
         }
         var track = mi >= 0 && mi < _tracks.Count ? _tracks[mi] : _tracks[0];
         return (track, extras, mi);
     }
 
-    /// <summary>Viewer poses for every strut (store remaining, held/released active, placed).</summary>
+    /// <summary>Viewer poses for every strut (active cane at the feed / held / released, plus placed members).</summary>
     public List<(string Name, double[] Pose)> StrutPoses(double t, int hold, IReadOnlyList<double> qDeg)
     {
         var (track, extras, mi) = WorldAt(t, hold);

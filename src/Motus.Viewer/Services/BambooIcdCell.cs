@@ -52,6 +52,8 @@ public sealed class BambooIcdCell
     public IReadOnlyList<CellPart> Parts { get; }
     /// <summary>Joint offsets along viewer −Y (pole→θ1, θ1→θ2, …, θ5→jaw) read from the URDF.</summary>
     public double[] Seg { get; }
+    /// <summary>Length of the strut (bamboo cane) this cell picks, holds and places (metres).</summary>
+    public double StrutLen { get; }
 
     private readonly IReadOnlyList<LinkCollisionGeometry> _mountGeometry;
     private readonly List<double[]> _strutVerts;
@@ -62,11 +64,20 @@ public sealed class BambooIcdCell
 
     public sealed record CellPart(string Name, string Link, double[] Size, double[] Pos);
 
-    /// <summary>Strut placement on the ground in viewer coordinates (centre + pitch about X, degrees).</summary>
-    public readonly record struct StrutPlacement(double X, double Y, double Z, double PitchDeg);
-
-    private BambooIcdCell(UrdfRobot urdf, XElement root)
+    /// <summary>
+    /// Strut placement in viewer coordinates: centre, pitch about X, then yaw about viewer Y (degrees).
+    /// Pose = T(p)·Ry(yaw)·Rx(pitch); the strut axis is local Z, i.e. Ry(yaw)·(0, −sin pitch, cos pitch).
+    /// </summary>
+    public readonly record struct StrutPlacement(double X, double Y, double Z, double PitchDeg, double YawDeg = 0)
     {
+        /// <summary>Unit strut axis in viewer coordinates.</summary>
+        public (double X, double Y, double Z) Axis => BambooIcdMotion.StrutAxis(PitchDeg, YawDeg);
+    }
+
+    private BambooIcdCell(UrdfRobot urdf, XElement root, double strutLength)
+    {
+        if (!(strutLength > 2 * StrutRadius)) throw new ArgumentOutOfRangeException(nameof(strutLength));
+        StrutLen = strutLength;
         Urdf = urdf;
         Model = urdf.ToModel();
         Chain = urdf.Chain;
@@ -96,7 +107,7 @@ public sealed class BambooIcdCell
         }
         Seg = seg.ToArray();
 
-        (_strutVerts, _strutIdx) = CylinderMesh(StrutRadius, StrutLength, StrutSegments, alongZ: true);
+        (_strutVerts, _strutIdx) = CylinderMesh(StrutRadius, StrutLen, StrutSegments, alongZ: true);
         var (pv, pi) = CylinderMesh(PoleRadius, PoleLength, PoleSegments, alongZ: false);
         // viewer: pole.rotation.z = 90°, position (0, POLE_Y, 0)
         var poleViewer = Transforms.Multiply(
@@ -107,14 +118,17 @@ public sealed class BambooIcdCell
             GroundSize / 2, GroundSize / 2, GroundThickness / 2);
     }
 
-    public static BambooIcdCell Load(string urdfXml)
+    /// <param name="urdfXml">bamboo_icd.urdf contents.</param>
+    /// <param name="strutLength">Strut (cane) length for this cell; defaults to the ICD strut (<see cref="StrutLength"/>).</param>
+    public static BambooIcdCell Load(string urdfXml, double strutLength = StrutLength)
     {
         var doc = XDocument.Parse(urdfXml);
         var urdf = UrdfRobotLoader.Load(doc, new UrdfLoadOptions { BaseLink = "base_link", TipLink = "tool0" });
-        return new BambooIcdCell(urdf, doc.Root!);
+        return new BambooIcdCell(urdf, doc.Root!, strutLength);
     }
 
-    public static BambooIcdCell LoadFile(string path) => Load(File.ReadAllText(path));
+    public static BambooIcdCell LoadFile(string path, double strutLength = StrutLength) =>
+        Load(File.ReadAllText(path), strutLength);
 
     private static CellPart ToPart(CollisionObject g, string link) =>
         new(g.Name, link,
@@ -160,11 +174,13 @@ public sealed class BambooIcdCell
         return (verts, idx);
     }
 
-    /// <summary>Viewer pose T(p)·Rx(pitch) of a strut placement → Motus world matrix.</summary>
+    /// <summary>Viewer pose T(p)·Ry(yaw)·Rx(pitch) of a strut placement → Motus world matrix.</summary>
     public static double[] PlacementWorld(StrutPlacement p) =>
         Transforms.Multiply(ViewerToMotus, Transforms.Multiply(
             Transforms.FromFrame(new Frame(p.X, p.Y, p.Z)),
-            Transforms.FromAxisAngle(1, 0, 0, p.PitchDeg * Math.PI / 180.0)));
+            Transforms.Multiply(
+                Transforms.FromAxisAngle(0, 1, 0, p.YawDeg * Math.PI / 180.0),
+                Transforms.FromAxisAngle(1, 0, 0, p.PitchDeg * Math.PI / 180.0))));
 
     /// <summary>Strut mesh at a Motus world pose (scene obstacle).</summary>
     public CollisionObject StrutAt(double[] motusWorld, string? name = null) =>
@@ -210,7 +226,7 @@ public sealed class BambooIcdCell
             miss = $"grasp misses strut (strut axis {oy * 1000:F1} mm from jaw along jaw Y)";
         else if (Math.Abs(ox) + StrutRadius > openInner)
             miss = $"grasp misses strut (strut {ox * 1000:F1} mm off jaw centre)";
-        else if (axisZ < Math.Cos(20 * Math.PI / 180) || Math.Abs(oz) > StrutLength / 2)
+        else if (axisZ < Math.Cos(20 * Math.PI / 180) || Math.Abs(oz) > StrutLen / 2)
             miss = "grasp misses strut (jaw not across the strut)";
         if (miss is not null) return new StrutTrack { Rest = restM, Miss = miss };
 
@@ -263,7 +279,7 @@ public sealed class BambooIcdCell
         var extraKey = extras is null || extras.Count == 0
             ? 0
             : extras.Aggregate(0, (acc, e) => HashCode.Combine(acc, e.Name,
-                Math.Round(e.Pose.X, 5), Math.Round(e.Pose.Y, 5), Math.Round(e.Pose.Z, 5), Math.Round(e.Pose.PitchDeg, 3)));
+                Math.Round(e.Pose.X, 5), Math.Round(e.Pose.Y, 5), Math.Round(e.Pose.Z, 5), Math.Round(e.Pose.PitchDeg, 3), Math.Round(e.Pose.YawDeg, 3)));
         var key = (track, hold, gripping, (int)Math.Round(gLmm * 10), extraKey);
         if (_scenes.TryGetValue(key, out var cached)) return cached;
         if (_scenes.Count > 64) _scenes.Clear();
@@ -364,7 +380,7 @@ public sealed class BambooIcdCell
         seg = Seg,
         poleY = BambooIcdMotion.PoleY,
         pole = new { radius = PoleRadius, length = PoleLength, segments = PoleSegments },
-        strut = new { radius = StrutRadius, length = StrutLength, segments = StrutSegments },
+        strut = new { radius = StrutRadius, length = StrutLen, segments = StrutSegments },
         ground = new { size = GroundSize },
         parts = Parts.Select(p => new { name = p.Name, link = p.Link, size = p.Size, pos = p.Pos })
     };

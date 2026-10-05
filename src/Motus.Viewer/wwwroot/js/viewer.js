@@ -344,6 +344,8 @@
     rNeg = byName['R-grip jaw-']; rPos = byName['R-grip jaw+'];
 
     var sr = cell.strut.radius, sl = cell.strut.length;
+    // Node rings at ±0.3·length (±0.09 m on the 0.30 m ICD strut) so shorter canes keep them on the cane.
+    strutNodeOffsets = [-0.3 * sl, 0, 0.3 * sl];
     strutGeoTemplate = new THREE.CylinderGeometry(sr, sr, sl, cell.strut.segments);
     strutGeoTemplate.rotateX(Math.PI / 2);
     strut = makeStrutMesh();
@@ -362,6 +364,8 @@
         if (idx === 0) return; // primary strut mesh covers first / active
         var mesh = makeStrutMesh();
         mesh.position.set(slot.x, slot.y, slot.z);
+        mesh.rotation.order = 'YXZ';
+        mesh.rotation.y = (slot.yaw || 0) * DEG;
         mesh.rotation.x = (slot.pitch || 0) * DEG;
         scene.add(mesh);
         strutPool.push(mesh);
@@ -457,7 +461,7 @@
     }
   }
 
-  /** tasksJson: [{ id, planes:[{name,x,y0,z,pitch,yMm}] }] */
+  /** tasksJson: [{ id, planes:[{name,x,y0,z,pitch,yaw?,yMm}] }] */
   window.setBambooFrames = function (tasksJson) {
     if (!ready || !frameRoot) return;
     var tasks = typeof tasksJson === 'string' ? JSON.parse(tasksJson) : tasksJson;
@@ -468,6 +472,7 @@
         if (!isFinite(yMm)) yMm = 0;
         var holder = new THREE.Group();
         holder.position.set(pl.x, pl.y0 + yMm / 1000, pl.z);
+        holder.rotation.y = (pl.yaw || 0) * DEG;
         var axes = new THREE.Group();
         axes.rotation.x = (pl.pitch || 0) * DEG;
         var L = 0.03;
