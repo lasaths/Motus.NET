@@ -1,145 +1,70 @@
 # Motus.Viewer — Blazor WebAssembly Bamboo Arm Viewer
 
-A Blazor WebAssembly application that runs Motus.NET kinematics, collision checking, and task validation **entirely in the browser**. Demonstrates the Bamboo ICD 5-DoF robotic arm with real-time visualization via Three.js and C#-powered motion planning.
+**This is the sole Motus bamboo viewer.** The standalone HTML preview under
+`/workspace/bamboo-viewer` (and any sibling Grasshopper PR HTML assets) is
+**retired as a product viewer** — kept only as a visual/UX reference. Do not
+treat that folder as the shipping UI.
 
-## Features
-
-- **C# kinematics in WASM**: Forward kinematics computed by Motus.NET running in the browser
-- **Collision detection**: Real-time collision checking using `MeshCollisionChecker` and `SphereCollisionChecker`
-- **Task validation**: Pick-and-place task path validation with `TaskPathValidator`
-- **Three.js rendering**: 3D visualization with interactive joint controls
-- **No JavaScript reimplementation**: All robot logic (FK, IK, collision) comes from the C# library
+A Blazor WebAssembly app that runs Motus.NET kinematics, collision checking, and
+task validation in the browser. The `/bamboo` page ports the look and UX of the
+old ICD/LIS HTML preview (pole hang, parallel jaws, θ axes, task cards, scrub)
+while Motus.NET remains the source of truth for joint state, tasks, and collision.
 
 ## Architecture
 
 ```
 Browser (WebAssembly)
-├── Blazor UI (BambooViewer.razor)
-├── Motus.NET C# Libraries
-│   ├── Motus.Core (models, validation, tasks)
-│   ├── Motus.Geometry (FK/IK, collision)
-│   └── Motus.Presets (URDF loading)
-└── Three.js (rendering only)
-    └── JS interop: updateRobot(linkPoses)
+├── Blazor UI (BambooViewer.razor)     # sliders, tasks, play/scrub
+├── Motus.NET C# (WASM)
+│   ├── UrdfRobotLoader / joint limits
+│   ├── RobotMeshCollisionChecker      # collision decisions
+│   └── BambooIcdMotion (viewer)       # ICD planar IK + motion keys in C#
+└── Three.js (js/viewer.js)            # draw only: pole, strut, jaws, axes
 ```
 
-**Key principle**: Three.js **only renders**. Robot state (joint angles, link poses, collision status) is computed by Motus.NET C# and passed to JavaScript for display.
+**Key principle:** Three.js only draws. Joint angles, gripper openings, strut
+hold, task frames, and collision status are computed/owned in C# and pushed via
+`setBambooPose` / `setBambooFrames`.
 
-## Running Locally
+## Frame convention
 
-### Prerequisites
+| Layer | Up axis | Notes |
+|-------|---------|-------|
+| Three.js viewer | **Y-up** | Matches retired HTML preview (pole at `y = 0.40`, segments along local −Y) |
+| Motus.NET URDF | **Z-up** | ROS convention; shared θ vector with the viewer (degrees in UI, radians in Motus) |
 
-- .NET 8 SDK or later
-- Modern browser with WebAssembly support
+Conversion for task plane positions stored on `TaskInstance`: viewer `(x, y, z)` →
+Motus-ish `(x, −z, y)`. Documented in `Services/BambooIcdMotion.cs`.
 
-### Build and run
+## Features (ported from HTML)
+
+- Hang from horizontal bamboo pole; arm chain; strut pick / stand upright
+- Linear parallel-jaw grippers (L/R mm); left jaw closed on pole during task
+- Visible joint rotation axes + labels θ1–θ5; jaw travel axes
+- Per-joint sliders in degrees within published limits; play / pause / reset; motion scrub
+- Tasks: string identity pick/place, editable plane `yMm` nudges, jawMm, duplicate/delete
+  (cannot delete the last pick or last place)
+- Collision: Motus.NET `RobotMeshCollisionChecker` decides; play stops on hit; Three.js tints
+
+## Run
 
 ```bash
 cd src/Motus.Viewer
-dotnet run
+dotnet run --urls http://127.0.0.1:5268
 ```
 
-Then open `http://localhost:5000` (or the port shown in the terminal).
+Open `http://127.0.0.1:5268/bamboo`.
 
-### Development server with hot reload
+## What still differs from the HTML preview
 
-```bash
-dotnet watch
-```
-
-## Project Structure
-
-```
-src/Motus.Viewer/
-├── Pages/
-│   ├── BambooViewer.razor       # Main viewer component
-│   └── Home.razor               # Redirect to /bamboo
-├── wwwroot/
-│   ├── css/
-│   │   └── viewer.css           # Dark-mode UI styling
-│   ├── js/
-│   │   └── viewer.js            # Three.js scene + JS interop
-│   ├── fixtures/
-│   │   └── bamboo_icd/
-│   │       └── bamboo_icd.urdf  # 5-DoF arm URDF model
-│   └── index.html               # Loads Three.js + Blazor
-├── Motus.Viewer.csproj          # References Motus.Core, Geometry, Presets
-└── README.md                    # This file
-```
-
-## Bamboo ICD 5-DoF Arm
-
-The Bamboo arm is a 5-degree-of-freedom serial manipulator based on RA-L 2022 specifications:
-
-- **θ1**: wrist Z rotation [-170°, 170°]
-- **θ2**: elbow X rotation [-90°, 90°]
-- **θ3**: shoulder X rotation [-135°, 135°]
-- **θ4**: elbow X rotation [-90°, 90°]
-- **θ5**: wrist Z rotation [-170°, 170°]
-
-The URDF model is loaded at runtime and forward kinematics is computed via `UrdfRobotLoader` and `SerialForwardKinematics`.
-
-## Task Validation
-
-The viewer demonstrates task-based planning:
-
-1. **Pick**: Approach and grasp a strut from the ground
-2. **Place**: Stand the strut upright and release
-
-Tasks are validated using `TaskPathValidator` with:
-- **IK reachability**: Can the arm reach each frame?
-- **Collision checking**: Are all poses collision-free?
-- **Joint limits**: Do solutions respect the URDF limits?
-
-Failed validations report specific errors (e.g., "frame unreachable", "collides with ground").
-
-## Controls
-
-- **Joint sliders**: Manually adjust each joint angle
-- **Reset**: Return to home position (all zeros)
-- **Play Task**: Execute the pick-and-place path (if IK succeeds)
-- **Collision status**: Real-time indicator shows green (free) or red (colliding)
-
-## Testing
-
-Bamboo arm tests validate that Motus.NET handles the arm correctly:
-
-```bash
-cd /workspace
-dotnet test --filter "FullyQualifiedName~BambooArm"
-```
-
-Tests cover:
-- URDF loading and joint limit parsing
-- Forward kinematics at home position
-- Collision checking (no self-collision)
-- Task path validation (reachable frames pass, colliding frames fail)
-- Mesh collision checker integration
-
-## Deployment
-
-To publish as static files for hosting:
-
-```bash
-dotnet publish -c Release -o publish
-```
-
-Output is in `publish/wwwroot/`. Host via any static file server (GitHub Pages, Netlify, etc.).
-
-## Why Blazor WASM?
-
-The user (Lassie) explicitly chose Blazor WebAssembly to ensure the viewer **tests Motus.NET itself**, not a JavaScript reimplementation. By running the C# library in the browser, we guarantee:
-
-1. The viewer uses the same kinematics as the .NET library
-2. Collision detection matches what .NET tests use
-3. Task validation logic is identical to server-side planning
-4. No risk of JS/C# drift
-
-This makes the viewer a **live integration test** of Motus.NET, not just a visualization tool.
+- Motus URDF mesh envelopes are a floor-serial approximation of the ICD lengths;
+  visual meshes match the HTML preview. Collision part names are coarse when Motus
+  reports a hit (no Motus API for named OBB pairs yet).
+- ICD planar IK for play lives in `BambooIcdMotion` (C#), not Motus.Geometry’s
+  generic numerical IK — Motus still owns collision and `TaskInstance` / `TaskPath`.
+- Blazor template Counter/Weather pages were removed; Bootstrap assets may remain unused.
 
 ## References
 
-- [Motus.NET GitHub](https://github.com/lasaths/Motus.NET)
-- RA-L 2022: Bamboo ICD 5-DoF arm specifications
-- [Three.js](https://threejs.org/)
-- [Blazor WebAssembly](https://dotnet.microsoft.com/apps/aspnet/web-apps/blazor)
+- Retired visual reference: `/workspace/bamboo-viewer/next.html`
+- Motus.NET, Three.js r128, Blazor WebAssembly

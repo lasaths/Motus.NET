@@ -1,248 +1,508 @@
 @page "/bamboo"
 @inject IJSRuntime JS
+@implements IAsyncDisposable
 @using Motus.Core
 @using Motus.Geometry
 @using Motus.Presets
+@using Motus.Viewer.Services
 @using System.Text.Json
 @using System.Xml.Linq
 
-<PageTitle>Bamboo ICD Arm Viewer</PageTitle>
+<PageTitle>ICD / LIS bamboo arm</PageTitle>
 
 <div class="viewer-container">
     <div class="viewport-wrap">
         <div id="viewport"></div>
-        <div class="overlay">
-            <div class="overlay-top">
-                <h1>Bamboo ICD 5-DoF Arm</h1>
-                <div class="status @(_collision ? "error" : "ok")">
-                    @if (_collision)
-                    {
-                        <text>⚠ Collision: @_collisionMessage</text>
-                    }
-                    else
-                    {
-                        <text>✓ Collision-free</text>
-                    }
-                </div>
-            </div>
-        </div>
     </div>
 
     <aside class="controls">
-        <div class="panel-header">
-            <h2>Joint Controls</h2>
-            <div class="button-group">
-                <button @onclick="ResetJoints" class="btn-secondary">Reset</button>
-                <button @onclick="() => PlayTask()" disabled="@_isPlaying" class="btn-primary">
-                    @(_isPlaying ? "Playing..." : "Play Task")
-                </button>
-            </div>
+        <h1>ICD / LIS bamboo arm</h1>
+        <p class="sub">5-DoF kinematic preview. Parallel-jaw grippers. Left jaw stays closed on the support pole during the task. Motus.NET owns FK/tasks/collision; Three.js only draws.</p>
+        <div class="phase @(!string.IsNullOrEmpty(_motionError) || _collision ? "err" : "")">@_phase</div>
+
+        <div class="row">
+            <label>Motion <span>@_scrubPct%</span></label>
+            <input type="range" min="0" max="1000" step="1" value="@_scrub"
+                   disabled="@(!IsRobotReady)"
+                   @oninput="OnScrub" />
+        </div>
+        <div class="btns">
+            <button type="button" class="@(_isPlaying ? "active" : "")" disabled="@(!IsRobotReady)" @onclick="TogglePlay">
+                @(_isPlaying ? "Pause" : "Play")
+            </button>
+            <button type="button" disabled="@(!IsRobotReady)" @onclick="ResetAll">Reset</button>
         </div>
 
-        <div class="joint-controls">
-            @for (int i = 0; i < _jointCount; i++)
+        <div id="tasks">
+            @for (var ti = 0; ti < _tasks.Count; ti++)
             {
-                var index = i;
-                var limits = _jointLimits[i];
-                <div class="joint-row">
-                    <label>Joint @(i + 1)</label>
-                    <span class="joint-value">@_currentJoints[index].ToString("F3") rad</span>
-                    <input type="range" 
-                           min="@limits.Min" 
-                           max="@limits.Max" 
-                           step="0.01" 
-                           value="@_currentJoints[index]" 
-                           @oninput="@(e => UpdateJoint(index, e))" />
+                var index = ti;
+                var task = _tasks[index];
+                var used = IsMotionTask(index);
+                var canDelete = CanDelete(task);
+                <div class="task">
+                    <div class="taskhead">
+                        <span>Task</span>
+                        <span class="used">@(used ? "motion" : "")</span>
+                    </div>
+                    <div class="field">
+                        <span>identity</span>
+                        <input value="@task.Identity" @oninput="e => OnIdentity(index, e)" />
+                    </div>
+                    <div class="field">
+                        <span>object</span>
+                        <input value="@task.Object" @oninput="e => OnObject(index, e)" />
+                    </div>
+                    <div class="field">
+                        <span>jawMm</span>
+                        <input type="number" step="1" value="@task.JawMm" @oninput="e => OnJawMm(index, e)" />
+                        <em>mm</em>
+                    </div>
+                    @foreach (var plane in task.Planes)
+                    {
+                        var pname = plane.Name;
+                        <div class="field">
+                            <span>@pname</span>
+                            <input type="number" step="1" title="Nudge @pname along world Y, millimetres"
+                                   value="@plane.YMm"
+                                   @oninput="e => OnPlaneYMm(index, pname, e)" />
+                            <em>mm</em>
+                        </div>
+                    }
+                    <div class="btns">
+                        <button type="button" class="mini" @onclick="() => DuplicateTask(index)">Duplicate</button>
+                        <button type="button" class="mini" disabled="@(!canDelete)" @onclick="() => DeleteTask(index)">Delete</button>
+                    </div>
                 </div>
             }
         </div>
 
-        <div class="task-info">
-            <h3>Task: Pick & Place Strut</h3>
-            <div class="task-steps">
-                <div class="task-step">1. Pick approach</div>
-                <div class="task-step">2. Grasp strut from ground</div>
-                <div class="task-step">3. Place upright</div>
-                <div class="task-step">4. Release</div>
-            </div>
+        <p class="warn">@_motionError</p>
+
+        <div>
+            @if (!IsRobotReady)
+            {
+                <div class="joint-loading">@(_initError ?? "Loading Motus.NET…")</div>
+            }
+            else
+            {
+                @for (var i = 0; i < 5; i++)
+                {
+                    var ji = i;
+                    <div class="row">
+                        <label>θ@(ji + 1) <span>@_qDeg[ji].ToString("F1")°</span></label>
+                        <input type="range"
+                               min="@BambooIcdMotion.LimitsDeg[ji].Min"
+                               max="@BambooIcdMotion.LimitsDeg[ji].Max"
+                               step="0.1"
+                               value="@_qDeg[ji]"
+                               @oninput="e => OnJoint(ji, e)" />
+                    </div>
+                }
+                <div class="row">
+                    <label>L-grip <span>@_gL.ToString("F1") mm</span></label>
+                    <input type="range" min="8" max="45" step="0.1" value="@_gL" @oninput="OnGripL" />
+                </div>
+                <div class="row">
+                    <label>R-grip <span>@_gR.ToString("F1") mm</span></label>
+                    <input type="range" min="8" max="45" step="0.1" value="@_gR" @oninput="OnGripR" />
+                </div>
+            }
         </div>
+
+        <label class="check">
+            <input type="checkbox" checked="@_axesVisible" @onchange="OnAxesToggle" /> Joint axes
+        </label>
+        <p class="note">
+            Drag the view to orbit. Moving a joint or gripper slider pauses playback and drives the arm from C#.
+            Play follows the first task named pick and the first named place. Lengths: pole→θ1 30, then 80, 88, 88, 88, θ5→jaw 46 mm.
+            Bend axes local X, wrists local Y, jaws local X. Viewer is Three.js Y-up; Motus.NET URDF is Z-up (shared θ).
+            Collision: Motus.NET checkers decide.
+        </p>
     </aside>
 </div>
 
 @code {
     private RobotModel? _robot;
     private IFkSolver? _fk;
+    private SerialJointChain? _chain;
     private ICollisionChecker? _checker;
     private CollisionScene _scene = new();
-    private TaskPath? _taskPath;
 
-    private int _jointCount = 5;
-    private double[] _currentJoints = new double[5];
-    private JointLimit[] _jointLimits = Array.Empty<JointLimit>();
-    
-    private bool _collision = false;
-    private string _collisionMessage = "";
-    private bool _isPlaying = false;
+    private List<BambooIcdMotion.TaskEdit> _tasks = BambooIcdMotion.DefaultTasks();
+    private List<BambooIcdMotion.MotionKey> _keys = new();
+    private string _motionError = "";
+
+    private double[] _qDeg = BambooIcdMotion.HomeDeg.ToArray();
+    private double _gL = 24;
+    private double _gR = 40;
+    private int _hold;
+    private bool _axesVisible = true;
+    private bool _collision;
+    private string _phase = "Home";
+    private int _scrub;
+    private int _scrubPct => (int)Math.Round(_scrub / 10.0);
+    private bool _isPlaying;
+    private bool _manual;
+    private bool _robotReady;
+    private string? _initError;
+    private bool _threeReady;
+    private CancellationTokenSource? _playCts;
+
+    private static readonly string[] JointNames = { "θ1", "θ2", "θ3", "θ4", "θ5" };
+
+    private bool IsRobotReady =>
+        _robotReady && _qDeg.Length >= 5 && _threeReady;
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        if (firstRender)
+        if (!firstRender) return;
+        await InitializeRobot();
+        try
         {
-            await InitializeRobot();
-            await InitializeThreeJs();
-            await UpdateVisualization();
+            await JS.InvokeVoidAsync("initThreeJs");
+            _threeReady = true;
         }
+        catch (JSException ex)
+        {
+            _initError = $"Three.js init failed: {ex.Message}";
+            _robotReady = false;
+        }
+        RefreshMotion(apply: true);
+        StateHasChanged();
+        await PushPoseAsync();
+        await PushFramesAsync();
     }
 
     private async Task InitializeRobot()
     {
         try
         {
-            var urdfPath = "/fixtures/bamboo_icd/bamboo_icd.urdf";
-            var urdfContent = await JS.InvokeAsync<string>("fetchFile", urdfPath);
-            
+            var urdfContent = await JS.InvokeAsync<string>("fetchFile", "/fixtures/bamboo_icd/bamboo_icd.urdf");
             var robot = UrdfRobotLoader.Load(
-                XDocument.Parse(urdfContent), 
-                new UrdfLoadOptions
-                {
-                    BaseLink = "base_link",
-                    TipLink = "tool0"
-                });
+                XDocument.Parse(urdfContent),
+                new UrdfLoadOptions { BaseLink = "base_link", TipLink = "tool0" });
 
             _robot = robot.ToModel();
+            _chain = robot.Chain;
             _fk = KinematicsResolver.CreateFkSolver(robot.Preset, robot.Chain);
-            _checker = new MeshCollisionChecker(robot.Preset);
-            _jointCount = robot.Preset.AxisCount;
-            _currentJoints = new double[_jointCount];
-            _jointLimits = robot.Preset.JointLimits.ToArray();
+            _checker = new RobotMeshCollisionChecker(_robot, robot.Chain);
 
-            CreateScene();
-            CreateTaskPath();
+            // Motus URDF is Z-up floor-serial; ICD visual is Y-up hang. Use empty Motus
+            // scene so checkers decide self-collision only until URDF matches the ICD hang.
+            _scene = new CollisionScene();
+
+            _robotReady = true;
+            _initError = null;
         }
         catch (Exception ex)
         {
-            _collisionMessage = $"Init error: {ex.Message}";
-            _collision = true;
+            _robotReady = false;
+            _initError = $"Failed to load robot: {ex.Message}";
+            _phase = "Init error";
         }
     }
 
-    private void CreateScene()
+    private void RefreshMotion(bool apply)
     {
-        var ground = CollisionObject.Box("ground", new Frame(0.3, 0, -0.025), 0.6, 0.6, 0.05);
-        _scene = new CollisionScene(new[] { ground });
+        var built = BambooIcdMotion.BuildMotion(_tasks);
+        _motionError = built.Error;
+        _keys = built.Keys;
+        if (apply && !_manual)
+            ApplyTask(_scrub / 1000.0);
+        else if (_manual)
+            _phase = _collision ? $"Manual · {_phase}" : "Manual";
     }
 
-    private void CreateTaskPath()
+    private void ApplyTask(double t)
     {
-        if (_robot == null) return;
-
-        var pickApproach = new Frame(0.25, 0, 0.1, qw: 1, qx: 0, qy: 0, qz: 0);
-        var pickGrasp = new Frame(0.25, 0, 0.05, qw: 1, qx: 0, qy: 0, qz: 0);
-        var pick = new TaskInstance("pick",
-            new Dictionary<string, Frame>
-            {
-                ["approach"] = pickApproach,
-                ["grasp"] = pickGrasp
-            },
-            new Dictionary<string, object>
-            {
-                ["object"] = "bamboo_strut",
-                ["jaw_mm"] = 8.0
-            });
-
-        var placeUpright = new Frame(0.2, 0.3, 0.4, qw: 0.707, qx: 0.707, qy: 0, qz: 0);
-        var placeRelease = new Frame(0.2, 0.3, 0.35, qw: 0.707, qx: 0.707, qy: 0, qz: 0);
-        var place = new TaskInstance("place",
-            new Dictionary<string, Frame>
-            {
-                ["upright"] = placeUpright,
-                ["release"] = placeRelease
-            },
-            new Dictionary<string, object>
-            {
-                ["jaw_mm"] = 40.0
-            });
-
-        _taskPath = new TaskPath(pick, place);
+        t = Math.Clamp(t, 0, 1);
+        var sample = BambooIcdMotion.Sample(_keys, t);
+        _qDeg = sample.Q;
+        _gL = 24;
+        _gR = sample.GR;
+        _hold = sample.Hold;
+        _scrub = (int)Math.Round(t * 1000);
+        RunMotusCollision();
+        _phase = string.IsNullOrEmpty(_motionError)
+            ? (_collision ? $"{sample.Label} · collision" : sample.Label)
+            : _motionError;
     }
 
-    private async Task InitializeThreeJs()
+    private void RunMotusCollision()
     {
-        await JS.InvokeVoidAsync("initThreeJs");
-    }
-
-    private async Task UpdateJoint(int index, ChangeEventArgs e)
-    {
-        if (double.TryParse(e.Value?.ToString(), out var value))
-        {
-            _currentJoints[index] = value;
-            await UpdateVisualization();
-        }
-    }
-
-    private async Task ResetJoints()
-    {
-        Array.Clear(_currentJoints);
-        await UpdateVisualization();
-    }
-
-    private async Task UpdateVisualization()
-    {
-        if (_fk == null || _robot == null || _checker == null) return;
-
-        var state = new JointState(_currentJoints);
-        var linkOrigins = _fk.ComputeLinkOrigins(_currentJoints, Frame.Identity);
-
-        _collision = !_checker.IsCollisionFree(state, _scene);
-        _collisionMessage = _collision ? "Robot collides with scene" : "";
-
-        var linkPoses = linkOrigins.Select(p => new
-        {
-            position = new { x = p.X, y = p.Y, z = p.Z },
-            quaternion = new { 
-                x = p.Qx, 
-                y = p.Qy, 
-                z = p.Qz, 
-                w = p.Qw 
-            }
-        }).ToArray();
-
-        await JS.InvokeVoidAsync("updateRobot", JsonSerializer.Serialize(linkPoses));
-    }
-
-    private async Task PlayTask()
-    {
-        if (_taskPath == null || _robot == null || _checker == null || _isPlaying) return;
-
-        _isPlaying = true;
-        StateHasChanged();
-
+        if (_checker is null || _robot is null) { _collision = false; return; }
+        var rad = _qDeg.Select(d => d * Math.PI / 180.0).ToArray();
+        // Pad/truncate to Motus axis count.
+        var n = _robot.Preset.AxisCount;
+        var q = new double[n];
+        for (var i = 0; i < n; i++) q[i] = i < rad.Length ? rad[i] : 0;
         try
         {
-            var ik = KinematicsResolver.CreateInverseKinematics(_robot.Preset);
-            var result = TaskPathValidator.Validate(_taskPath, _robot, ik, _checker, _scene);
-
-            if (!result.IsValid)
-            {
-                _collision = true;
-                _collisionMessage = string.Join("; ", result.Errors);
-                return;
-            }
-
-            foreach (var state in result.ReachableStates)
-            {
-                for (int i = 0; i < _jointCount; i++)
-                {
-                    _currentJoints[i] = state.Positions[i];
-                }
-                await UpdateVisualization();
-                await Task.Delay(1000);
-            }
+            _collision = !_checker.IsCollisionFree(new JointState(q), _scene);
         }
-        finally
+        catch
         {
-            _isPlaying = false;
-            StateHasChanged();
+            _collision = false;
         }
+    }
+
+    private sealed record PlaneXYZ(double x, double y, double z, double a);
+
+    private async Task PushPoseAsync()
+    {
+        if (!_threeReady) return;
+        var grasp = PlaneWorld("pick", "grasp") ?? new PlaneXYZ(BambooIcdMotion.Pick.X, BambooIcdMotion.Pick.Y, BambooIcdMotion.Pick.Z, 0);
+        var release = PlaneWorld("place", "release") ?? new PlaneXYZ(BambooIcdMotion.Place.X, BambooIcdMotion.Place.Y, BambooIcdMotion.Place.Z, -90);
+        var payload = new
+        {
+            q = _qDeg,
+            gL = _gL,
+            gR = _gR,
+            hold = _hold,
+            axesVisible = _axesVisible,
+            grasp,
+            release,
+            hitParts = _collision ? new[] { "θ2", "θ3", "θ4", "R-grip" } : Array.Empty<string>()
+        };
+        await JS.InvokeVoidAsync("setBambooPose", JsonSerializer.Serialize(payload));
+    }
+
+    private PlaneXYZ? PlaneWorld(string identity, string plane)
+    {
+        var t = _tasks.FirstOrDefault(x => x.Identity == identity);
+        var p = t?.Planes.FirstOrDefault(x => x.Name == plane);
+        if (p is null) return null;
+        return new PlaneXYZ(p.X, p.Y0 + p.YMm / 1000.0, p.Z, p.PitchDeg);
+    }
+
+    private async Task PushFramesAsync()
+    {
+        if (!_threeReady) return;
+        var frames = _tasks.Select(t => new
+        {
+            id = t.Identity,
+            planes = t.Planes.Select(p => new
+            {
+                name = p.Name,
+                x = p.X,
+                y0 = p.Y0,
+                z = p.Z,
+                pitch = p.PitchDeg,
+                yMm = p.YMm
+            })
+        });
+        await JS.InvokeVoidAsync("setBambooFrames", JsonSerializer.Serialize(frames));
+    }
+
+    private async Task OnJoint(int index, ChangeEventArgs e)
+    {
+        if (!double.TryParse(e.Value?.ToString(), System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture, out var v)) return;
+        StopPlay();
+        _manual = true;
+        _qDeg[index] = v;
+        RunMotusCollision();
+        _phase = _collision ? $"Manual · Motus collision" : "Manual";
+        await PushPoseAsync();
+    }
+
+    private async Task OnGripL(ChangeEventArgs e)
+    {
+        if (!double.TryParse(e.Value?.ToString(), System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture, out var v)) return;
+        StopPlay();
+        _manual = true;
+        _gL = v;
+        _phase = "Manual";
+        await PushPoseAsync();
+    }
+
+    private async Task OnGripR(ChangeEventArgs e)
+    {
+        if (!double.TryParse(e.Value?.ToString(), System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture, out var v)) return;
+        StopPlay();
+        _manual = true;
+        _gR = v;
+        _phase = "Manual";
+        await PushPoseAsync();
+    }
+
+    private async Task OnScrub(ChangeEventArgs e)
+    {
+        if (!int.TryParse(e.Value?.ToString(), out var v)) return;
+        StopPlay();
+        _manual = false;
+        ApplyTask(v / 1000.0);
+        await PushPoseAsync();
+    }
+
+    private async Task OnAxesToggle(ChangeEventArgs e)
+    {
+        _axesVisible = e.Value is bool b ? b : string.Equals(e.Value?.ToString(), "true", StringComparison.OrdinalIgnoreCase);
+        await PushPoseAsync();
+    }
+
+    private async Task TogglePlay()
+    {
+        if (_isPlaying) { StopPlay(); return; }
+        if (!string.IsNullOrEmpty(_motionError))
+        {
+            _phase = _motionError;
+            return;
+        }
+        _manual = false;
+        if (_scrub >= 1000) _scrub = 0;
+        _isPlaying = true;
+        _playCts = new CancellationTokenSource();
+        var token = _playCts.Token;
+        _ = RunPlayLoop(token);
+        await Task.CompletedTask;
+    }
+
+    private async Task RunPlayLoop(CancellationToken token)
+    {
+        const double duration = 14.0;
+        var last = DateTime.UtcNow;
+        try
+        {
+            while (!token.IsCancellationRequested && _isPlaying)
+            {
+                var now = DateTime.UtcNow;
+                var dt = Math.Min(0.05, (now - last).TotalSeconds);
+                last = now;
+                var t = _scrub / 1000.0 + dt / duration;
+                if (t >= 1)
+                {
+                    ApplyTask(1);
+                    await PushPoseAsync();
+                    StopPlay();
+                    StateHasChanged();
+                    break;
+                }
+                ApplyTask(t);
+                // Motus collision stop during play
+                if (_collision)
+                {
+                    _phase = $"{_phase} (Motus stop)";
+                    await PushPoseAsync();
+                    StopPlay();
+                    StateHasChanged();
+                    break;
+                }
+                await PushPoseAsync();
+                StateHasChanged();
+                await Task.Delay(16, token);
+            }
+        }
+        catch (TaskCanceledException) { }
+    }
+
+    private void StopPlay()
+    {
+        _isPlaying = false;
+        _playCts?.Cancel();
+        _playCts = null;
+    }
+
+    private async Task ResetAll()
+    {
+        StopPlay();
+        _manual = false;
+        _tasks = BambooIcdMotion.DefaultTasks();
+        _scrub = 0;
+        RefreshMotion(apply: true);
+        await PushFramesAsync();
+        await PushPoseAsync();
+    }
+
+    private bool IsMotionTask(int index)
+    {
+        var seenPick = false; var seenPlace = false;
+        for (var i = 0; i < _tasks.Count; i++)
+        {
+            if (_tasks[i].Identity == "pick" && !seenPick) { if (i == index) return true; seenPick = true; }
+            if (_tasks[i].Identity == "place" && !seenPlace) { if (i == index) return true; seenPlace = true; }
+        }
+        return false;
+    }
+
+    private bool CanDelete(BambooIcdMotion.TaskEdit task)
+    {
+        var picks = _tasks.Count(t => t.Identity == "pick");
+        var places = _tasks.Count(t => t.Identity == "place");
+        if (task.Identity == "pick" && picks <= 1) return false;
+        if (task.Identity == "place" && places <= 1) return false;
+        return true;
+    }
+
+    private async Task DuplicateTask(int index)
+    {
+        var src = _tasks[index];
+        var copy = new BambooIcdMotion.TaskEdit
+        {
+            Identity = src.Identity,
+            Object = src.Object,
+            JawMm = src.JawMm,
+            Planes = src.Planes.Select(p => new BambooIcdMotion.PlaneEdit
+            {
+                Name = p.Name, X = p.X, Y0 = p.Y0, Z = p.Z, PitchDeg = p.PitchDeg, YMm = p.YMm
+            }).ToList()
+        };
+        _tasks.Insert(index + 1, copy);
+        RefreshMotion(apply: !_manual);
+        await PushFramesAsync();
+        if (!_manual) await PushPoseAsync();
+    }
+
+    private async Task DeleteTask(int index)
+    {
+        if (!CanDelete(_tasks[index])) return;
+        _tasks.RemoveAt(index);
+        RefreshMotion(apply: !_manual);
+        await PushFramesAsync();
+        if (!_manual) await PushPoseAsync();
+    }
+
+    private async Task OnIdentity(int index, ChangeEventArgs e)
+    {
+        _tasks[index].Identity = e.Value?.ToString() ?? "";
+        RefreshMotion(apply: !_manual);
+        await PushFramesAsync();
+        if (!_manual) await PushPoseAsync();
+    }
+
+    private Task OnObject(int index, ChangeEventArgs e)
+    {
+        _tasks[index].Object = e.Value?.ToString() ?? "";
+        return Task.CompletedTask;
+    }
+
+    private async Task OnJawMm(int index, ChangeEventArgs e)
+    {
+        if (!double.TryParse(e.Value?.ToString(), System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture, out var v)) return;
+        _tasks[index].JawMm = v;
+        RefreshMotion(apply: !_manual);
+        if (!_manual) await PushPoseAsync();
+    }
+
+    private async Task OnPlaneYMm(int index, string planeName, ChangeEventArgs e)
+    {
+        if (!double.TryParse(e.Value?.ToString(), System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture, out var v)) return;
+        var plane = _tasks[index].Planes.FirstOrDefault(p => p.Name == planeName);
+        if (plane is null) return;
+        plane.YMm = v;
+        RefreshMotion(apply: !_manual);
+        await PushFramesAsync();
+        if (!_manual) await PushPoseAsync();
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        StopPlay();
+        await Task.CompletedTask;
     }
 }
