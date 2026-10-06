@@ -46,8 +46,11 @@ public sealed class BambooIcdCell
     public RobotModel Model { get; }
     public SerialJointChain Chain { get; }
     public IFkSolver Fk { get; }
-    /// <summary>Motus world pose of the fixed mount link (from the URDF <c>pole_hang</c> joint).</summary>
-    public double[] MountWorld { get; }
+    /// <summary>Motus world pose of the mount link (URDF <c>pole_hang</c>, optionally relocated by <see cref="SetHang"/>).</summary>
+    public double[] MountWorld { get; private set; } = null!;
+    /// <summary>Current L-grip hang in viewer coordinates (pole by default).</summary>
+    public BambooIcdMotion.HangPose Hang { get; private set; } = BambooIcdMotion.HangPose.Pole;
+    double[] _defaultMountWorld = null!;
     /// <summary>Box parts per URDF link (mount + link_1..link_5), for drawing and reporting.</summary>
     public IReadOnlyList<CellPart> Parts { get; }
     /// <summary>Joint offsets along viewer −Y (pole→θ1, θ1→θ2, …, θ5→jaw) read from the URDF.</summary>
@@ -60,7 +63,7 @@ public sealed class BambooIcdCell
     private readonly List<int> _strutIdx;
     private readonly CollisionObject _poleObj;
     private readonly CollisionObject _groundObj;
-    private readonly Dictionary<(int gR, bool held, int off), RobotMeshCollisionChecker> _checkers = new();
+    private readonly Dictionary<(int gR, bool held, int off, int hang), RobotMeshCollisionChecker> _checkers = new();
 
     public sealed record CellPart(string Name, string Link, double[] Size, double[] Pos);
 
@@ -88,7 +91,9 @@ public sealed class BambooIcdCell
         foreach (var j in tree.Joints)
             if (string.Equals(tree.Links[j.ChildLinkIndex].Name, "mount", StringComparison.OrdinalIgnoreCase)) hang = j;
         if (hang is null) throw new InvalidOperationException("bamboo URDF: no joint into 'mount'.");
-        MountWorld = Transforms.FromRpy(hang.OriginX, hang.OriginY, hang.OriginZ, hang.Roll, hang.Pitch, hang.Yaw);
+        _defaultMountWorld = Transforms.FromRpy(hang.OriginX, hang.OriginY, hang.OriginZ, hang.Roll, hang.Pitch, hang.Yaw);
+        MountWorld = (double[])_defaultMountWorld.Clone();
+        Hang = BambooIcdMotion.HangPose.Pole;
 
         _mountGeometry = UrdfCollisionLoader.Load(root, new[] { "mount" }, ".")?.Links
                          ?? throw new InvalidOperationException("bamboo URDF: mount has no collision.");
@@ -129,6 +134,35 @@ public sealed class BambooIcdCell
 
     public static BambooIcdCell LoadFile(string path, double strutLength = StrutLength) =>
         Load(File.ReadAllText(path), strutLength);
+
+    /// <summary>
+    /// Relocate the L-grip hang in viewer space (brachiation). Updates mount collision and Motus base
+    /// so FK/collision match <see cref="BambooIcdMotion.FkJaw"/> with the same hang.
+    /// </summary>
+    public void SetHang(BambooIcdMotion.HangPose hang)
+    {
+        Hang = hang;
+        // Motus delta: viewer (x,y,z) → Motus (x,−z,y); default hang Motus (0,0,PoleY).
+        var dx = hang.X;
+        var dy = -hang.Z;
+        var dz = hang.Y - BambooIcdMotion.PoleY;
+        var delta = Transforms.FromFrame(new Frame(dx, dy, dz));
+        MountWorld = Transforms.Multiply(delta, _defaultMountWorld);
+        _scenes.Clear();
+        _checkers.Clear();
+    }
+
+    /// <summary>Motus <see cref="BaseFrame"/> that places the URDF hang at the current <see cref="Hang"/>.</summary>
+    public BaseFrame HangBaseFrame
+    {
+        get
+        {
+            var dx = Hang.X;
+            var dy = -Hang.Z;
+            var dz = Hang.Y - BambooIcdMotion.PoleY;
+            return new BaseFrame(new Frame(dx, dy, dz));
+        }
+    }
 
     private static CellPart ToPart(CollisionObject g, string link) =>
         new(g.Name, link,
@@ -192,7 +226,7 @@ public sealed class BambooIcdCell
 
     /// <summary>Motus world TCP (jaw) matrix from Motus FK.</summary>
     public double[] JawWorld(IReadOnlyList<double> qDeg) =>
-        Fk.ComputeTcpTransform(RadFromDeg(qDeg), Model.Preset.BaseFrame.Frame, Model.Preset.ToolFrame.Frame);
+        Fk.ComputeTcpTransform(RadFromDeg(qDeg), HangBaseFrame.Frame, Model.Preset.ToolFrame.Frame);
 
     /// <summary>
     /// Where the strut physically is through a motion. It rests on the ground at the pick object's location
@@ -305,7 +339,17 @@ public sealed class BambooIcdCell
             ("θ1", "base tube"),
         };
         if (gripping)
+        {
             foreach (var plate in RGripPlates) allowed.Add((plate, Strut));
+            // Long uprights (truss 0.5 m) extend past the jaw plates into the grip body while clamped;
+            // allow the grip-corridor (neck/rail/carriage) the same way the plates are allowed.
+            if (StrutLen > 0.35)
+            {
+                allowed.Add(("neck", Strut));
+                allowed.Add(("R-grip rail", Strut));
+                allowed.Add(("R-grip carriage", Strut));
+            }
+        }
         return new CollisionScene(objects, allowed);
     }
 
@@ -315,7 +359,8 @@ public sealed class BambooIcdCell
         var offKey = heldOffset is { } o
             ? HashCode.Combine(Math.Round(o.X, 6), Math.Round(o.Y, 6), Math.Round(o.Z, 6), Math.Round(o.Qw, 6), Math.Round(o.Qx, 6), Math.Round(o.Qy, 6), Math.Round(o.Qz, 6))
             : 0;
-        var key = ((int)Math.Round(gRmm * 10), heldOffset is not null, offKey);
+        var hangKey = HashCode.Combine(Math.Round(Hang.X, 5), Math.Round(Hang.Y, 5), Math.Round(Hang.Z, 5));
+        var key = ((int)Math.Round(gRmm * 10), heldOffset is not null, offKey, hangKey);
         if (_checkers.TryGetValue(key, out var c)) return c;
         var baseModel = Model.CollisionModel!;
         var links = baseModel.Links.Select(l =>
@@ -329,7 +374,8 @@ public sealed class BambooIcdCell
                 g.ExtentX, g.ExtentY, g.ExtentZ);
             return new LinkCollisionGeometry(l.LinkIndex, l.LinkName, moved);
         }).ToList();
-        var model = new RobotModel(Model.Preset, new RobotCollisionModel(links), Urdf.JointNames);
+        var model = Model.WithTool(null, HangBaseFrame);
+        model = new RobotModel(model.Preset, new RobotCollisionModel(links), Urdf.JointNames);
         var attached = heldOffset is { } off ? new[] { HeldStrut(off) } : Array.Empty<AttachedBody>();
         c = new RobotMeshCollisionChecker(model, Chain, attached, SelfCollisionMinLinkGap);
         if (_checkers.Count > 512) _checkers.Clear();
@@ -338,8 +384,11 @@ public sealed class BambooIcdCell
     }
 
     /// <summary>Gripping = R-grip closed on a captured strut, or closing/opening around it.</summary>
-    public static bool IsGripping(StrutTrack track, int hold, string label) =>
-        track.Captured && (hold == 1 || label is "Close" or "Open");
+    public bool IsGripping(StrutTrack track, int hold, string label) =>
+        track.Captured && (
+            hold == 1
+            || label is "Close" or "Open" or "Depart" or "Clear"
+            || (StrutLen > 0.35 && hold == 2 && label is "Retract"));
 
     /// <summary>All Motus contacts for one pose. Empty = clear.</summary>
     public IReadOnlyList<CollisionContact> Contacts(
@@ -361,7 +410,7 @@ public sealed class BambooIcdCell
     /// <summary>Motus FK: jaw (TCP) origin in viewer coordinates.</summary>
     public (double X, double Y, double Z) JawViewer(IReadOnlyList<double> qDeg)
     {
-        var tcp = Fk.ComputeTcp(new JointState(RadFromDeg(qDeg)), Model.Preset.BaseFrame, Model.Preset.ToolFrame).Tcp;
+        var tcp = Fk.ComputeTcp(new JointState(RadFromDeg(qDeg)), HangBaseFrame, Model.Preset.ToolFrame).Tcp;
         return (tcp.X, tcp.Z, -tcp.Y);
     }
 

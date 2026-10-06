@@ -14,6 +14,12 @@ public static class BambooIcdMotion
 {
     public static readonly double Deg = Math.PI / 180.0;
     public static readonly double PoleY = 0.40;
+    /// <summary>L-grip hang pose in viewer coordinates. Default is the support-pole hang.</summary>
+    public readonly record struct HangPose(double X, double Y, double Z)
+    {
+        public static HangPose Pole { get; } = new(0, PoleY, 0);
+        public bool IsPole => Math.Abs(X) < 1e-12 && Math.Abs(Y - PoleY) < 1e-12 && Math.Abs(Z) < 1e-12;
+    }
     public static readonly double[] Seg = { 0.030, 0.080, 0.088, 0.088, 0.088, 0.046 };
     public static readonly (double Min, double Max)[] LimitsDeg =
     {
@@ -139,12 +145,14 @@ public static class BambooIcdMotion
         return a;
     }
 
-    public static List<double[]> IkSolve(double y, double z, double alphaDeg)
+    public static List<double[]> IkSolve(double y, double z, double alphaDeg) => IkSolve(y, z, alphaDeg, HangPose.Pole);
+
+    public static List<double[]> IkSolve(double y, double z, double alphaDeg, HangPose hang)
     {
         var alpha = alphaDeg * Deg;
         var L = 0.088;
         var Ljaw = 0.088 + 0.046;
-        var y2 = PoleY - Seg[0] - Seg[1];
+        var y2 = hang.Y - Seg[0] - Seg[1];
         var Ay = y2 - y - Ljaw * Math.Cos(alpha);
         var Az = -z - Ljaw * Math.Sin(alpha);
         var r = Math.Sqrt(Ay * Ay + Az * Az);
@@ -172,8 +180,10 @@ public static class BambooIcdMotion
                 q[i] = Math.Clamp(q[i], LimitsDeg[i].Min, LimitsDeg[i].Max);
             }
             if (!ok) continue;
-            var f = FkJaw(q);
-            if (Math.Sqrt((f.Pos[1] - y) * (f.Pos[1] - y) + (f.Pos[2] - z) * (f.Pos[2] - z)) > 0.002) continue;
+            var f = FkJaw(q, hang);
+            // Planar θ1 = −90 reaches (hang.X, y, hang.Z + z).
+            if (Math.Sqrt((f.Pos[0] - hang.X) * (f.Pos[0] - hang.X) + (f.Pos[1] - y) * (f.Pos[1] - y) + (f.Pos[2] - (hang.Z + z)) * (f.Pos[2] - (hang.Z + z))) > 0.002)
+                continue;
             var eZ1 = -Math.Sin(alpha);
             var eZ2 = Math.Cos(alpha);
             if (Math.Sqrt(f.Z[0] * f.Z[0] + (f.Z[1] - eZ1) * (f.Z[1] - eZ1) + (f.Z[2] - eZ2) * (f.Z[2] - eZ2)) > 0.05) continue;
@@ -189,22 +199,25 @@ public static class BambooIcdMotion
     /// (PlacementWorld uses Rx(pitch) only — axis (0, −sin pitch, cos pitch)). When x = 0 and
     /// z ≥ 0 this matches <see cref="IkSolve"/> (θ5 stays 0).
     /// </summary>
-    public static List<double[]> IkSolveSpatial(double x, double y, double z, double pitchDeg)
+    public static List<double[]> IkSolveSpatial(double x, double y, double z, double pitchDeg) =>
+        IkSolveSpatial(x, y, z, pitchDeg, HangPose.Pole);
+
+    public static List<double[]> IkSolveSpatial(double x, double y, double z, double pitchDeg, HangPose hang)
     {
-        var r = Math.Sqrt(x * x + z * z);
+        var dx = x - hang.X; var dz = z - hang.Z;
+        var r = Math.Sqrt(dx * dx + dz * dz);
         if (r < 1e-9) return new List<double[]>();
-        var planar = IkSolve(y, r, pitchDeg);
-        var yawDeg = Math.Atan2(x, z) / Deg;
+        var planar = IkSolve(y, r, pitchDeg, hang);
+        var yawDeg = Math.Atan2(dx, dz) / Deg;
         var pitch = pitchDeg * Deg;
-        // Expected jaw/strut Z for PlacementWorld(Rx(pitch)).
         var axis = new[] { 0.0, -Math.Sin(pitch), Math.Cos(pitch) };
         var sols = new List<double[]>();
         foreach (var s in planar)
         {
             var q = s.ToArray();
             q[0] = Math.Clamp(-90.0 + yawDeg, LimitsDeg[0].Min, LimitsDeg[0].Max);
-            AlignWristToAxis(q, axis);
-            var f = FkJaw(q);
+            AlignWristToAxis(q, axis, hang);
+            var f = FkJaw(q, hang);
             if (Math.Sqrt((f.Pos[0] - x) * (f.Pos[0] - x) + (f.Pos[1] - y) * (f.Pos[1] - y) + (f.Pos[2] - z) * (f.Pos[2] - z)) > 0.005)
                 continue;
             sols.Add(q);
@@ -220,26 +233,29 @@ public static class BambooIcdMotion
     /// <paramref name="maxAxisErrDeg"/> are dropped (the jaw would not be across the strut).
     /// </summary>
     public static List<double[]> IkSolveAxis(double x, double y, double z, double tiltDeg,
-        (double X, double Y, double Z) axis, double maxAxisErrDeg = 2.0)
+        (double X, double Y, double Z) axis, double maxAxisErrDeg = 2.0) =>
+        IkSolveAxis(x, y, z, tiltDeg, axis, HangPose.Pole, maxAxisErrDeg);
+
+    public static List<double[]> IkSolveAxis(double x, double y, double z, double tiltDeg,
+        (double X, double Y, double Z) axis, HangPose hang, double maxAxisErrDeg = 2.0)
     {
-        var r = Math.Sqrt(x * x + z * z);
+        var dx = x - hang.X; var dz = z - hang.Z;
+        var r = Math.Sqrt(dx * dx + dz * dz);
         var sols = new List<double[]>();
         if (r < 1e-9) return sols;
-        var yawDeg = Math.Atan2(x, z) / Deg;
+        var yawDeg = Math.Atan2(dx, dz) / Deg;
         var ax = new[] { axis.X, axis.Y, axis.Z };
         var minDot = Math.Cos(maxAxisErrDeg * Deg);
-        // Face the target (planar reach +r), or turn θ1 half a revolution and reach back through the
-        // plane (planar −r, mirrored tilt) when the facing yaw is outside the θ1 limits.
         var branches = new List<(double Theta1, double R, double Tilt)>();
         foreach (var (t1, rr, tt) in new[] { (-90.0 + yawDeg, r, tiltDeg), (-90.0 + yawDeg + 180, -r, -tiltDeg), (-90.0 + yawDeg - 180, -r, -tiltDeg) })
             if (t1 >= LimitsDeg[0].Min - 1e-9 && t1 <= LimitsDeg[0].Max + 1e-9) branches.Add((t1, rr, tt));
         foreach (var (theta1, rr, tilt) in branches)
-        foreach (var s in IkSolve(y, rr, tilt))
+        foreach (var s in IkSolve(y, rr, tilt, hang))
         {
             var q = s.ToArray();
             q[0] = theta1;
-            AlignWristToAxis(q, ax);
-            var f = FkJaw(q);
+            AlignWristToAxis(q, ax, hang);
+            var f = FkJaw(q, hang);
             if (Math.Sqrt((f.Pos[0] - x) * (f.Pos[0] - x) + (f.Pos[1] - y) * (f.Pos[1] - y) + (f.Pos[2] - z) * (f.Pos[2] - z)) > 0.005)
                 continue;
             if (Math.Abs(f.Z[0] * ax[0] + f.Z[1] * ax[1] + f.Z[2] * ax[2]) < minDot) continue;
@@ -249,14 +265,16 @@ public static class BambooIcdMotion
     }
 
     /// <summary>Set θ5 (about jaw Y) so jaw Z is closest to ±<paramref name="axis"/>.</summary>
-    static void AlignWristToAxis(double[] q, double[] axis)
+    static void AlignWristToAxis(double[] q, double[] axis) => AlignWristToAxis(q, axis, HangPose.Pole);
+
+    static void AlignWristToAxis(double[] q, double[] axis, HangPose hang)
     {
         var best = q[4];
         var bestDot = -1.0;
         for (var t5 = LimitsDeg[4].Min; t5 <= LimitsDeg[4].Max; t5 += 2.5)
         {
             q[4] = t5;
-            var z = FkJaw(q).Z;
+            var z = FkJaw(q, hang).Z;
             var dot = Math.Abs(z[0] * axis[0] + z[1] * axis[1] + z[2] * axis[2]);
             if (dot > bestDot) { bestDot = dot; best = t5; }
         }
@@ -266,7 +284,7 @@ public static class BambooIcdMotion
         for (var t5 = lo; t5 <= hi; t5 += 0.5)
         {
             q[4] = t5;
-            var z = FkJaw(q).Z;
+            var z = FkJaw(q, hang).Z;
             var dot = Math.Abs(z[0] * axis[0] + z[1] * axis[1] + z[2] * axis[2]);
             if (dot > bestDot) { bestDot = dot; best = t5; }
         }
@@ -280,11 +298,13 @@ public static class BambooIcdMotion
         public List<double[]> Pts { get; init; }
     }
 
-    public static FkResult FkJaw(double[] deg)
+    public static FkResult FkJaw(double[] deg) => FkJaw(deg, HangPose.Pole);
+
+    public static FkResult FkJaw(double[] deg, HangPose hang)
     {
         var q = deg.Select(d => d * Deg).ToArray();
         var R = Ry(90 * Deg);
-        var p = new[] { 0.0, PoleY, 0.0 };
+        var p = new[] { hang.X, hang.Y, hang.Z };
         var axes = new[] { "Y", "X", "X", "X", "Y" };
         var pts = new List<double[]> { (double[])p.Clone() };
         for (var i = 0; i < 5; i++)

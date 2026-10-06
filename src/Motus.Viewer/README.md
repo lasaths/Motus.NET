@@ -76,17 +76,16 @@ Open `http://127.0.0.1:5268/bamboo` (single strut pick/place) or
 
 - **Store:** single feed at the default ICD pick pose; one cane is presented per cycle (waiting stock is
   not in the Motus scene).
-- **Truss:** two equilateral triangles A–B–C and B–D–C lying flat on the ground, sharing the middle edge
-  B–C (bottoms A–B / B–D, diagonals A–C / D–C). Each member is a horizontal cane lying on its edge,
-  ending a small node gap short of every node so canes never touch.
-- **Cane length:** 0.10 m (the 0.30 m ICD strut cannot form a flat two-triangle truss inside the hung
-  arm's ground reach: ≈0.095 m gripping straight down, ≈0.128 m fully stretched). The page loads the
-  cell with this length, so the drawn cane is the collided cane.
-- **Motion:** grip straight down, lift vertically, swing at transit height, lower vertically, release,
-  back off vertically, return Home. θ5 rolls the jaw onto each cane's direction.
+- **Truss:** two equilateral triangles A–B–C and B–D–C on a compact ground footprint, sharing B–C.
+  Each member is a **0.5 m vertical upright** at the edge midpoint (pitch −90°).
+- **Brachiation:** after `baseL` is planted it is fixed at both ends (ground stake + pole sleeve where
+  the cane crosses the support pole). Later cycles relocate the L-grip hang onto that upright — the arm
+  does not stay fixed at the pole. Unsupported / single-end canes are never used as walk rails.
+- **Motion:** pick from the feed, place upright, return Home; hang pose switches at cycle boundaries.
 - **Tasks:** Motus string-identity pick/place pairs (`object` = member id) build members in order.
 - **Collision:** Motus.NET vs pole, ground, mount, placed members, the active cane, held cane, and self.
-  The full five-cycle path is Motus-clear (`BambooTrussTests.FullTruss_PathIsCollisionFree_UnderMotus`).
+  Drawn cane length == collided cane length. Full five-cycle path Motus-clear
+  (`BambooTrussTests.FullTruss_PathIsCollisionFree_UnderMotus`).
 
 ## What still differs from the HTML preview
 

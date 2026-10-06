@@ -17,7 +17,7 @@
 
     <aside class="controls">
         <h1>Bamboo truss (store → 2 triangles)</h1>
-        <p class="sub">Single truss: two triangles lying on the ground, sharing the middle edge B–C. The store feeds one cane at a time; each is carried flat and laid on its truss edge. Motus.NET owns FK/tasks/collision; Three.js only draws.</p>
+        <p class="sub">Single truss: two triangles on a compact footprint (shared edge B–C). 0.5 m uprights; after baseL is fixed (ground + pole sleeve) the arm brachiates onto it for later members. Motus.NET owns FK/tasks/collision; Three.js only draws.</p>
         <div class="phase @(!string.IsNullOrEmpty(_motionError) || _collision ? "err" : "")" data-motus="@_motusState">@_phase</div>
 
         <div class="row">
@@ -122,7 +122,7 @@
             Play runs every pick/place pair (object = member id). Footprint: A–B–C + B–D–C (rhombus), bottoms A–B / B–D, apex C, shared B–C.
             Bend axes local X, wrists local Y, jaws local X. Viewer is Three.js Y-up; Motus.NET URDF is Z-up (shared θ).
             Collision: Motus.NET against pole, ground, mount, already-placed members, the held strut, and self.
-            Play builds members in order (feed → baseL → baseR → sep → diagL → diagR). Stop on first Motus hit.
+            Play builds members in order (feed → baseL → brachiate → baseR → sep → diagL → diagR). Stop on first Motus hit.
         </p>
     </aside>
 </div>
