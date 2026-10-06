@@ -77,20 +77,29 @@ Open `http://127.0.0.1:5268/bamboo` (single strut pick/place) or
 - **Store:** single feed at the default ICD pick pose; one cane is presented per cycle (waiting stock is
   not in the Motus scene).
 - **Truss:** two equilateral triangles A–B–C and B–D–C on a compact ground footprint, sharing B–C.
-  Each member is a **0.5 m vertical upright** at the edge midpoint (pitch −90°).
+  Each member is a **0.5 m vertical upright** (pitch −90°) placed in a compact, Motus-reachable band
+  near its edge (not at the exact midpoint: the 0.5 m feed cane pitches up in the x = 0 plane, so every
+  upright keeps |x| ≥ 0.05). Uprights are spread in azimuth about the pole so no later member sits in the
+  radial "shadow" of an earlier one (`baseR` at (0.16, 0.18) lets `diagR` be reached without the arm
+  crossing it).
 - **Brachiation:** after `baseL` is planted it is fixed at both ends (ground stake + pole sleeve where
-  the cane crosses the support pole). Later cycles relocate the L-grip hang onto that upright — the arm
-  does not stay fixed at the pole. Unsupported / single-end canes are never used as walk rails.
-- **Motion:** pick from the feed, place upright, return Home; hang pose switches at cycle boundaries.
+  the cane crosses the support pole); `BambooTrussLayout.WalkHang` names that rail. The auto path stays on
+  the pole hang for all five cycles (also both-ends fixed). Unsupported / single-end canes are never used
+  as walk rails.
+- **Motion:** pick from the feed, pitch the cane upright through obstacle-aware vias (`Pitch`), thread
+  between planted neighbours with the cane vertical (`Swing`), place, return Home.
 - **Tasks:** Motus string-identity pick/place pairs (`object` = member id) build members in order.
 - **Collision:** Motus.NET vs pole, ground, mount, placed members, the active cane, held cane, and self.
-  Drawn cane length == collided cane length. Full five-cycle path Motus-clear
+  Drawn cane length == collided cane length. Full five-cycle path Motus-clear, LastClearT = 1.0
   (`BambooTrussTests.FullTruss_PathIsCollisionFree_UnderMotus`).
 
 ## What still differs from the HTML preview
 
 - The planner keeps the HTML's point-model floor heuristics only as IK-branch *preferences*
-  (`FloorPenalty`); they never veto a path. Collision verdicts are Motus-only.
+  (`FloorPenalty`); they never veto a path. Collision verdicts are Motus-only. On `/bamboo-truss` the
+  linker additionally rejects transits whose carried cane / gripper envelope sweeps a planted upright and
+  penalises arm-skeleton grazes — a planning filter only; the Motus scan remains the judge (and if no
+  filtered chain exists the plain transit is built so Motus names the contact).
 - ICD planar IK for play lives in `BambooIcdMotion` (C#); `BambooIcdIk` exposes it as a Motus
   `IInverseKinematics` so `TaskPathValidator` can validate bamboo task paths.
 - The grasp plane cannot be driven much lower than −1.5 mm: at −2 mm it is outside the arm's reach.

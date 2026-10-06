@@ -80,9 +80,12 @@ public static class BambooTrussLayout
         var edges = new (string Id, string Label, (double X, double Z) P, (double X, double Z) Q, double Px, double Pz)[]
         {
             // Compact Motus-reachable uprights; |x|≥0.05 clears the 0.5 m store feed.
-            // WalkHang is Members[0] (baseL) once ground-staked + pole-sleeved (both ends fixed).
+            // Azimuth about the pole (deg): baseL −22, sep −10, diagL +10, diagR +23, baseR +42.
+            // baseR sits outboard so diagR (placed later) is not in its radial shadow: the arm reaching
+            // diagR never has to cross a planted cane. WalkHang is Members[0] (baseL) once
+            // ground-staked + pole-sleeved (both ends fixed).
             ("baseL", "base left", A, B, -0.08, 0.20),
-            ("baseR", "base right", B, D, 0.08, 0.20),
+            ("baseR", "base right", B, D, 0.16, 0.18),
             ("sep", "shared upright", B, C, -0.05, 0.28),
             ("diagL", "diag left", A, C, 0.05, 0.28),
             ("diagR", "diag right", D, C, 0.11, 0.26)
