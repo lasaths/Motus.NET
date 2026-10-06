@@ -38,8 +38,8 @@ public class BambooTrussTests
         Assert.True(BambooTrussLayout.HangForMemberIndex(1).IsPole);
         var walk = BambooTrussLayout.WalkHang;
         Assert.False(walk.IsPole);
-        Assert.Equal(BambooTrussLayout.Members[0].Place.X, walk.X, 9);
-        Assert.Equal(BambooTrussLayout.Members[0].Place.Z, walk.Z, 9);
+        Assert.Equal(BambooTrussLayout.Members[0].Place.X + BambooTrussLayout.WalkHangOffsetX, walk.X, 9);
+        Assert.Equal(BambooTrussLayout.Members[0].Place.Z + BambooTrussLayout.WalkHangOffsetZ, walk.Z, 9);
         Assert.Equal(BambooTrussLayout.WalkHangY, walk.Y, 9);
     }
 
@@ -105,11 +105,13 @@ public class BambooTrussTests
     public void FullTruss_PathIsCollisionFree_UnderMotus()
     {
         var built = Build();
-        Assert.Equal(5, built.Cycles.Count);
-        // Walk rail is available once baseL is both-ends-fixed (ground + pole sleeve).
-        Assert.False(BambooTrussLayout.WalkHang.IsPole);
-        Assert.Equal(BambooTrussLayout.Members[0].Place.X, BambooTrussLayout.WalkHang.X, 9);
-        Assert.Equal(BambooTrussLayout.Members[0].Place.Z, BambooTrussLayout.WalkHang.Z, 9);
+        // Five members + brachiate walk on both-ends-fixed baseL.
+        Assert.Equal(6, built.Cycles.Count);
+        Assert.Equal("brachiate", built.Cycles[1].MemberId);
+        Assert.False(built.Cycles[1].PlaceHang.IsPole);
+        Assert.Equal(BambooTrussLayout.WalkHang.X, built.Cycles[1].PlaceHang.X, 9);
+        Assert.Equal(BambooTrussLayout.WalkHang.Z, built.Cycles[1].PlaceHang.Z, 9);
+        Assert.Contains(built.Keys, k => k.Label.StartsWith("brachiate:", StringComparison.Ordinal));
 
         var scan = new BambooTrussScan(Cell, built.Keys, built.Cycles, BambooTrussLayout.Members, maxStepDeg: 0.5).RunToEnd();
         Assert.Null(scan.TrackMiss);
@@ -125,10 +127,10 @@ public class BambooTrussTests
         var built = Build();
         var scan = new BambooTrussScan(Cell, built.Keys, built.Cycles, BambooTrussLayout.Members, maxStepDeg: 0.5);
         Assert.Null(scan.TrackMiss);
-        for (var i = 0; i < built.Cycles.Count; i++)
+        foreach (var c in built.Cycles)
         {
-            var c = built.Cycles[i];
-            var member = BambooTrussLayout.Members[i];
+            if (c.MemberId == "brachiate") continue;
+            var member = BambooTrussLayout.Members.First(m => m.Id == c.MemberId);
             var t = c.T1 - 1e-7;
             var s = BambooIcdMotion.Sample(built.Keys, t);
             Assert.Equal(2, s.Hold);
@@ -183,10 +185,13 @@ public class BambooTrussTests
     public void FullTrussMotion_BuildsFiveCycles()
     {
         var built = Build();
-        Assert.Equal(5, built.Cycles.Count);
-        Assert.Equal(BambooTrussLayout.Members.Select(m => m.Id), built.Cycles.Select(c => c.MemberId));
+        Assert.Equal(6, built.Cycles.Count);
+        Assert.Equal(
+            new[] { "baseL", "brachiate", "baseR", "sep", "diagL", "diagR" },
+            built.Cycles.Select(c => c.MemberId));
         Assert.Equal(0, built.Cycles[0].T0, 9);
         Assert.Equal(1, built.Cycles[^1].T1, 9);
+        Assert.False(built.Cycles[1].PlaceHang.IsPole);
     }
 
     [Fact]

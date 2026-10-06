@@ -33,6 +33,16 @@ public static class BambooTrussLayout
 
     /// <summary>Hang height on a walkable upright (below the pole so the arm still hangs downward).</summary>
     public const double WalkHangY = 0.32;
+    /// <summary>
+    /// L-grip clamp offset from the upright centreline (metres). Motus-true: hanging exactly on the
+    /// cane axis puts θ1/θ2 through the vertical member; the grip body sits beside the cane the same
+    /// way the L-grip surrounds the horizontal support pole.
+    /// </summary>
+    public const double WalkHangOffsetX = 0.03;
+    public const double WalkHangOffsetZ = 0.03;
+    /// <summary>Y span walked along the both-ends-fixed rail during the brachiate segment.</summary>
+    public const double WalkHangY0 = 0.30;
+    public const double WalkHangY1 = 0.36;
 
     public sealed record MemberDef(
         string Id,
@@ -64,9 +74,16 @@ public static class BambooTrussLayout
     /// <summary>Place hang: always the pole. Brachiation along baseL is a dedicated Motus-clear segment after cycle 0.</summary>
     public static BambooIcdMotion.HangPose HangForMemberIndex(int index) => BambooIcdMotion.HangPose.Pole;
 
-    /// <summary>Walk-rail hang on the planted baseL upright (ground + pole sleeve).</summary>
+    /// <summary>
+    /// Walk-rail hang on the planted baseL upright (ground + pole sleeve — both ends fixed).
+    /// Offset from the cane axis so Home is Motus-clear (L-grip clamp beside the member).
+    /// </summary>
     public static BambooIcdMotion.HangPose WalkHang =>
-        new(Members[0].Place.X, WalkHangY, Members[0].Place.Z);
+        new(Members[0].Place.X + WalkHangOffsetX, WalkHangY, Members[0].Place.Z + WalkHangOffsetZ);
+
+    /// <summary>Hang pose on the walk rail at a given height (same XZ clamp as <see cref="WalkHang"/>).</summary>
+    public static BambooIcdMotion.HangPose WalkHangAt(double y) =>
+        new(Members[0].Place.X + WalkHangOffsetX, y, Members[0].Place.Z + WalkHangOffsetZ);
 
     static IReadOnlyList<MemberDef> BuildMembers()
     {

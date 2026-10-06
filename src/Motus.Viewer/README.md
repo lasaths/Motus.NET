@@ -83,11 +83,13 @@ Open `http://127.0.0.1:5268/bamboo` (single strut pick/place) or
   radial "shadow" of an earlier one (`baseR` at (0.16, 0.18) lets `diagR` be reached without the arm
   crossing it).
 - **Brachiation:** after `baseL` is planted it is fixed at both ends (ground stake + pole sleeve where
-  the cane crosses the support pole); `BambooTrussLayout.WalkHang` names that rail. The auto path stays on
-  the pole hang for all five cycles (also both-ends fixed). Unsupported / single-end canes are never used
-  as walk rails.
+  the cane crosses the support pole); `BambooTrussLayout.WalkHang` names that rail (L-grip clamp offset
+  beside the upright so Home is Motus-clear). The auto path hang-walks along that rail between `baseL`
+  and `baseR` (`brachiate` cycle: Home posture, hang Y `WalkHangY0`→`WalkHangY1`→`WalkHangY0`). Place
+  hangs for the five members stay on the pole. Unsupported / single-end canes are never used as walk rails.
 - **Motion:** pick from the feed, pitch the cane upright through obstacle-aware vias (`Pitch`), thread
-  between planted neighbours with the cane vertical (`Swing`), place, return Home.
+  between planted neighbours with the cane vertical (`Swing`), place, return Home; then brachiate on
+  both-ends-fixed `baseL` before the remaining members.
 - **Tasks:** Motus string-identity pick/place pairs (`object` = member id) build members in order.
 - **Collision:** Motus.NET vs pole, ground, mount, placed members, the active cane, held cane, and self.
   Drawn cane length == collided cane length. Full five-cycle path Motus-clear, LastClearT = 1.0

@@ -138,10 +138,10 @@ public static class BambooTrussMotion
             }
         }
 
-        // Brachiation: after baseL is planted it is fixed at both ends (ground + pole sleeve) and
-        // BambooTrussLayout.WalkHang names that rail. The five-member Motus path stays on the pole hang
-        // (compact uprights are reachable); animating a Home hang-teleport onto baseL collides Motus-true
-        // with the cane, so the walk is available as a hang target rather than an auto-inserted segment.
+        // Brachiation: after baseL is planted (ground + pole sleeve, both ends fixed) the auto path
+        // hang-walks along that upright before the remaining members (Motus-clear WalkHang clamp).
+        if (n >= 2)
+            InsertBrachiate(allKeys, cycles);
 
         for (var i = 1; i < allKeys.Count; i++)
             if (allKeys[i].T <= allKeys[i - 1].T)
@@ -152,70 +152,114 @@ public static class BambooTrussMotion
     }
 
     /// <summary>
-    /// After baseL is planted it is fixed at both ends (ground + pole sleeve). Steal a small T window
-    /// from the joint between cycle 0 and 1 and hang-walk along that upright (Home posture).
+    /// After baseL is planted it is fixed at both ends (ground + pole sleeve). Insert a Motus-clear
+    /// hang-walk along that upright (Home posture on <see cref="BambooTrussLayout.WalkHang"/>) between
+    /// cycle 0 and cycle 1, re-stamping every key into the new T windows.
     /// </summary>
     static void InsertBrachiate(List<BambooIcdMotion.MotionKey> keys, List<CycleBound> cycles)
     {
         if (cycles.Count < 2) return;
-        var tJoin = cycles[0].T1;
-        // Shrink later cycles' T to make room for brachiate in (tJoin - span/2, tJoin + span/2).
-        const double span = 0.04;
-        var t0 = Math.Max(cycles[0].T0 + 1e-3, tJoin - span / 2);
-        var t1 = Math.Min(cycles[1].T1 - 1e-3, tJoin + span / 2);
-        if (t1 <= t0 + 1e-3) return;
 
-        // Mark cycle 0 end early and shift cycle 1+.
-        cycles[0] = new CycleBound
+        // Snapshot each member's keys normalised to [0,1] inside its old cycle window.
+        var memberKeys = new List<List<BambooIcdMotion.MotionKey>>();
+        foreach (var c in cycles)
         {
-            MemberId = cycles[0].MemberId, T0 = cycles[0].T0, T1 = t0,
-            PickHang = cycles[0].PickHang, PlaceHang = cycles[0].PlaceHang
-        };
-        // Insert a synthetic cycle for the walk so the scan can SetHang along baseL.
-        var walk = new CycleBound
-        {
-            MemberId = "brachiate",
-            T0 = t0,
-            T1 = t1,
-            PickHang = BambooIcdMotion.HangPose.Pole,
-            PlaceHang = BambooTrussLayout.WalkHang
-        };
-        cycles.Insert(1, walk);
-        var rem = 1.0 - t1;
-        var oldStart = cycles[2].T0;
-        for (var i = 2; i < cycles.Count; i++)
-        {
-            var c = cycles[i];
-            var u0 = (c.T0 - oldStart) / Math.Max(1e-9, 1.0 - oldStart);
-            var u1 = (c.T1 - oldStart) / Math.Max(1e-9, 1.0 - oldStart);
-            cycles[i] = new CycleBound
+            var span = Math.Max(1e-9, c.T1 - c.T0);
+            var prefix = c.MemberId + ":";
+            var list = new List<BambooIcdMotion.MotionKey>();
+            foreach (var k in keys)
             {
-                MemberId = c.MemberId,
-                T0 = t1 + u0 * rem,
-                T1 = t1 + u1 * rem,
-                PickHang = c.PickHang,
-                PlaceHang = c.PlaceHang
-            };
+                if (!k.Label.StartsWith(prefix, StringComparison.Ordinal)) continue;
+                if (k.T < c.T0 - 1e-9 || k.T > c.T1 + 1e-9) continue;
+                list.Add(new BambooIcdMotion.MotionKey
+                {
+                    T = (k.T - c.T0) / span,
+                    Label = k.Label,
+                    Q = k.Q.ToArray(),
+                    GR = k.GR,
+                    Hold = k.Hold
+                });
+            }
+            if (list.Count > 0)
+            {
+                list[0].T = 0;
+                list[^1].T = 1;
+            }
+            memberKeys.Add(list);
         }
 
-        // Re-stamp member keys into new cycle windows; append brachiate Home keys.
-        // Simpler: inject Home keys at t0..t1 labelled brachiate:*.
-        keys.Add(new BambooIcdMotion.MotionKey
+        const double brachFrac = 0.06;
+        var n = cycles.Count;
+        var memberShare = (1.0 - brachFrac) / n;
+        var newCycles = new List<CycleBound>();
+        var newKeys = new List<BambooIcdMotion.MotionKey>();
+
+        void StampMember(int mi, double t0, double t1)
         {
-            T = t0, Label = "brachiate:Home", Q = BambooIcdMotion.HomeDeg.ToArray(),
+            var c = cycles[mi];
+            newCycles.Add(new CycleBound
+            {
+                MemberId = c.MemberId, T0 = t0, T1 = t1,
+                PickHang = c.PickHang, PlaceHang = c.PlaceHang
+            });
+            var span = t1 - t0;
+            foreach (var k in memberKeys[mi])
+            {
+                newKeys.Add(new BambooIcdMotion.MotionKey
+                {
+                    T = t0 + k.T * span,
+                    Label = k.Label,
+                    Q = k.Q.ToArray(),
+                    GR = k.GR,
+                    Hold = k.Hold
+                });
+            }
+        }
+
+        // Cycle 0 (baseL), then brachiate walk on the both-ends-fixed rail, then remaining members.
+        StampMember(0, 0, memberShare);
+        var b0 = memberShare;
+        var b1 = memberShare + brachFrac;
+        newCycles.Add(new CycleBound
+        {
+            MemberId = "brachiate",
+            T0 = b0,
+            T1 = b1,
+            PickHang = BambooIcdMotion.HangPose.Pole,
+            PlaceHang = BambooTrussLayout.WalkHang
+        });
+        // Home posture throughout; scan interpolates hang Y along the rail (WalkHangY0→Y1→Y0).
+        newKeys.Add(new BambooIcdMotion.MotionKey
+        {
+            T = b0, Label = "brachiate:Home", Q = BambooIcdMotion.HomeDeg.ToArray(),
             GR = BambooTrussLayout.JawOpenMm, Hold = 0
         });
-        keys.Add(new BambooIcdMotion.MotionKey
+        newKeys.Add(new BambooIcdMotion.MotionKey
         {
-            T = (t0 + t1) / 2, Label = "brachiate:Walk", Q = BambooIcdMotion.HomeDeg.ToArray(),
+            T = (b0 + b1) / 2, Label = "brachiate:Walk", Q = BambooIcdMotion.HomeDeg.ToArray(),
             GR = BambooTrussLayout.JawOpenMm, Hold = 0
         });
-        keys.Add(new BambooIcdMotion.MotionKey
+        newKeys.Add(new BambooIcdMotion.MotionKey
         {
-            T = t1, Label = "brachiate:Home", Q = BambooIcdMotion.HomeDeg.ToArray(),
+            T = b1, Label = "brachiate:Home", Q = BambooIcdMotion.HomeDeg.ToArray(),
             GR = BambooTrussLayout.JawOpenMm, Hold = 0
         });
-        keys.Sort((a, b) => a.T.CompareTo(b.T));
+        for (var mi = 1; mi < n; mi++)
+        {
+            var t0 = b1 + (mi - 1) * memberShare;
+            var t1 = mi == n - 1 ? 1.0 : b1 + mi * memberShare;
+            StampMember(mi, t0, t1);
+        }
+
+        for (var i = 1; i < newKeys.Count; i++)
+            if (newKeys[i].T <= newKeys[i - 1].T)
+                newKeys[i].T = newKeys[i - 1].T + 1e-6;
+        newKeys[^1].T = 1;
+
+        keys.Clear();
+        keys.AddRange(newKeys);
+        cycles.Clear();
+        cycles.AddRange(newCycles);
     }
 
     static List<BambooIcdMotion.MotionKey> HomeKeys() =>

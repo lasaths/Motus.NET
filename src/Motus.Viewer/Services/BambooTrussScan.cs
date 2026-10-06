@@ -175,7 +175,9 @@ public sealed class BambooTrussScan
                 _cell.SetHang(hold >= 1 ? _cycles[mi].PlaceHang : _cycles[mi].PickHang);
             }
             var world = _cell.StrutWorld(track, hold, qDeg);
-            var name = hold == 2 && mi < _members.Count ? $"placed-{_members[mi].Id}" : BambooIcdCell.Strut;
+            string name = BambooIcdCell.Strut;
+            if (hold == 2 && mi < _cycles.Count && _cycles[mi].MemberId != "brachiate")
+                name = $"placed-{_cycles[mi].MemberId}";
             list.Add((name, BambooIcdCell.ToViewerPose(world)));
         }
         return list;
@@ -187,7 +189,7 @@ public sealed class BambooTrussScan
         var s = BambooIcdMotion.Sample(_keys, t);
         var (track, extras, mi) = WorldAt(t, s.Hold);
         if (mi >= 0 && mi < _cycles.Count)
-            _cell.SetHang(HangAt(_cycles[mi], StripMember(s.Label)));
+            _cell.SetHang(HangAt(_cycles[mi], StripMember(s.Label), t));
         var contacts = _cell.Contacts(s.Q, s.GR, _gL, s.Hold, StripMember(s.Label), track, extras);
         if (contacts.Count > 0)
         {
@@ -198,10 +200,17 @@ public sealed class BambooTrussScan
         _next++;
     }
 
-    static BambooIcdMotion.HangPose HangAt(BambooTrussMotion.CycleBound cycle, string label)
+    static BambooIcdMotion.HangPose HangAt(BambooTrussMotion.CycleBound cycle, string label, double t)
     {
         if (cycle.MemberId == "brachiate")
-            return cycle.PlaceHang; // entire walk segment hangs on the both-ends-fixed baseL upright
+        {
+            // Walk along the both-ends-fixed baseL rail: Y goes WalkHangY0 → WalkHangY1 → WalkHangY0.
+            var span = Math.Max(1e-9, cycle.T1 - cycle.T0);
+            var u = Math.Clamp((t - cycle.T0) / span, 0, 1);
+            var tri = u <= 0.5 ? (u * 2) : (2 - u * 2);
+            var y = BambooTrussLayout.WalkHangY0 + tri * (BambooTrussLayout.WalkHangY1 - BambooTrussLayout.WalkHangY0);
+            return BambooTrussLayout.WalkHangAt(y);
+        }
         if (label is "Transfer" or "Hold" or "Lower" or "Open" or "Depart" or "Retract" or "place:hold" or "place:release")
             return cycle.PlaceHang;
         return cycle.PickHang;
