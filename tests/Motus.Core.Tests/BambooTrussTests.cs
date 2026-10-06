@@ -26,21 +26,18 @@ public class BambooTrussTests
     }
 
     [Fact]
-    public void Layout_IsTwoTrianglesWithSharedMiddleEdge_AndHalfMetreCanes()
+    public void Layout_IsTwoTrianglesWithSharedMiddleEdge()
     {
-        Assert.Equal(0.5, BambooTrussLayout.StrutLength, 9);
         Assert.Equal(5, BambooTrussLayout.Members.Count);
         Assert.Equal(4, BambooTrussLayout.FootNodes.Length);
         var ids = BambooTrussLayout.Members.Select(m => m.Id).ToArray();
         Assert.Equal(new[] { "baseL", "baseR", "sep", "diagL", "diagR" }, ids);
-        Assert.All(BambooTrussLayout.Members, m => Assert.Equal(-90, m.Place.PitchDeg, 9));
-        Assert.True(BambooTrussLayout.HangForMemberIndex(0).IsPole);
-        Assert.True(BambooTrussLayout.HangForMemberIndex(1).IsPole);
-        var walk = BambooTrussLayout.WalkHang;
-        Assert.False(walk.IsPole);
-        Assert.Equal(BambooTrussLayout.Members[0].Place.X + BambooTrussLayout.WalkHangOffsetX, walk.X, 9);
-        Assert.Equal(BambooTrussLayout.Members[0].Place.Z + BambooTrussLayout.WalkHangOffsetZ, walk.Z, 9);
-        Assert.Equal(BambooTrussLayout.WalkHangY, walk.Y, 9);
+        // Shared upright is B–C; bases share B; diags meet at C.
+        var sep = BambooTrussLayout.Members.First(m => m.Id == "sep");
+        Assert.Equal(0, sep.EdgeA.X, 9);
+        Assert.Equal(BambooTrussLayout.FootZ0, sep.EdgeA.Z, 9);
+        Assert.Equal(0, sep.EdgeB.X, 9);
+        Assert.Equal(BambooTrussLayout.FootZ0 + BambooTrussLayout.FootH, sep.EdgeB.Z, 9);
     }
 
     [Fact]
@@ -64,11 +61,11 @@ public class BambooTrussTests
     [Fact]
     public void StoreToFirstMember_PathIsCollisionFree_UnderMotus()
     {
+        // Only the first store→baseL cycle — a clear path must validate.
         var tasks = BambooTrussMotion.DefaultTasks().Take(2).ToList();
         var built = Build(tasks);
         Assert.Single(built.Cycles);
         Assert.Equal("baseL", built.Cycles[0].MemberId);
-        Assert.True(built.Cycles[0].Hang.IsPole);
 
         var scan = new BambooTrussScan(Cell, built.Keys, built.Cycles, BambooTrussLayout.Members, maxStepDeg: 0.5).RunToEnd();
         Assert.Null(scan.TrackMiss);
@@ -82,8 +79,10 @@ public class BambooTrussTests
     public void StoreToFirstMember_CollidingGraspNudge_FailsWithNamedContact()
     {
         var tasks = BambooTrussMotion.DefaultTasks().Take(2).ToList();
+        // Aim the grasp into the strut / neighbours — Motus must stop and name the hit.
         tasks[0].Planes.First(p => p.Name == "grasp").YMm = -1.5;
         var built = BambooTrussMotion.Build(tasks);
+        // Motion may still build (floor heuristics are preferences); collision is Motus-only.
         Assert.True(string.IsNullOrEmpty(built.Error), built.Error);
 
         var scan = new BambooTrussScan(Cell, built.Keys, built.Cycles, BambooTrussLayout.Members, maxStepDeg: 0.5).RunToEnd();
@@ -104,14 +103,10 @@ public class BambooTrussTests
     [Fact]
     public void FullTruss_PathIsCollisionFree_UnderMotus()
     {
+        // All five store→member cycles concatenated, each later cycle with every earlier member lying in the
+        // Motus scene as a named obstacle (placed-*), plus pole, ground, mount and self.
         var built = Build();
-        // Five members + brachiate walk on both-ends-fixed baseL.
-        Assert.Equal(6, built.Cycles.Count);
-        Assert.Equal("brachiate", built.Cycles[1].MemberId);
-        Assert.False(built.Cycles[1].PlaceHang.IsPole);
-        Assert.Equal(BambooTrussLayout.WalkHang.X, built.Cycles[1].PlaceHang.X, 9);
-        Assert.Equal(BambooTrussLayout.WalkHang.Z, built.Cycles[1].PlaceHang.Z, 9);
-        Assert.Contains(built.Keys, k => k.Label.StartsWith("brachiate:", StringComparison.Ordinal));
+        Assert.Equal(5, built.Cycles.Count);
 
         var scan = new BambooTrussScan(Cell, built.Keys, built.Cycles, BambooTrussLayout.Members, maxStepDeg: 0.5).RunToEnd();
         Assert.Null(scan.TrackMiss);
@@ -124,30 +119,34 @@ public class BambooTrussTests
     [Fact]
     public void FullTruss_EveryCaneIsReleasedExactlyOnItsMember()
     {
+        // The placed-* obstacles later cycles collide with must be where the gripper really let go.
         var built = Build();
         var scan = new BambooTrussScan(Cell, built.Keys, built.Cycles, BambooTrussLayout.Members, maxStepDeg: 0.5);
         Assert.Null(scan.TrackMiss);
-        foreach (var c in built.Cycles)
+        for (var i = 0; i < built.Cycles.Count; i++)
         {
-            if (c.MemberId == "brachiate") continue;
-            var member = BambooTrussLayout.Members.First(m => m.Id == c.MemberId);
-            var t = c.T1 - 1e-7;
+            var c = built.Cycles[i];
+            var member = BambooTrussLayout.Members[i];
+            var t = c.T1 - 1e-7; // Retract of this cycle: cane released, jaw open
             var s = BambooIcdMotion.Sample(built.Keys, t);
             Assert.Equal(2, s.Hold);
             var active = scan.StrutPoses(t, s.Hold, s.Q).Single(p => p.Name == $"placed-{member.Id}");
             var want = BambooIcdCell.ToViewerPose(BambooIcdCell.PlacementWorld(member.Place));
             for (var k = 0; k < 3; k++)
                 Assert.True(Math.Abs(active.Pose[k] - want[k]) < 1e-3, $"{member.Id}: released position off by {Math.Abs(active.Pose[k] - want[k]) * 1000:F2} mm (axis {k})");
+            // Same cane axis (canes are symmetric: ±).
             var a = AxisOf(active.Pose); var b = AxisOf(want);
             Assert.True(Math.Abs(a.X * b.X + a.Y * b.Y + a.Z * b.Z) > Math.Cos(2 * Math.PI / 180), $"{member.Id}: released cane axis differs");
-            // Vertical upright.
-            Assert.True(Math.Abs(a.Y) > 0.98, $"{member.Id}: cane should stand vertical");
+            // Lying flat on the ground, not intersecting it.
+            Assert.True(Math.Abs(a.Y) < 0.02, $"{member.Id}: cane should lie horizontal");
+            Assert.True(active.Pose[1] > BambooIcdCell.StrutRadius, $"{member.Id}: cane below ground");
         }
     }
 
     [Fact]
     public void FullTruss_PlacedMembersAreLiveMotusObstacles()
     {
+        // Aim the last cane onto an already placed member: Motus must stop on a placed-* member in that cycle.
         var members = BambooTrussLayout.Members.ToList();
         var last = members[^1];
         members[^1] = last with { Place = members[1].Place };
@@ -161,18 +160,16 @@ public class BambooTrussTests
     }
 
     [Fact]
-    public void Layout_UprightsAreReachable_AndNeverTouch()
+    public void Layout_CanesLieWithinStraightDownReach_AndNeverTouch()
     {
         var all = BambooTrussLayout.Members.Select(m => (Id: m.Id, P: m.Place)).Append((Id: "store", P: BambooTrussLayout.Store)).ToList();
-        for (var i = 0; i < BambooTrussLayout.Members.Count; i++)
+        foreach (var (id, p) in all)
         {
-            var m = BambooTrussLayout.Members[i];
-            Assert.NotEmpty(BambooIcdMotion.IkSolveAxis(m.Place.X, m.Place.Y, m.Place.Z, m.Place.PitchDeg, m.Place.Axis));
-            Assert.True(m.Place.Y - BambooTrussLayout.StrutLength / 2 > -0.002, $"{m.Id} bottom below ground");
+            Assert.Equal(0, p.PitchDeg, 9);
+            Assert.NotEmpty(BambooIcdMotion.IkSolveAxis(p.X, p.Y, p.Z, 0, p.Axis));
+            Assert.True(p.Y - BambooIcdCell.StrutRadius > 0, $"{id} must rest above the ground slab");
         }
-        Assert.NotEmpty(BambooIcdMotion.IkSolveAxis(
-            BambooTrussLayout.Store.X, BambooTrussLayout.Store.Y, BambooTrussLayout.Store.Z, 0, BambooTrussLayout.Store.Axis));
-
+        // Axis-to-axis distance between every pair of canes (capsule bound) exceeds two radii.
         for (var i = 0; i < all.Count; i++)
         for (var j = i + 1; j < all.Count; j++)
         {
@@ -181,17 +178,37 @@ public class BambooTrussTests
         }
     }
 
+    private static (double X, double Y, double Z) AxisOf(double[] pose7)
+    {
+        // Local Z of quaternion (x, y, z, w) at pose[3..6].
+        double x = pose7[3], y = pose7[4], z = pose7[5], w = pose7[6];
+        return (2 * (x * z + w * y), 2 * (y * z - w * x), 1 - 2 * (x * x + y * y));
+    }
+
+    private static double SegmentDistance(BambooIcdCell.StrutPlacement a, BambooIcdCell.StrutPlacement b, double len)
+    {
+        var ua = a.Axis; var ub = b.Axis;
+        var best = double.MaxValue;
+        for (var i = 0; i <= 200; i++)
+        for (var j = 0; j <= 200; j++)
+        {
+            var sa = (i / 200.0 - 0.5) * len; var sb = (j / 200.0 - 0.5) * len;
+            var dx = a.X + ua.X * sa - (b.X + ub.X * sb);
+            var dy = a.Y + ua.Y * sa - (b.Y + ub.Y * sb);
+            var dz = a.Z + ua.Z * sa - (b.Z + ub.Z * sb);
+            best = Math.Min(best, Math.Sqrt(dx * dx + dy * dy + dz * dz));
+        }
+        return best;
+    }
+
     [Fact]
     public void FullTrussMotion_BuildsFiveCycles()
     {
         var built = Build();
-        Assert.Equal(6, built.Cycles.Count);
-        Assert.Equal(
-            new[] { "baseL", "brachiate", "baseR", "sep", "diagL", "diagR" },
-            built.Cycles.Select(c => c.MemberId));
+        Assert.Equal(5, built.Cycles.Count);
+        Assert.Equal(BambooTrussLayout.Members.Select(m => m.Id), built.Cycles.Select(c => c.MemberId));
         Assert.Equal(0, built.Cycles[0].T0, 9);
         Assert.Equal(1, built.Cycles[^1].T1, 9);
-        Assert.False(built.Cycles[1].PlaceHang.IsPole);
     }
 
     [Fact]
@@ -213,31 +230,4 @@ public class BambooTrussTests
         Assert.Equal(planar[0][0], spatial[0][0], 6);
         Assert.Equal(planar[0][1], spatial[0][1], 6);
     }
-
-    private static (double X, double Y, double Z) AxisOf(double[] pose7)
-    {
-        double x = pose7[3], y = pose7[4], z = pose7[5], w = pose7[6];
-        return (2 * (x * z + w * y), 2 * (y * z - w * x), 1 - 2 * (x * x + y * y));
-    }
-
-    private static double SegmentDistance(BambooIcdCell.StrutPlacement a, BambooIcdCell.StrutPlacement b, double len)
-    {
-        var ua = a.Axis; var ub = b.Axis;
-        var best = double.MaxValue;
-        for (var i = 0; i <= 200; i++)
-        for (var j = 0; j <= 200; j++)
-        {
-            var sa = (i / 200.0 - 0.5) * len; var sb = (j / 200.0 - 0.5) * len;
-            var dx = a.X + ua.X * sa - (b.X + ub.X * sb);
-            var dy = a.Y + ua.Y * sa - (b.Y + ub.Y * sb);
-            var dz = a.Z + ua.Z * sa - (b.Z + ub.Z * sb);
-            best = Math.Min(best, Math.Sqrt(dx * dx + dy * dy + dz * dz));
-        }
-        return best;
-    }
-
-
-
-
-
 }

@@ -76,32 +76,26 @@ Open `http://127.0.0.1:5268/bamboo` (single strut pick/place) or
 
 - **Store:** single feed at the default ICD pick pose; one cane is presented per cycle (waiting stock is
   not in the Motus scene).
-- **Truss:** two equilateral triangles A–B–C and B–D–C on a compact ground footprint, sharing B–C.
-  Each member is a **0.5 m vertical upright** (pitch −90°) placed in a compact, Motus-reachable band
-  near its edge (not at the exact midpoint: the 0.5 m feed cane pitches up in the x = 0 plane, so every
-  upright keeps |x| ≥ 0.05). Uprights are spread in azimuth about the pole so no later member sits in the
-  radial "shadow" of an earlier one (`baseR` at (0.16, 0.18) lets `diagR` be reached without the arm
-  crossing it).
-- **Brachiation:** after `baseL` is planted it is fixed at both ends (ground stake + pole sleeve where
-  the cane crosses the support pole); `BambooTrussLayout.WalkHang` names that rail (L-grip clamp offset
-  beside the upright so Home is Motus-clear). The auto path hang-walks along that rail between `baseL`
-  and `baseR` (`brachiate` cycle: Home posture, hang Y `WalkHangY0`→`WalkHangY1`→`WalkHangY0`). Place
-  hangs for the five members stay on the pole. Unsupported / single-end canes are never used as walk rails.
-- **Motion:** pick from the feed, pitch the cane upright through obstacle-aware vias (`Pitch`), thread
-  between planted neighbours with the cane vertical (`Swing`), place, return Home; then brachiate on
-  both-ends-fixed `baseL` before the remaining members.
+- **Truss:** two equilateral triangles A–B–C and B–D–C lying flat on the ground, sharing B–C (a 60°
+  rhombus). Each member is a **horizontal cane lying on its edge** (pitch 0, yaw along the edge), ending
+  a node gap short of every node so canes never touch — a real edge truss, not five upright poles.
+- **Cane length:** 0.10 m. A flat two-triangle edge truss of 0.5 m canes cannot keep all five midpoints
+  Motus-reachable from the pole hang while clearing the 0.5 m store feed (medial-triangle spacing and
+  store capsule). The hung arm grips ground canes only within ≈0.095 m of the pole. The page loads the
+  cell with this length so drawn cane == collided cane. `/bamboo` keeps the 0.30 m ICD strut.
+- **Walk / brachiate:** not used — every place is reachable from the support-pole hang, and ground edge
+  members are not double-fixed elevated rails. Hang relocation stays on the pole only.
+- **Motion:** grip straight down, lift vertically, swing at transit height, lower vertically, release,
+  back off, Home. θ5 rolls the jaw onto each cane's direction.
 - **Tasks:** Motus string-identity pick/place pairs (`object` = member id) build members in order.
 - **Collision:** Motus.NET vs pole, ground, mount, placed members, the active cane, held cane, and self.
-  Drawn cane length == collided cane length. Full five-cycle path Motus-clear, LastClearT = 1.0
+  Full five-cycle path Motus-clear, LastClearT = 1.0
   (`BambooTrussTests.FullTruss_PathIsCollisionFree_UnderMotus`).
 
 ## What still differs from the HTML preview
 
 - The planner keeps the HTML's point-model floor heuristics only as IK-branch *preferences*
-  (`FloorPenalty`); they never veto a path. Collision verdicts are Motus-only. On `/bamboo-truss` the
-  linker additionally rejects transits whose carried cane / gripper envelope sweeps a planted upright and
-  penalises arm-skeleton grazes — a planning filter only; the Motus scan remains the judge (and if no
-  filtered chain exists the plain transit is built so Motus names the contact).
+  (`FloorPenalty`); they never veto a path. Collision verdicts are Motus-only.
 - ICD planar IK for play lives in `BambooIcdMotion` (C#); `BambooIcdIk` exposes it as a Motus
   `IInverseKinematics` so `TaskPathValidator` can validate bamboo task paths.
 - The grasp plane cannot be driven much lower than −1.5 mm: at −2 mm it is outside the arm's reach.
