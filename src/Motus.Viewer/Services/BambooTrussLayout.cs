@@ -13,12 +13,14 @@ namespace Motus.Viewer.Services;
 /// re-approach after baseL (hang-side / Motus-filtered vias).
 /// </para>
 /// <para>
-/// <b>Motus note:</b> sep / diags / five-triangle still leave on-structure WalkHang reach at 0.5 m
-/// (arm hangs down; chord hang is too low for apex mids). Lower chord baseL+baseR is the target
-/// Motus-clear prefix without a hang rod. /bamboo stays 0.30 m.
+/// After baseL+baseR the lower chord is both-ends-fixed; the auto path brachiates onto
+/// <see cref="WalkHang"/> (outboard L-grip at A — Motus-clear transfer from the dock).
+/// <b>Motus limit:</b> sep / diags / five-triangle stay jaw-axis unreachable from every Motus-clear
+/// on-chord hang (arm hangs down; apex mids sit above / too far laterally). Motus-clear members:
+/// baseL+baseR only. /bamboo stays 0.30 m.
 /// </para>
 /// <para>
-/// Build order: baseL <c>/</c> → baseR <c>_</c>. Walk rails after both planted (both-ends-fixed chord).
+/// Build order: baseL <c>/</c> → baseR <c>_</c> → brachiate onto the double-fixed chord.
 /// </para>
 /// </summary>
 public static class BambooTrussLayout
@@ -60,20 +62,78 @@ public static class BambooTrussLayout
 
     /// <summary>L-grip clamp offset from a walk-rail cane axis (metres).</summary>
     public const double WalkHangOffset = 0.03;
+    /// <summary>Elevated hang Y used while transferring from <see cref="StartDock"/> onto the chord.</summary>
+    public const double BrachiateViaY = 0.42;
+    /// <summary>Hang-side Z for the elevated transfer vias (metres).</summary>
+    public const double BrachiateViaZ = -0.05;
     /// <summary>
-    /// Walk-rail hang on the planted lower chord near B (both ends fixed: A/D anchors + B junction).
-    /// Offset beside the cane so Home stays Motus-clear (L-grip clamp, not through the member).
+    /// Walk-rail hang on the planted lower chord at A (both ends fixed: A/D anchors + B junction).
+    /// Outboard −X L-grip so Home is Motus-clear and the dock→chord hang transfer stays Motus-clear
+    /// (inboard / −Z offsets leave a Motus collision band on the transfer).
     /// </summary>
     public static BambooIcdMotion.HangPose WalkHang
     {
         get
         {
-            // Near B on baseL: parametric t≈0.85 along A→B.
-            var a = FootNodes[0]; var b = FootNodes[1];
-            const double t = 0.85;
-            var x = a.X + (b.X - a.X) * t;
-            var y = a.Y + (b.Y - a.Y) * t;
-            return new BambooIcdMotion.HangPose(x + WalkHangOffset, y + WalkHangOffset, PlaneZ - WalkHangOffset);
+            var a = FootNodes[0];
+            return new BambooIcdMotion.HangPose(a.X - WalkHangOffset, a.Y, PlaneZ);
+        }
+    }
+
+    /// <summary>Outboard L-grip on baseL at parametric t along A→B (0 at A, 1 at B).</summary>
+    public static BambooIcdMotion.HangPose WalkHangAt(double t)
+    {
+        var a = FootNodes[0]; var b = FootNodes[1];
+        t = Math.Clamp(t, 0, 1);
+        var x = a.X + (b.X - a.X) * t;
+        var y = a.Y + (b.Y - a.Y) * t;
+        return new BambooIcdMotion.HangPose(x - WalkHangOffset, y, PlaneZ);
+    }
+
+    /// <summary>
+    /// Motus-clear hang waypoints for brachiating from <see cref="StartDock"/> onto
+    /// <see cref="WalkHang"/> and a short along-chord walk (Home posture throughout).
+    /// </summary>
+    public static IReadOnlyList<BambooIcdMotion.HangPose> BrachiateHangPath
+    {
+        get
+        {
+            var w = WalkHang;
+            return
+            [
+                StartDock,
+                new BambooIcdMotion.HangPose(0, BrachiateViaY, BrachiateViaZ),
+                new BambooIcdMotion.HangPose(w.X, BrachiateViaY, BrachiateViaZ),
+                w,
+                WalkHangAt(0.5),
+                w
+            ];
+        }
+    }
+
+    /// <summary>Notional sep / diag place poses (not in <see cref="Members"/> — Motus-unreachable from WalkHang).</summary>
+    public static BambooIcdCell.StrutPlacement NotionalSep
+    {
+        get
+        {
+            var b = FootNodes[1]; var c = FootNodes[3];
+            return AlongEdge((b.X, b.Y, b.Z), (c.X, c.Y, c.Z));
+        }
+    }
+    public static BambooIcdCell.StrutPlacement NotionalDiagL
+    {
+        get
+        {
+            var a = FootNodes[0]; var c = FootNodes[3];
+            return AlongEdge((a.X, a.Y, a.Z), (c.X, c.Y, c.Z));
+        }
+    }
+    public static BambooIcdCell.StrutPlacement NotionalDiagR
+    {
+        get
+        {
+            var d = FootNodes[2]; var c = FootNodes[3];
+            return AlongEdge((d.X, d.Y, d.Z), (c.X, c.Y, c.Z));
         }
     }
 
@@ -121,7 +181,7 @@ public static class BambooTrussLayout
         var A = (-HalfSpan, FootY0 + Height / 2, PlaneZ);
         var B = (0.0, FootY0, PlaneZ);
         var D = (HalfSpan, FootY0 + Height / 2, PlaneZ);
-        // Motus-clear 0.5 m lower-chord prefix (sep/diags leave WalkHang reach — see type summary).
+        // Motus-clear 0.5 m lower-chord prefix (sep/diags Motus-unreachable from WalkHang — see type summary).
         var edges = new (string Id, string Label, string Glyph, (double X, double Y, double Z) P, (double X, double Y, double Z) Q)[]
         {
             ("baseL", "base left", "/", A, B),
@@ -192,7 +252,7 @@ public static class BambooTrussLayout
         }),
         anchors = AnchorPads.Select(a => new { x = a.X, z = a.Z, half = AnchorPadHalf }),
         // Intended but Motus-unreachable at 0.5 m without a hang rod (see type summary).
-        motusLimit = "lower chord baseL+baseR at 0.5 m (no hang rod); sep/diags/five-triangle leave WalkHang reach"
+        motusLimit = "lower chord baseL+baseR Motus-clear (no hang rod); brachiate onto outboard WalkHang at A; sep/diags/five-triangle jaw-axis unreachable from on-chord hangs"
     };
 
     public static object StoreDescription() => new

@@ -50,9 +50,19 @@ public sealed class BambooTrussScan
         _tracks = new List<BambooIcdCell.StrutTrack>();
         for (var i = 0; i < _cycles.Count; i++)
         {
+            if (_cycles[i].MemberId == "brachiate")
+            {
+                // Empty-hand hang-walk: reuse store track with Hold=0 keys (no cane in jaws).
+                var cycleKeys = KeysInCycle(i);
+                var brachTrack = cell.TrackStrut(cycleKeys, BambooTrussLayout.Store);
+                cell.SetHang(_cycles[i].PickHang);
+                _tracks.Add(brachTrack);
+                continue;
+            }
             var member = _members.First(m => m.Id == _cycles[i].MemberId);
-            var cycleKeys = KeysInCycle(i);
-            var track = cell.TrackStrut(cycleKeys, member.Store);
+            var memberKeys = KeysInCycle(i);
+            cell.SetHang(_cycles[i].PickHang);
+            var track = cell.TrackStrut(memberKeys, member.Store);
             // Held transit uses the store-grasp jaw offset; snap the Motus release pose to the designed
             // edge place so later cycles collide with the true member (pitch changes store→vertical plane).
             if (track.Miss is null && track.Released is not null)
@@ -66,6 +76,7 @@ public sealed class BambooTrussScan
             }
             _tracks.Add(track);
         }
+        cell.SetHang(BambooTrussLayout.StartDock);
         BuildSamples(maxStepDeg);
     }
 
@@ -150,15 +161,16 @@ public sealed class BambooTrussScan
         WorldAt(double t, int hold)
     {
         var mi = BambooTrussMotion.MemberIndexAt(_cycles, t);
+        var placedCount = 0;
+        for (var ci = 0; ci < mi; ci++)
+            if (_cycles[ci].MemberId != "brachiate") placedCount++;
         var extras = new List<(string, BambooIcdCell.StrutPlacement)>();
         for (var i = 0; i < _members.Count; i++)
         {
             var m = _members[i];
             // Waiting stock is not Motus-present yet (single feed). Only prior placements collide.
-            if (i < mi)
+            if (i < placedCount)
                 extras.Add(($"placed-{m.Id}", m.Place));
-            // i == mi: active Track owns rest / held / released (named "strut" in the scene).
-            // i > mi: not yet fed from the store.
         }
         var track = mi >= 0 && mi < _tracks.Count ? _tracks[mi] : _tracks[0];
         return (track, extras, mi);
@@ -172,10 +184,11 @@ public sealed class BambooTrussScan
         foreach (var (name, pose) in extras)
             list.Add((name, BambooIcdCell.ToViewerPose(BambooIcdCell.PlacementWorld(pose))));
 
-        if (mi >= 0 && mi < _tracks.Count)
+        if (mi >= 0 && mi < _tracks.Count && mi < _cycles.Count && _cycles[mi].MemberId != "brachiate")
         {
+            _cell.SetHang(hold >= 1 ? _cycles[mi].PlaceHang : _cycles[mi].PickHang);
             var world = _cell.StrutWorld(track, hold, qDeg);
-            var name = hold == 2 && mi < _members.Count ? $"placed-{_members[mi].Id}" : BambooIcdCell.Strut;
+            var name = hold == 2 ? $"placed-{_cycles[mi].MemberId}" : BambooIcdCell.Strut;
             list.Add((name, BambooIcdCell.ToViewerPose(world)));
         }
         return list;
@@ -185,7 +198,9 @@ public sealed class BambooTrussScan
     {
         var t = _ts[_next];
         var s = BambooIcdMotion.Sample(_keys, t);
-        var (track, extras, _) = WorldAt(t, s.Hold);
+        var (track, extras, mi) = WorldAt(t, s.Hold);
+        if (mi >= 0 && mi < _cycles.Count)
+            _cell.SetHang(HangAt(_cycles[mi], StripMember(s.Label), t));
         var contacts = _cell.Contacts(s.Q, s.GR, _gL, s.Hold, StripMember(s.Label), track, extras);
         if (contacts.Count > 0)
         {
@@ -194,6 +209,30 @@ public sealed class BambooTrussScan
         }
         LastClearT = t;
         _next++;
+    }
+
+    static BambooIcdMotion.HangPose HangAt(BambooTrussMotion.CycleBound cycle, string label, double t)
+    {
+        if (cycle.MemberId == "brachiate")
+        {
+            var path = BambooTrussLayout.BrachiateHangPath;
+            if (path.Count == 0) return BambooTrussLayout.WalkHang;
+            if (path.Count == 1) return path[0];
+            var span = Math.Max(1e-9, cycle.T1 - cycle.T0);
+            var u = Math.Clamp((t - cycle.T0) / span, 0, 1);
+            var x = u * (path.Count - 1);
+            var i = Math.Min((int)x, path.Count - 2);
+            var f = x - i;
+            var a = path[i]; var b = path[i + 1];
+            return new BambooIcdMotion.HangPose(
+                a.X + (b.X - a.X) * f,
+                a.Y + (b.Y - a.Y) * f,
+                a.Z + (b.Z - a.Z) * f);
+        }
+        if (label is "Transfer" or "Hold" or "Lower" or "Open" or "Depart" or "Retract"
+            or "place:hold" or "place:release" or "Swing" or "Pitch")
+            return cycle.PlaceHang;
+        return cycle.PickHang;
     }
 
     public string? TrackMiss =>

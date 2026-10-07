@@ -13,6 +13,10 @@ public static class BambooTrussMotion
         public required string MemberId { get; init; }
         public double T0 { get; init; }
         public double T1 { get; init; }
+        /// <summary>Hang while picking / empty-hand (start dock unless brachiating).</summary>
+        public BambooIcdMotion.HangPose PickHang { get; init; } = BambooTrussLayout.StartDock;
+        /// <summary>Hang while carrying / placing (start dock; brachiate ends on <see cref="BambooTrussLayout.WalkHang"/>).</summary>
+        public BambooIcdMotion.HangPose PlaceHang { get; init; } = BambooTrussLayout.StartDock;
     }
 
     public sealed class TrussBuild
@@ -56,6 +60,7 @@ public static class BambooTrussMotion
             MotusCell = cell;
             _planTrack = null;
         }
+        cell.SetHang(BambooTrussLayout.StartDock);
     }
 
     static bool ReleaseOverlapsPlaced()
@@ -209,6 +214,7 @@ public static class BambooTrussMotion
                 Keys = HomeKeys()
             };
 
+        TryCell()?.SetHang(BambooTrussLayout.StartDock);
         var allKeys = new List<BambooIcdMotion.MotionKey>();
         var cycles = new List<CycleBound>();
         var n = pairs.Count;
@@ -218,13 +224,19 @@ public static class BambooTrussMotion
             Placed = pairs.Take(i)
                 .Select(p => BambooTrussLayout.Members.First(m => m.Id == p.MemberId).Place)
                 .ToList();
+            TryCell()?.SetHang(BambooTrussLayout.StartDock);
             var one = BuildOne(pick, place, memberId, afterPlaced: i > 0);
             if (!string.IsNullOrEmpty(one.Error))
                 return new TrussBuild { Error = $"{memberId}: {one.Error}", Tasks = tasks.ToList(), Keys = HomeKeys() };
 
             var t0 = i / (double)n;
             var t1 = (i + 1) / (double)n;
-            cycles.Add(new CycleBound { MemberId = memberId, T0 = t0, T1 = t1 });
+            cycles.Add(new CycleBound
+            {
+                MemberId = memberId, T0 = t0, T1 = t1,
+                PickHang = BambooTrussLayout.StartDock,
+                PlaceHang = BambooTrussLayout.StartDock
+            });
             foreach (var k in one.Keys)
             {
                 allKeys.Add(new BambooIcdMotion.MotionKey
@@ -238,10 +250,15 @@ public static class BambooTrussMotion
             }
         }
 
+        // After the lower chord is both-ends-fixed, brachiate onto WalkHang (sep/diags stay unreachable).
+        if (n >= 2)
+            InsertBrachiate(allKeys, cycles);
+
         for (var i = 1; i < allKeys.Count; i++)
             if (allKeys[i].T <= allKeys[i - 1].T)
                 allKeys[i].T = allKeys[i - 1].T + 1e-6;
-        allKeys[^1].T = 1;
+        if (allKeys.Count > 0)
+            allKeys[^1].T = 1;
 
         return new TrussBuild { Error = "", Keys = allKeys, Cycles = cycles, Tasks = tasks.ToList() };
     }
@@ -276,13 +293,19 @@ public static class BambooTrussMotion
             Placed = pairs.Take(i)
                 .Select(p => BambooTrussLayout.Members.First(m => m.Id == p.MemberId).Place)
                 .ToList();
+            TryCell()?.SetHang(BambooTrussLayout.StartDock);
             var one = BuildOne(pick, place, memberId, afterPlaced: i > 0);
             if (!string.IsNullOrEmpty(one.Error))
                 return new TrussBuild { Error = $"{memberId}: {one.Error}", Tasks = tasks.ToList(), Keys = HomeKeys() };
 
             var t0 = i / (double)n;
             var t1 = (i + 1) / (double)n;
-            cycles.Add(new CycleBound { MemberId = memberId, T0 = t0, T1 = t1 });
+            cycles.Add(new CycleBound
+            {
+                MemberId = memberId, T0 = t0, T1 = t1,
+                PickHang = BambooTrussLayout.StartDock,
+                PlaceHang = BambooTrussLayout.StartDock
+            });
             foreach (var k in one.Keys)
             {
                 allKeys.Add(new BambooIcdMotion.MotionKey
@@ -295,6 +318,8 @@ public static class BambooTrussMotion
                 });
             }
         }
+        if (n >= 2)
+            InsertBrachiate(allKeys, cycles);
         if (allKeys.Count > 0)
         {
             for (var i = 1; i < allKeys.Count; i++)
@@ -303,6 +328,106 @@ public static class BambooTrussMotion
             allKeys[^1].T = 1;
         }
         return new TrussBuild { Error = "", Keys = allKeys, Cycles = cycles, Tasks = tasks.ToList() };
+    }
+
+    /// <summary>
+    /// After baseL+baseR the lower chord is both-ends-fixed. Append a Motus-clear hang-walk from
+    /// <see cref="BambooTrussLayout.StartDock"/> onto <see cref="BambooTrussLayout.WalkHang"/> (Home
+    /// posture; scan interpolates hang along <see cref="BambooTrussLayout.BrachiateHangPath"/>).
+    /// </summary>
+    static void InsertBrachiate(List<BambooIcdMotion.MotionKey> keys, List<CycleBound> cycles)
+    {
+        if (cycles.Count < 2) return;
+        var memberIds = cycles.Select(c => c.MemberId).ToHashSet(StringComparer.Ordinal);
+        if (!memberIds.Contains("baseL") || !memberIds.Contains("baseR")) return;
+
+        // Snapshot each cycle's keys normalised to [0,1].
+        var memberKeys = new List<List<BambooIcdMotion.MotionKey>>();
+        foreach (var c in cycles)
+        {
+            var span = Math.Max(1e-9, c.T1 - c.T0);
+            var prefix = c.MemberId + ":";
+            var list = new List<BambooIcdMotion.MotionKey>();
+            foreach (var k in keys)
+            {
+                if (!k.Label.StartsWith(prefix, StringComparison.Ordinal)) continue;
+                if (k.T < c.T0 - 1e-9 || k.T > c.T1 + 1e-9) continue;
+                list.Add(new BambooIcdMotion.MotionKey
+                {
+                    T = (k.T - c.T0) / span,
+                    Label = k.Label,
+                    Q = k.Q.ToArray(),
+                    GR = k.GR,
+                    Hold = k.Hold
+                });
+            }
+            if (list.Count > 0) { list[0].T = 0; list[^1].T = 1; }
+            memberKeys.Add(list);
+        }
+
+        const double brachFrac = 0.10;
+        var n = cycles.Count;
+        var memberShare = (1.0 - brachFrac) / n;
+        var newCycles = new List<CycleBound>();
+        var newKeys = new List<BambooIcdMotion.MotionKey>();
+
+        void StampMember(int mi, double t0, double t1)
+        {
+            var c = cycles[mi];
+            newCycles.Add(new CycleBound
+            {
+                MemberId = c.MemberId, T0 = t0, T1 = t1,
+                PickHang = c.PickHang, PlaceHang = c.PlaceHang
+            });
+            var span = t1 - t0;
+            foreach (var k in memberKeys[mi])
+            {
+                newKeys.Add(new BambooIcdMotion.MotionKey
+                {
+                    T = t0 + k.T * span,
+                    Label = k.Label,
+                    Q = k.Q.ToArray(),
+                    GR = k.GR,
+                    Hold = k.Hold
+                });
+            }
+        }
+
+        for (var mi = 0; mi < n; mi++)
+        {
+            var t0 = mi * memberShare;
+            var t1 = (mi + 1) * memberShare;
+            StampMember(mi, t0, t1);
+        }
+        var b0 = n * memberShare;
+        var b1 = 1.0;
+        newCycles.Add(new CycleBound
+        {
+            MemberId = "brachiate",
+            T0 = b0,
+            T1 = b1,
+            PickHang = BambooTrussLayout.StartDock,
+            PlaceHang = BambooTrussLayout.WalkHang
+        });
+        var path = BambooTrussLayout.BrachiateHangPath;
+        var home = BambooIcdMotion.HomeDeg.ToArray();
+        for (var i = 0; i < path.Count; i++)
+        {
+            var u = path.Count == 1 ? 0.0 : i / (double)(path.Count - 1);
+            newKeys.Add(new BambooIcdMotion.MotionKey
+            {
+                T = b0 + u * (b1 - b0),
+                Label = i == 0 ? "brachiate:Home" : (i == path.Count - 1 ? "brachiate:Home" : "brachiate:Walk"),
+                Q = home.ToArray(),
+                GR = BambooTrussLayout.JawOpenMm,
+                Hold = 0
+            });
+        }
+
+        keys.Clear();
+        keys.AddRange(newKeys);
+        cycles.Clear();
+        cycles.AddRange(newCycles);
     }
 
     static List<BambooIcdMotion.MotionKey> HomeKeys() =>

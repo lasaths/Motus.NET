@@ -79,9 +79,11 @@ Open `http://127.0.0.1:5268/bamboo` (single strut pick/place) or
   `BambooTrussLayout.StrutLength` (**0.5 m**): baseL `/` + baseR `_`. Anchor pads at A and D.
 - **No horizontal hang rod:** `IncludePole = false`. Start dock at legacy hang coordinates for IK;
   Motus-filtered re-approach after baseL (hang-side vias) so the second pick clears planted baseL.
-- **Motus limit at 0.5 m:** sep / diags / five-triangle Warren still leave on-structure WalkHang reach
-  (arm hangs down; chord hang too low for apex). Motus-clear prefix: **baseL + baseR**. `/bamboo` stays 0.30 m.
-- **Build order:** baseL → baseR. Walk on both-ends-fixed lower chord after both planted.
+- **Motus limit at 0.5 m:** sep / diags / five-triangle Warren are jaw-axis unreachable from every
+  Motus-clear on-chord hang (arm hangs down; apex mids above / too far). Motus-clear members:
+  **baseL + baseR**. `/bamboo` stays 0.30 m.
+- **Build order:** baseL → baseR → brachiate onto outboard WalkHang at A (Motus-clear hang transfer;
+  no hang rod). Sep/diags not placed.
 - **Collision:** Motus.NET against ground pads, mount, already-placed members, held strut, and self (no pole).
 
 ## What still differs from the HTML preview

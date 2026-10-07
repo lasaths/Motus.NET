@@ -115,7 +115,7 @@ public class BambooTrussTests
     public void FullTruss_PathIsCollisionFree_UnderMotus()
     {
         var built = Build();
-        Assert.Equal(2, built.Cycles.Count);
+        Assert.Equal(3, built.Cycles.Count); // baseL + baseR + brachiate
 
         var scan = new BambooTrussScan(Cell, built.Keys, built.Cycles, BambooTrussLayout.Members, maxStepDeg: 0.5).RunToEnd();
         Assert.Null(scan.TrackMiss);
@@ -131,11 +131,14 @@ public class BambooTrussTests
         var built = Build();
         var scan = new BambooTrussScan(Cell, built.Keys, built.Cycles, BambooTrussLayout.Members, maxStepDeg: 0.5);
         Assert.Null(scan.TrackMiss);
-        for (var i = 0; i < built.Cycles.Count; i++)
+        var memberCycles = built.Cycles.Where(c => c.MemberId != "brachiate").ToList();
+        Assert.Equal(BambooTrussLayout.Members.Count, memberCycles.Count);
+        for (var i = 0; i < memberCycles.Count; i++)
         {
-            var c = built.Cycles[i];
+            var c = memberCycles[i];
             var member = BambooTrussLayout.Members[i];
-            var t = c.T1 - 1e-7;
+            // Sample just before the cycle ends while Hold=2 (released on member).
+            var t = c.T0 + (c.T1 - c.T0) * 0.99;
             var s = BambooIcdMotion.Sample(built.Keys, t);
             Assert.Equal(2, s.Hold);
             var active = scan.StrutPoses(t, s.Hold, s.Q).Single(p => p.Name == $"placed-{member.Id}");
@@ -243,13 +246,74 @@ public class BambooTrussTests
     }
 
     [Fact]
-    public void FullTrussMotion_BuildsTwoCycles()
+    public void FullTrussMotion_BuildsMemberCycles_ThenBrachiate()
     {
         var built = Build();
-        Assert.Equal(2, built.Cycles.Count);
-        Assert.Equal(BambooTrussLayout.Members.Select(m => m.Id), built.Cycles.Select(c => c.MemberId));
+        Assert.Equal(3, built.Cycles.Count);
+        Assert.Equal(new[] { "baseL", "baseR", "brachiate" }, built.Cycles.Select(c => c.MemberId).ToArray());
         Assert.Equal(0, built.Cycles[0].T0, 9);
         Assert.Equal(1, built.Cycles[^1].T1, 9);
+        Assert.Equal(BambooTrussLayout.StartDock, built.Cycles[0].PickHang);
+        Assert.Equal(BambooTrussLayout.WalkHang, built.Cycles[^1].PlaceHang);
+    }
+
+
+    [Fact]
+    public void WalkHang_IsOutboardLGripAtA_OnDoubleFixedChord()
+    {
+        var a = BambooTrussLayout.FootNodes[0];
+        var w = BambooTrussLayout.WalkHang;
+        Assert.Equal(a.X - BambooTrussLayout.WalkHangOffset, w.X, 9);
+        Assert.Equal(a.Y, w.Y, 9);
+        Assert.Equal(BambooTrussLayout.PlaneZ, w.Z, 9);
+        Assert.Equal(new[] { "baseL", "baseR" }, BambooTrussLayout.WalkableMemberIdsAfter(2));
+        Assert.True(BambooTrussLayout.BrachiateHangPath.Count >= 4);
+        Assert.Equal(BambooTrussLayout.StartDock, BambooTrussLayout.BrachiateHangPath[0]);
+        Assert.Equal(BambooTrussLayout.WalkHang, BambooTrussLayout.BrachiateHangPath[3]);
+    }
+
+    [Fact]
+    public void SepAndDiags_AreJawAxisUnreachable_FromWalkHang()
+    {
+        // Motus-honest blocker: on-chord WalkHang cannot IK-reach apex members at 0.5 m.
+        static bool Ik(BambooIcdCell.StrutPlacement p, BambooIcdMotion.HangPose hang)
+        {
+            foreach (var tilt in new[] { p.PitchDeg, -Math.Abs(p.PitchDeg), 0.0, -40.0, -60.0, -80.0, -90.0, 20.0, 40.0 })
+                if (BambooIcdMotion.IkSolveAxis(p.X, p.Y, p.Z, tilt, p.Axis, hang, BambooTrussMotion.PlaceAxisErrDeg).Count > 0)
+                    return true;
+            return false;
+        }
+        var hang = BambooTrussLayout.WalkHang;
+        Assert.False(Ik(BambooTrussLayout.NotionalSep, hang));
+        Assert.False(Ik(BambooTrussLayout.NotionalDiagL, hang));
+        Assert.False(Ik(BambooTrussLayout.NotionalDiagR, hang));
+        // Along-chord outboard hangs likewise cannot place sep.
+        for (var t = 0.0; t <= 1.0; t += 0.25)
+            Assert.False(Ik(BambooTrussLayout.NotionalSep, BambooTrussLayout.WalkHangAt(t)), $"sep reachable at WalkHangAt({t:F2})");
+    }
+
+    [Fact]
+    public void WalkHang_HomeIsMotusClear_WithChordPlanted()
+    {
+        var home = BambooIcdMotion.HomeDeg.ToArray();
+        var keys = new List<BambooIcdMotion.MotionKey>
+        {
+            new() { T = 0, Label = "Home", Q = home, GR = BambooTrussLayout.JawOpenMm, Hold = 0 },
+            new() { T = 1, Label = "Home", Q = home, GR = BambooTrussLayout.JawOpenMm, Hold = 0 }
+        };
+        var extras = BambooTrussLayout.Members
+            .Select(m => ($"placed-{m.Id}", m.Place)).ToList();
+        try
+        {
+            Cell.SetHang(BambooTrussLayout.WalkHang);
+            var track = Cell.TrackStrut(keys, BambooTrussLayout.Store);
+            Assert.True(Cell.IsClear(home, BambooTrussLayout.JawOpenMm, 24, 0, "Home", track, extras),
+                "WalkHang Home must be Motus-clear with baseL+baseR planted");
+        }
+        finally
+        {
+            Cell.SetHang(BambooTrussLayout.StartDock);
+        }
     }
 
     [Fact]
