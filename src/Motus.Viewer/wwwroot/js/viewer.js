@@ -436,12 +436,14 @@
 
   /**
    * Apply pose from Motus.NET / Blazor.
-   * payload: { q:[5], gL, gR, strut:[...], struts?:[{name,pose:[7]}], axesVisible, hitParts?:[string] }
+   * payload: { q:[5], hang?:{x,y,z}, gL, gR, strut:[...], struts?:[{name,pose:[7]}], axesVisible, hitParts?:[string] }
    * hitParts are Motus contact body names (URDF collision names, 'pole', 'strut', 'ground', mount parts).
    */
   window.setBambooPose = function (payloadJson) {
     if (!ready) return;
     var p = typeof payloadJson === 'string' ? JSON.parse(payloadJson) : payloadJson;
+    // Brachiation: the L-grip mount (and the whole arm under it) moves to the Motus hang pose.
+    if (p.hang && mount && typeof p.hang.x === 'number') mount.position.set(p.hang.x, p.hang.y, p.hang.z);
     if (p.q && p.q.length >= 5) applyJoints(p.q);
     if (typeof p.gL === 'number') setOpening(lNeg, lPos, p.gL);
     if (typeof p.gR === 'number') setOpening(rNeg, rPos, p.gR);

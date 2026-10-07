@@ -148,6 +148,9 @@
     private IReadOnlyList<CollisionContact> _contacts = Array.Empty<CollisionContact>();
     private string _phase = "Home";
     private int _scrub;
+    /// <summary>Exact motion time (0..1); <see cref="_scrub"/> is only the slider's rounded view of it.</summary>
+    private double _t;
+    private BambooTrussPlayback? _playback;
     private int _scrubPct => (int)Math.Round(_scrub / 10.0);
     private bool _isPlaying;
     private bool _manual;
@@ -252,7 +255,7 @@
             _ = BackgroundTrussScan(_trussScan, _scanCts.Token);
         }
         if (apply && !_manual)
-            ApplyTask(_scrub / 1000.0);
+            ApplyTask(_t);
         else if (_manual)
             RunManualCollision();
     }
@@ -260,13 +263,19 @@
     /// <summary>Joint step between Motus checks along the motion (degrees). 0.5° keeps every part from tunnelling.</summary>
     private const double BambooViewerScanStepDeg = 0.5;
 
+    /// <summary>Wall-clock budget per background Motus slice (ms). A fixed sample count could block the
+    /// WASM UI thread for seconds in expensive stretches; a time budget keeps every frame paintable.</summary>
+    private const double ScanSliceMs = 8;
+    /// <summary>Motus budget spent inside each Play frame when playback is waiting on the scan frontier.</summary>
+    private const double PlayScanSliceMs = 10;
+
     private async Task BackgroundTrussScan(BambooTrussScan scan, CancellationToken token)
     {
         try
         {
             while (!token.IsCancellationRequested && !scan.Complete)
             {
-                scan.Step(40);
+                scan.StepFor(ScanSliceMs);
                 await Task.Delay(1, token);
             }
             if (token.IsCancellationRequested || !ReferenceEquals(scan, _trussScan)) return;
@@ -305,6 +314,7 @@
         _gR = sample.GR;
         _hold = sample.Hold;
         _label = sample.Label;
+        _t = t;
         _scrub = (int)Math.Round(t * 1000);
         if (stop is not null)
         {
@@ -326,8 +336,9 @@
     private void RunManualCollision()
     {
         if (_cell is null || _trussScan is null) { _collision = false; return; }
-        var t = _scrub / 1000.0;
+        var t = _t;
         var (track, extras, _) = _trussScan.WorldAt(t, _hold);
+        _cell.SetHang(_trussScan.HangAt(t));
         _contacts = _cell.Contacts(_qDeg, _gR, _gL, _hold, "Manual", track, extras);
         _collision = _contacts.Count > 0;
         _motusState = _collision ? "manual-hit" : "clear";
@@ -346,14 +357,19 @@
         if (!_threeReady || _cell is null) return;
         object? strut = null;
         object? struts = null;
+        object? hang = null;
         if (_trussScan is not null)
         {
-            var poses = _trussScan.StrutPoses(_scrub / 1000.0, _hold, _qDeg);
+            var poses = _trussScan.StrutPoses(_t, _hold, _qDeg);
             struts = poses.Select(p => new { name = p.Name, pose = p.Pose }).ToList();
+            // Brachiation relocates the L-grip mount; draw it where Motus collides it.
+            var h = _trussScan.HangAt(_t);
+            hang = new { x = h.X, y = h.Y, z = h.Z };
         }
         var payload = new
         {
             q = _qDeg,
+            hang,
             gL = _gL,
             gR = _gR,
             strut,
@@ -427,6 +443,7 @@
         await PushPoseAsync();
     }
 
+
     private async Task OnAxesToggle(ChangeEventArgs e)
     {
         _axesVisible = e.Value is bool b ? b : string.Equals(e.Value?.ToString(), "true", StringComparison.OrdinalIgnoreCase);
@@ -443,7 +460,8 @@
         }
         _manual = false;
         // Restart from the beginning when at the end or parked on a Motus stop.
-        if (_scrub >= 1000 || _motusState == "stopped") _scrub = 0;
+        if (_t >= 1 - 1e-9 || _motusState == "stopped") { _t = 0; _scrub = 0; }
+        _playback = new BambooTrussPlayback(_keys, _t);
         _isPlaying = true;
         _playCts = new CancellationTokenSource();
         var token = _playCts.Token;
@@ -453,21 +471,32 @@
 
     private async Task RunPlayLoop(CancellationToken token)
     {
-        const double duration = 45.0;
         var last = DateTime.UtcNow;
+        var playback = _playback;
         try
         {
-            while (!token.IsCancellationRequested && _isPlaying)
+            while (!token.IsCancellationRequested && _isPlaying && playback is not null)
             {
                 var now = DateTime.UtcNow;
-                var dt = Math.Min(0.05, (now - last).TotalSeconds);
+                var dt = (now - last).TotalSeconds;
                 last = now;
-                var t = Math.Min(1, _scrub / 1000.0 + dt / duration);
-                // ApplyTask advances the Motus scan through every sample up to t and parks on the
-                // last clear one if Motus reports a contact in between.
-                ApplyTask(t);
+                // Motus work per frame is time-boxed: playback waits on the verified frontier instead of
+                // forcing the remaining scan synchronously on the UI thread (that froze the page for
+                // seconds, then the clock had run past the blocks that were never drawn).
+                var frontier = 1.0;
+                if (_trussScan is not null && string.IsNullOrEmpty(_motionError))
+                {
+                    if (!_trussScan.Complete) _trussScan.StepFor(PlayScanSliceMs);
+                    frontier = _trussScan.Frontier;
+                }
+                var t = playback.Advance(dt, frontier);
+                if (_trussScan?.FirstHit is { } hit && playback.WaitingForMotus)
+                    ApplyTask(hit.T); // parks on LastClearT and shows the Motus stop
+                else
+                    ApplyTask(t);
+                if (playback.WaitingForMotus && _motusState == "clear") _motusState = "checking";
                 await PushPoseAsync();
-                if (_motusState == "stopped" || t >= 1)
+                if (_motusState == "stopped" || playback.Done)
                 {
                     StopPlay();
                     StateHasChanged();
@@ -493,6 +522,7 @@
         _manual = false;
         _tasks = BambooTrussMotion.DefaultTasks();
         _scrub = 0;
+        _t = 0;
         _gL = 24;
         await RefreshMotionAsync(apply: true);
         await PushFramesAsync();

@@ -32,6 +32,8 @@ public sealed class BambooTrussScan
     public Hit? FirstHit { get; private set; }
     public bool Complete => FirstHit is not null || _next >= _ts.Count;
     public int SampleCount => _ts.Count;
+    /// <summary>Motion times Motus checks, ascending.</summary>
+    public IReadOnlyList<double> SampleTimes => _ts;
     public IReadOnlyList<BambooTrussMotion.CycleBound> Cycles => _cycles;
 
     public BambooTrussScan(
@@ -132,11 +134,28 @@ public sealed class BambooTrussScan
             for (var k = 0; k < a.Q.Length; k++) dq = Math.Max(dq, Math.Abs(b.Q[k] - a.Q[k]));
             var dg = Math.Abs(b.GR - a.GR);
             var n = (int)Math.Ceiling(1.5 * Math.Max(dq / maxStepDeg, dg / 0.25));
+            // Brachiation moves the hang (mount) with the joints parked at Home: dq = 0, so sample the
+            // hang translation instead — Motus must check the whole hang-walk, not just its waypoints.
+            var ha = HangAt(a.T); var hb = HangAt(b.T);
+            var dh = Math.Sqrt((hb.X - ha.X) * (hb.X - ha.X) + (hb.Y - ha.Y) * (hb.Y - ha.Y) + (hb.Z - ha.Z) * (hb.Z - ha.Z));
+            n = Math.Max(n, (int)Math.Ceiling(dh / MaxHangStepM));
             n = Math.Max(1, n);
             for (var s = 1; s <= n; s++)
                 _ts.Add(a.T + (b.T - a.T) * s / n);
         }
     }
+
+    /// <summary>Max hang (mount) translation between Motus checks while brachiating (metres).</summary>
+    public const double MaxHangStepM = 0.004;
+
+    /// <summary>
+    /// Last motion time Motus has verified clear (1 once the whole path is checked clear). Playback must
+    /// not run ahead of this — it waits for the scan instead of forcing it synchronously.
+    /// </summary>
+    public double Frontier =>
+        FirstHit is not null ? Math.Max(0, LastClearT)
+        : _next >= _ts.Count ? 1.0
+        : Math.Max(0, LastClearT);
 
     public void AdvanceTo(double t)
     {
@@ -149,6 +168,23 @@ public sealed class BambooTrussScan
         for (var i = 0; i < budget && FirstHit is null && _next < _ts.Count; i++)
             CheckNext();
     }
+
+    /// <summary>
+    /// Run Motus checks for at most <paramref name="budgetMs"/> wall-clock milliseconds (WASM UI thread:
+    /// a fixed sample count can take seconds in expensive stretches and freeze the page).
+    /// </summary>
+    public void StepFor(double budgetMs, double untilT = 1.0)
+    {
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        while (FirstHit is null && _next < _ts.Count && _ts[_next] <= untilT + 1e-12)
+        {
+            CheckNext();
+            if (sw.Elapsed.TotalMilliseconds >= budgetMs) break;
+        }
+    }
+
+    /// <summary>Fraction of Motus samples checked (0..1).</summary>
+    public double Progress => _ts.Count == 0 ? 1 : Math.Min(1, _next / (double)_ts.Count);
 
     public BambooTrussScan RunToEnd()
     {
@@ -186,7 +222,7 @@ public sealed class BambooTrussScan
 
         if (mi >= 0 && mi < _tracks.Count && mi < _cycles.Count && _cycles[mi].MemberId != "brachiate")
         {
-            _cell.SetHang(hold >= 1 ? _cycles[mi].PlaceHang : _cycles[mi].PickHang);
+            _cell.SetHang(HangAt(t));
             var world = _cell.StrutWorld(track, hold, qDeg);
             var name = hold == 2 ? $"placed-{_cycles[mi].MemberId}" : BambooIcdCell.Strut;
             list.Add((name, BambooIcdCell.ToViewerPose(world)));
@@ -209,6 +245,15 @@ public sealed class BambooTrussScan
         }
         LastClearT = t;
         _next++;
+    }
+
+    /// <summary>Hang (L-grip mount) at motion time t — the viewer draws the mount here.</summary>
+    public BambooIcdMotion.HangPose HangAt(double t)
+    {
+        if (_cycles.Count == 0) return BambooTrussLayout.StartDock;
+        var mi = BambooTrussMotion.MemberIndexAt(_cycles, t);
+        var label = StripMember(BambooIcdMotion.Sample(_keys, t).Label);
+        return HangAt(_cycles[mi], label, t);
     }
 
     static BambooIcdMotion.HangPose HangAt(BambooTrussMotion.CycleBound cycle, string label, double t)

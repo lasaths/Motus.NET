@@ -85,6 +85,12 @@ Open `http://127.0.0.1:5268/bamboo` (single strut pick/place) or
 - **Build order:** baseL → baseR → brachiate onto outboard WalkHang at A (Motus-clear hang transfer;
   no hang rod). Sep/diags not placed.
 - **Collision:** Motus.NET against ground pads, mount, already-placed members, held strut, and self (no pole).
+- **Brachiate phases:** `brachiate:Home → Rise → Traverse → Grip → Walk → Return`. The hang (L-grip mount)
+  moves with the arm parked at Home; `BambooTrussScan` samples the hang path every ≤ 4 mm and the viewer
+  draws the mount at `BambooTrussScan.HangAt(t)`.
+- **Play:** `BambooTrussPlayback` stops on every motion key (≥ 0.35 s dwell) so each block is on screen,
+  keeps time as a double, and never runs past the Motus-verified frontier. Motus scanning on the WASM UI
+  thread is time-boxed (`StepFor`), so Play waits for the scan instead of freezing and skipping blocks.
 
 ## What still differs from the HTML preview
 

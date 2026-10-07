@@ -111,6 +111,14 @@ public static class BambooTrussLayout
         }
     }
 
+    /// <summary>
+    /// Phase label for each <see cref="BrachiateHangPath"/> waypoint (motion keys are
+    /// <c>brachiate:&lt;label&gt;</c>): Home at the dock → Rise → Traverse (hang-side, above the span) →
+    /// Grip (outboard L-grip on baseL at A) → Walk (along baseL) → Return (back to the A grip).
+    /// </summary>
+    public static IReadOnlyList<string> BrachiatePhaseLabels { get; } =
+        ["Home", "Rise", "Traverse", "Grip", "Walk", "Return"];
+
     /// <summary>Notional sep / diag place poses (not in <see cref="Members"/> — Motus-unreachable from WalkHang).</summary>
     public static BambooIcdCell.StrutPlacement NotionalSep
     {

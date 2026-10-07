@@ -316,6 +316,106 @@ public class BambooTrussTests
         }
     }
 
+
+    /// <summary>Every motion key label, in plan order — what Play must put on screen, one by one.</summary>
+    private static List<string> PlannedPhases(BambooTrussMotion.TrussBuild built) =>
+        built.Keys.Select(k => k.Label).ToList();
+
+    [Fact]
+    public void Plan_PhaseOrder_IsBaseL_BaseR_ThenBrachiateOntoChord()
+    {
+        var built = Build();
+        var phases = PlannedPhases(built);
+        var baseRDepart = phases.IndexOf("baseR:Depart");
+        Assert.True(baseRDepart > 0, "baseR:Depart missing");
+        Assert.Equal(new[] { "baseR:Depart", "baseR:Release", "baseR:Open", "baseR:Retract" },
+            phases.Skip(baseRDepart).Take(4).ToArray());
+        Assert.Equal(BambooTrussLayout.BrachiatePhaseLabels.Select(l => "brachiate:" + l).ToArray(),
+            phases.Skip(baseRDepart + 4).ToArray());
+        // Keys strictly increasing in T so no phase has zero duration on the timeline.
+        for (var i = 1; i < built.Keys.Count; i++)
+            Assert.True(built.Keys[i].T > built.Keys[i - 1].T, $"key {i} ({built.Keys[i].Label}) not after {built.Keys[i - 1].Label}");
+    }
+
+    [Theory]
+    [InlineData(0.016)]  // desktop frame
+    [InlineData(0.11)]   // slow WASM frame
+    public void Playback_ShowsEveryPlannedPhaseInOrder_EvenAcrossAStall(double frameSec)
+    {
+        var built = Build();
+        var play = new BambooTrussPlayback(built.Keys);
+        var shown = new List<string>();
+        var frames = 0;
+        var stalled = false;
+        while (!play.Done && frames < 200_000)
+        {
+            // One 16 s stall in baseR:Lower (where the recording froze) must not skip any block.
+            var dt = frameSec;
+            if (!stalled && play.T > 0.84 && play.T < 0.845) { dt = 16.0; stalled = true; }
+            var t = play.Advance(dt);
+            var label = BambooIcdMotion.Sample(built.Keys, t).Label;
+            if (shown.Count == 0 || shown[^1] != label) shown.Add(label);
+            frames++;
+        }
+        Assert.True(play.Done, "playback should finish");
+        Assert.Equal(1.0, play.T, 9);
+        Assert.Equal(PlannedPhases(built), play.Reached);
+        // Each planned phase is actually on screen (label sampled at a drawn frame), in order.
+        Assert.True(stalled, "test should inject the stall");
+        var drawn = shown;
+        var dedupPlan = PlannedPhases(built).Where((l, i) => i == 0 || PlannedPhases(built)[i - 1] != l).ToList();
+        Assert.Equal(dedupPlan, drawn);
+    }
+
+    [Fact]
+    public void Playback_NeverRunsAheadOfMotusFrontier_AndStillReachesEveryPhase()
+    {
+        var built = Build();
+        BambooTrussMotion.UseCell(Cell);
+        var scan = new BambooTrussScan(Cell, built.Keys, built.Cycles, BambooTrussLayout.Members, maxStepDeg: 0.5);
+        var play = new BambooTrussPlayback(built.Keys);
+        var frames = 0;
+        var waited = 0;
+        while (!play.Done && frames < 400_000)
+        {
+            if (!scan.Complete) scan.Step(3); // scan lags playback, like WASM with a cold background scan
+            var t = play.Advance(0.05, scan.Frontier);
+            Assert.True(t <= scan.Frontier + 1e-12, $"playback t={t:F4} ran past Motus frontier {scan.Frontier:F4}");
+            if (play.WaitingForMotus) waited++;
+            frames++;
+        }
+        Assert.Null(scan.FirstHit);
+        Assert.True(play.Done);
+        Assert.True(waited > 0, "test should exercise a lagging scan");
+        Assert.Equal(PlannedPhases(built), play.Reached);
+    }
+
+    [Fact]
+    public void Brachiate_HangWalk_IsDenselyMotusChecked_AndDrawnAtTheHang()
+    {
+        var built = Build();
+        var scan = new BambooTrussScan(Cell, built.Keys, built.Cycles, BambooTrussLayout.Members, maxStepDeg: 0.5);
+        var b = built.Cycles.Single(c => c.MemberId == "brachiate");
+        var path = BambooTrussLayout.BrachiateHangPath;
+        var length = 0.0;
+        for (var i = 1; i < path.Count; i++)
+        {
+            var dx = path[i].X - path[i - 1].X; var dy = path[i].Y - path[i - 1].Y; var dz = path[i].Z - path[i - 1].Z;
+            length += Math.Sqrt(dx * dx + dy * dy + dz * dz);
+        }
+        var samples = scan.SampleTimes.Count(t => t > b.T0 && t <= b.T1);
+        Assert.True(samples >= length / BambooTrussScan.MaxHangStepM,
+            $"brachiate hang-walk has {samples} Motus samples for {length:F3} m of hang travel");
+        Assert.Equal(BambooTrussLayout.StartDock, scan.HangAt(b.T0));
+        Assert.Equal(BambooTrussLayout.WalkHang, scan.HangAt(1.0));
+        // Grip key sits exactly on the outboard L-grip at A (walk only on the double-fixed chord).
+        var grip = built.Keys.Single(k => k.Label == "brachiate:Grip");
+        var h = scan.HangAt(grip.T);
+        Assert.Equal(BambooTrussLayout.WalkHang.X, h.X, 6);
+        Assert.Equal(BambooTrussLayout.WalkHang.Y, h.Y, 6);
+        Assert.Equal(BambooTrussLayout.WalkHang.Z, h.Z, 6);
+    }
+
     [Fact]
     public void IkSolveAxis_MatchesSpatialForThePlanarStrut()
     {

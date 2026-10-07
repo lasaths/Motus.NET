@@ -149,6 +149,8 @@ public sealed class BambooIcdCell
     /// </summary>
     public void SetHang(BambooIcdMotion.HangPose hang)
     {
+        // Scan / viewer call this per sample; an unchanged hang must keep the Motus scene + checker caches.
+        if (hang == Hang) return;
         Hang = hang;
         // Motus delta: viewer (x,y,z) → Motus (x,−z,y); default hang Motus (0,0,PoleY).
         var dx = hang.X;
@@ -156,8 +158,7 @@ public sealed class BambooIcdCell
         var dz = hang.Y - BambooIcdMotion.PoleY;
         var delta = Transforms.FromFrame(new Frame(dx, dy, dz));
         MountWorld = Transforms.Multiply(delta, _defaultMountWorld);
-        _scenes.Clear();
-        _checkers.Clear();
+        // Scenes and checkers are keyed by hang, so cached entries for other hangs stay valid.
     }
 
     /// <summary>
@@ -343,7 +344,9 @@ public sealed class BambooIcdCell
             ? 0
             : extras.Aggregate(0, (acc, e) => HashCode.Combine(acc, e.Name,
                 Math.Round(e.Pose.X, 5), Math.Round(e.Pose.Y, 5), Math.Round(e.Pose.Z, 5), Math.Round(e.Pose.PitchDeg, 3), Math.Round(e.Pose.YawDeg, 3)));
-        var key = (track, hold, gripping, (int)Math.Round(gLmm * 10), extraKey);
+        // Mount collision moves with the hang (brachiation), so the hang is part of the scene key.
+        var hangKey = HashCode.Combine(Math.Round(Hang.X, 5), Math.Round(Hang.Y, 5), Math.Round(Hang.Z, 5));
+        var key = (track, hold, gripping, (int)Math.Round(gLmm * 10), HashCode.Combine(extraKey, hangKey));
         if (_scenes.TryGetValue(key, out var cached)) return cached;
         if (_scenes.Count > 64) _scenes.Clear();
         return _scenes[key] = BuildScene(track, hold, gripping, gLmm, qDeg, extras);

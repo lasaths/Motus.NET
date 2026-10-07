@@ -417,7 +417,7 @@ public static class BambooTrussMotion
             newKeys.Add(new BambooIcdMotion.MotionKey
             {
                 T = b0 + u * (b1 - b0),
-                Label = i == 0 ? "brachiate:Home" : (i == path.Count - 1 ? "brachiate:Home" : "brachiate:Walk"),
+                Label = "brachiate:" + BambooTrussLayout.BrachiatePhaseLabels[i],
                 Q = home.ToArray(),
                 GR = BambooTrussLayout.JawOpenMm,
                 Hold = 0
