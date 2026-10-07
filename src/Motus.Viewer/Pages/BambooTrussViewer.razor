@@ -190,7 +190,16 @@
                 _robotReady = false;
             }
         }
-        RefreshMotion(apply: true);
+        // Paint the Three.js cell first; Motus path-build is CPU-heavy (esp. WASM) and must not
+        // block the first interactive frame. Play stays disabled until Build finishes.
+        _phase = "Planning Motus path…";
+        _robotReady = false; // keep Play disabled while Build runs
+        StateHasChanged();
+        await Task.Delay(1);
+        await RefreshMotionAsync(apply: true);
+        _robotReady = true;
+        if (string.IsNullOrEmpty(_motionError))
+            _phase = _keys.Count > 0 ? BambooIcdMotion.Sample(_keys, 0).Label : "Home";
         StateHasChanged();
         await PushPoseAsync();
         await PushFramesAsync();
@@ -217,9 +226,14 @@
         }
     }
 
-    private void RefreshMotion(bool apply)
+    private async Task RefreshMotionAsync(bool apply)
     {
-        var built = BambooTrussMotion.Build(_tasks);
+        var built = await BambooTrussMotion.BuildAsync(_tasks, async memberId =>
+        {
+            _phase = $"Planning {memberId}…";
+            await InvokeAsync(StateHasChanged);
+            await Task.Delay(1);
+        });
         _motionError = built.Error;
         _keys = built.Keys;
         _cycles = built.Cycles;
@@ -476,7 +490,7 @@
         _tasks = BambooTrussMotion.DefaultTasks();
         _scrub = 0;
         _gL = 24;
-        RefreshMotion(apply: true);
+        await RefreshMotionAsync(apply: true);
         await PushFramesAsync();
         await PushPoseAsync();
     }
@@ -524,7 +538,7 @@
 
     private async Task AfterTaskEdit(bool frames)
     {
-        RefreshMotion(apply: !_manual);
+        await RefreshMotionAsync(apply: !_manual);
         if (frames) await PushFramesAsync();
         await PushPoseAsync();
     }
