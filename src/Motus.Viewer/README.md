@@ -76,26 +76,22 @@ Open `http://127.0.0.1:5268/bamboo` (single strut pick/place) or
 
 - **Store:** single feed at the default ICD pick pose; one cane is presented per cycle (waiting stock is
   not in the Motus scene).
-- **Truss:** two isosceles triangles A–B–C and B–D–C **standing in the vertical XY plane** (constant Z),
-  sharing upright B–C. B is near the ground, C the top apex, A/D left/right — a diamond on point B.
-  Each member is a **true edge cane** (pitch/yaw along the edge), ending short of every node so canes
-  never touch — not five freestanding upright poles.
-- **Cane length:** 0.08 m. A 0.5 m vertical edge truss cannot keep all five midpoints Motus-graspable
-  from the pole hang (inclined yaw±90 members leave the compact Y/|x| band where jaw-axis IK succeeds);
-  walk on a double-fixed rail does not enlarge that grasp envelope enough for five true edge centres.
-  The page loads the cell with this length so drawn cane == collided cane. `/bamboo` keeps the 0.30 m
-  ICD strut.
-- **Walk / brachiate:** not used — every place is reachable from the support-pole hang with multi-tilt
-  jaw-axis IK. Hang relocation stays on the pole only. (A 0.5 m vertical *edge* frame still cannot put
-  all five midpoints in the Motus grasp band even with walk on a double-fixed rail.)
-- **Motion:** grasp store horizontally, hang-side pitch, Z-step into the vertical plane, place on the
-  edge, depart to the store bay, Home. Build order baseL → baseR → sep → diagL → diagR. Stage linking
-  Motus-checks carry segments against already-placed members. θ5 rolls the jaw onto each cane axis;
-  jaw tilt may differ from strut pitch.
-- **Tasks:** Motus string-identity pick/place pairs (`object` = member id) build members in order.
+- **Truss:** two triangles A–B–C and B–D–C on a compact ground footprint, sharing edge B–C. Each member is
+  a **0.5 m vertical upright** planted at the edge midpoint (pitch −90°) — Motus jaw-axis reach cannot
+  place 0.5 m *along-edge* canes at true vertical-plane diamond midpoints, so uprights at edge midpoints
+  keep the two-triangle topology Motus-true. `/bamboo` keeps the 0.30 m ICD strut.
+- **Walk / brachiate:** after baseL is planted it is treated as fixed at both ends (ground stake + pole
+  sleeve). The auto path inserts a Motus-clear brachiate segment that hang-walks along that upright
+  (WalkHang clamp beside the cane) before later members. Unsupported/cantilevered canes are never walk
+  rails. Place hangs stay on the pole.
+- **Motion:** grasp store, lift, Motus-aware pitch/swing vias vs planted uprights (geometric cane/gripper
+  clearance in the planner), place, depart, Home. Build order baseL → brachiate → baseR → sep → diagL →
+  diagR. Fine 0.5° `BambooTrussScan` is the Motus judge (planner clearance is not Motus IsClear).
+- **Tasks:** Motus string-identity pick/place pairs (`object` = member id).
 - **Collision:** Motus.NET vs pole, ground, mount, placed members, the active cane, held cane, and self.
-  Full five-cycle path Motus-clear, LastClearT = 1.0
+  Full path Motus-clear, LastClearT = 1.0
   (`BambooTrussTests.FullTruss_PathIsCollisionFree_UnderMotus`).
+
 
 ## What still differs from the HTML preview
 
@@ -113,10 +109,7 @@ Open `http://127.0.0.1:5268/bamboo` (single strut pick/place) or
 
 ## `/bamboo-truss` WASM startup
 
-Vertical-plane Motus path-build used to block the first paint for minutes under Blazor WASM: the Motus-aware
-stage linker ran `IsClear` on every Swing/Hold candidate pair (≈39k Motus checks on desktop CLR ≈ 4.4 s
-Release; ×60-ish under WASM). The planner now caps Motus-stage candidates, beam-prunes `LinkStages`, uses
-coarser Motus samples while planning (fine 0.5° `BambooTrussScan` still validates), Motus-checks only the
-place approach + release/depart, and `BuildAsync` yields between members so the page can paint. Desktop
-Release `BambooTrussMotion.Build` is ≈0.4–0.9 s; box headless Chrome reaches Play-enabled in ≈17 s.
-
+Path-build uses geometric cane/gripper clearance (no Motus `IsClear` in the linker), so Blazor WASM
+startup stays in the tens of seconds. `BuildAsync` yields between members and paints before planning.
+Fine 0.5° `BambooTrussScan` (viewer + BambooTruss tests) is the Motus authority — coarse planner samples
+alone never define “clear”.
