@@ -12,6 +12,7 @@ public class BambooTrussTests
     private static readonly Lazy<BambooIcdCell> LazyCell = new(() =>
     {
         var cell = BambooIcdCell.LoadFile(UrdfPath, BambooTrussLayout.StrutLength);
+        cell.IncludePole = false;
         cell.SetAnchorPads(BambooTrussLayout.AnchorPads
             .Select(a => (a.X, a.Z, BambooTrussLayout.AnchorPadHalf)).ToList());
         return cell;
@@ -34,35 +35,28 @@ public class BambooTrussTests
     }
 
     [Fact]
-    public void Layout_IsBridgeSpanTwoTriangles_InVerticalPlane()
+    public void Layout_IsBridgeLowerChord_AtHalfMetre_NoHangRod()
     {
-        Assert.Equal(5, BambooTrussLayout.Members.Count);
-        Assert.Equal(4, BambooTrussLayout.FootNodes.Length);
-        var ids = BambooTrussLayout.Members.Select(m => m.Id).ToArray();
-        Assert.Equal(new[] { "baseL", "baseR", "sep", "diagL", "diagR" }, ids);
-        Assert.Equal(new[] { "/", "_", "\\", "/", "\\" }, BambooTrussLayout.Members.Select(m => m.Glyph).ToArray());
+        Assert.Equal(0.5, BambooTrussLayout.StrutLength, 9);
+        Assert.Equal(1, BambooTrussLayout.Members.Count);
+        Assert.Equal(4, BambooTrussLayout.FootNodes.Length); // A,B,D + notional apex C
+        Assert.Equal("baseL", BambooTrussLayout.Members[0].Id);
+        Assert.Equal("/", BambooTrussLayout.Members[0].Glyph);
         Assert.Equal(2, BambooTrussLayout.AnchorPads.Length);
-        // Shared upright B–C is vertical in the XY plane at PlaneZ.
-        var sep = BambooTrussLayout.Members.First(m => m.Id == "sep");
-        Assert.Equal(0, sep.EdgeA.X, 9);
-        Assert.Equal(BambooTrussLayout.FootY0, sep.EdgeA.Y, 9);
-        Assert.Equal(BambooTrussLayout.PlaneZ, sep.EdgeA.Z, 9);
-        Assert.Equal(0, sep.EdgeB.X, 9);
-        Assert.Equal(BambooTrussLayout.FootY0 + BambooTrussLayout.Height, sep.EdgeB.Y, 9);
-        Assert.Equal(BambooTrussLayout.PlaneZ, sep.EdgeB.Z, 9);
-        // All nodes share the vertical plane.
         Assert.All(BambooTrussLayout.FootNodes, n => Assert.Equal(BambooTrussLayout.PlaneZ, n.Z, 9));
-        // Sep is upright (pitch −90).
-        Assert.Equal(-90, sep.Place.PitchDeg, 5);
+        var m0 = BambooTrussLayout.Members[0];
+        var dx = m0.EdgeB.X - m0.EdgeA.X; var dy = m0.EdgeB.Y - m0.EdgeA.Y; var dz = m0.EdgeB.Z - m0.EdgeA.Z;
+        Assert.Equal(BambooTrussLayout.StrutLength, Math.Sqrt(dx * dx + dy * dy + dz * dz), 6);
+        Assert.Empty(BambooTrussLayout.WalkableMemberIdsAfter(1));
     }
 
     [Fact]
     public void DefaultTasks_AreStoreToMemberPickPlacePairs()
     {
         var tasks = BambooTrussMotion.DefaultTasks();
-        Assert.Equal(10, tasks.Count);
+        Assert.Equal(2, tasks.Count);
         var pairs = BambooTrussMotion.Pairs(tasks);
-        Assert.Equal(5, pairs.Count);
+        Assert.Equal(1, pairs.Count);
         Assert.All(pairs, p =>
         {
             Assert.Equal("pick", p.Pick.Identity);
@@ -118,7 +112,7 @@ public class BambooTrussTests
     public void FullTruss_PathIsCollisionFree_UnderMotus()
     {
         var built = Build();
-        Assert.Equal(5, built.Cycles.Count);
+        Assert.Equal(1, built.Cycles.Count);
 
         var scan = new BambooTrussScan(Cell, built.Keys, built.Cycles, BambooTrussLayout.Members, maxStepDeg: 0.5).RunToEnd();
         Assert.Null(scan.TrackMiss);
@@ -153,18 +147,10 @@ public class BambooTrussTests
     }
 
     [Fact]
-    public void FullTruss_PlacedMembersAreLiveMotusObstacles()
+    public void TrussCell_OmitsHangPole_AndUsesAnchorPads()
     {
-        var members = BambooTrussLayout.Members.ToList();
-        var last = members[^1];
-        members[^1] = last with { Place = members[1].Place };
-        var built = Build(BambooTrussMotion.DefaultTasks(members)); // UseCell via Build()
-        var scan = new BambooTrussScan(Cell, built.Keys, built.Cycles, members, maxStepDeg: 0.5).RunToEnd();
-        var hit = Assert.IsType<BambooTrussScan.Hit>(scan.FirstHit);
-        Assert.Equal(last.Id, BambooTrussMotion.MemberIdAt(built.Cycles, hit.T));
-        Assert.True(hit.T > built.Cycles[^1].T0);
-        Assert.Contains(hit.Contacts, c =>
-            c.BodyA.StartsWith("placed-", StringComparison.Ordinal) || c.BodyB.StartsWith("placed-", StringComparison.Ordinal));
+        Assert.False(Cell.IncludePole);
+        Assert.Equal(2, Cell.AnchorPads.Count);
     }
 
     [Fact]
@@ -188,12 +174,26 @@ public class BambooTrussTests
             }
             Assert.True(p.Y - BambooIcdCell.StrutRadius > -0.002, $"{id} must not sink through the ground slab");
         }
+        // Adjacent chord canes share node B (d≈0 at the joint); only non-adjacent / store pairs must clear.
+        var memberById = BambooTrussLayout.Members.ToDictionary(m => m.Id);
         for (var i = 0; i < all.Count; i++)
         for (var j = i + 1; j < all.Count; j++)
         {
+            if (all[i].Id != "store" && all[j].Id != "store"
+                && memberById.TryGetValue(all[i].Id, out var mi)
+                && memberById.TryGetValue(all[j].Id, out var mj)
+                && SharesNode(mi, mj))
+                continue;
             var d = SegmentDistance(all[i].P, all[j].P, BambooTrussLayout.StrutLength);
             Assert.True(d > 2 * BambooIcdCell.StrutRadius + 0.002, $"{all[i].Id}–{all[j].Id} canes too close: {d * 1000:F1} mm");
         }
+    }
+
+    private static bool SharesNode(BambooTrussLayout.MemberDef a, BambooTrussLayout.MemberDef b)
+    {
+        bool Near((double X, double Y, double Z) p, (double X, double Y, double Z) q) =>
+            (p.X - q.X) * (p.X - q.X) + (p.Y - q.Y) * (p.Y - q.Y) + (p.Z - q.Z) * (p.Z - q.Z) < 1e-8;
+        return Near(a.EdgeA, b.EdgeA) || Near(a.EdgeA, b.EdgeB) || Near(a.EdgeB, b.EdgeA) || Near(a.EdgeB, b.EdgeB);
     }
 
     private static (double X, double Y, double Z) AxisOf(double[] pose7)
@@ -219,10 +219,10 @@ public class BambooTrussTests
     }
 
     [Fact]
-    public void FullTrussMotion_BuildsFiveCycles()
+    public void FullTrussMotion_BuildsOneCycle()
     {
         var built = Build();
-        Assert.Equal(5, built.Cycles.Count);
+        Assert.Equal(1, built.Cycles.Count);
         Assert.Equal(BambooTrussLayout.Members.Select(m => m.Id), built.Cycles.Select(c => c.MemberId));
         Assert.Equal(0, built.Cycles[0].T0, 9);
         Assert.Equal(1, built.Cycles[^1].T1, 9);

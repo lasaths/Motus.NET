@@ -66,6 +66,11 @@ public sealed class BambooIcdCell
     private readonly List<CollisionObject> _groundPads = new();
     /// <summary>When non-empty, Motus uses these pads instead of the full ground slab (bridge void).</summary>
     public IReadOnlyList<(double X, double Z, double Half)> AnchorPads { get; private set; } = Array.Empty<(double, double, double)>();
+    /// <summary>
+    /// When false, Motus omits the horizontal support-pole collider ( /bamboo-truss: start dock only,
+    /// no hang rod). Default true for /bamboo.
+    /// </summary>
+    public bool IncludePole { get; set; } = true;
     private readonly Dictionary<(int gR, bool held, int off, int hang), RobotMeshCollisionChecker> _checkers = new();
 
     public sealed record CellPart(string Name, string Link, double[] Size, double[] Pos);
@@ -349,7 +354,8 @@ public sealed class BambooIcdCell
     private CollisionScene BuildScene(StrutTrack track, int hold, bool gripping, double gLmm, IReadOnlyList<double> qDeg,
         IReadOnlyList<(string Name, StrutPlacement Pose)>? extras)
     {
-        var objects = new List<CollisionObject> { _poleObj };
+        var objects = new List<CollisionObject>();
+        if (IncludePole) objects.Add(_poleObj);
         if (_groundPads.Count > 0) objects.AddRange(_groundPads);
         else objects.Add(_groundObj);
         objects.AddRange(MountObjects(gLmm));
@@ -454,6 +460,7 @@ public sealed class BambooIcdCell
     {
         seg = Seg,
         poleY = BambooIcdMotion.PoleY,
+        includePole = IncludePole,
         pole = new { radius = PoleRadius, length = PoleLength, segments = PoleSegments },
         strut = new { radius = StrutRadius, length = StrutLen, segments = StrutSegments },
         ground = new

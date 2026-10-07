@@ -111,6 +111,7 @@ public static class BambooTrussMotion
                     urdf = Path.GetFullPath(Path.Combine("tests", "fixtures", "bamboo_icd", "bamboo_icd.urdf"));
                 if (!File.Exists(urdf)) return null;
                 var cell = BambooIcdCell.LoadFile(urdf, BambooTrussLayout.StrutLength);
+                cell.IncludePole = false;
                 cell.SetAnchorPads(BambooTrussLayout.AnchorPads
                     .Select(a => (a.X, a.Z, BambooTrussLayout.AnchorPadHalf)).ToList());
                 MotusCell = cell;
@@ -427,24 +428,6 @@ public static class BambooTrussMotion
         var placeAxis = R.Axis;
         var stages = new List<Stage>();
 
-        if (afterPlaced)
-        {
-            var via = new List<double[]>();
-            foreach (var (x, y, z) in new (double, double, double)[]
-                     {
-                         (0.0, 0.16, 0.05),
-                         (G.X, 0.15, Math.Min(G.Z, 0.05)),
-                         (0.03, 0.14, 0.05),
-                         (-0.03, 0.14, 0.05)
-                     })
-            {
-                via.AddRange(SolvePick(new Pose(x, y, z, G.Pitch, G.Yaw)));
-                via.AddRange(Solve(new Pose(x, y, z, 0, G.Yaw), 15));
-            }
-            via = Dedup(via, MotusCandMax);
-            if (via.Count > 0)
-                stages.Add(new Stage { Name = "pick:approach", Sols = via });
-        }
         stages.Add(new Stage { Name = "pick:approach", Sols = sa });
         stages.Add(new Stage { Name = "pick:grasp", Sols = sg });
 
@@ -699,7 +682,7 @@ public static class BambooTrussMotion
     static (bool Ok, double Penalty) SegCheck(double[] a, double[] b, bool carrying, bool motusVsPlaced = false)
     {
         var floorBad = false;
-        var steps = carrying && motusVsPlaced && Placed.Count > 0 ? MotusStepsFor(a, b) : 12;
+        var steps = motusVsPlaced && Placed.Count > 0 ? MotusStepsFor(a, b) : 12;
         // Geometric placed clearance only when Motus cell is missing (WASM without UseCell).
         // With Motus available, IsClear is the source of truth — geo alone over-rejects at shared nodes.
         var geoVsPlaced = carrying && motusVsPlaced && Placed.Count > 0 && TryCell() is null;
@@ -722,20 +705,23 @@ public static class BambooTrussMotion
                 if (bot < -0.002) floorBad = true;
                 if (geoVsPlaced && !GeoClearVsPlaced(q))
                     return (false, 0);
-                if (motusVsPlaced && Placed.Count > 0 && TryCell() is { } cell)
+            }
+            // Motus vs placed: carrying (held cane) or empty-hand approach after members exist.
+            if (motusVsPlaced && Placed.Count > 0 && TryCell() is { } cell)
+            {
+                try
                 {
-                    try
-                    {
-                        var extras = Placed.Select((p, i) => ($"placed-{i}", p)).ToList();
-                        var track = PlanningTrack();
-                        if (!cell.IsClear(q, BambooTrussLayout.JawClosedMm, BambooTrussLayout.JawOpenMm, 1, "Lower", track, extras))
-                            return (false, 0);
-                    }
-                    catch
-                    {
-                        // Motus threw mid-check: reject unless conservative geo says clear.
-                        if (!GeoClearVsPlaced(q)) return (false, 0);
-                    }
+                    var extras = Placed.Select((p, i) => ($"placed-{i}", p)).ToList();
+                    var track = PlanningTrack();
+                    var hold = carrying ? 1 : 0;
+                    var gR = carrying ? BambooTrussLayout.JawClosedMm : BambooTrussLayout.JawOpenMm;
+                    if (!cell.IsClear(q, BambooTrussLayout.JawClosedMm, gR, hold, carrying ? "Lower" : "Approach", track, extras))
+                        return (false, 0);
+                }
+                catch
+                {
+                    if (carrying && !GeoClearVsPlaced(q)) return (false, 0);
+                    if (!carrying) return (false, 0);
                 }
             }
         }

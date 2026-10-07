@@ -75,15 +75,16 @@ Open `http://127.0.0.1:5268/bamboo` (single strut pick/place) or
 ### `/bamboo-truss` layout
 
 - **Store:** stock laying flat next to first anchor A (single feed; one cane per cycle).
-- **Truss:** vertical-plane bridge span — two triangles A–B–C and B–D–C sharing upright B–C (Motus-reachable
-  stand-in for ASCII `/_\-/_\`). True edge canes of length `BambooTrussLayout.StrutLength` (0.08 m), not
-  freestanding uprights and not a flat ground diamond. Anchors at A and D.
-- **Prefer 0.5 m / five-triangle Warren:** midpoints of a 0.5 m five-cell span leave Motus jaw-axis reach even
-  with brachiation; largest Motus-clear edge prefix found is the first `/_\` bay (~0.22 m side). This page
-  keeps a full Motus-clear path for the two-triangle five-edge span. `/bamboo` stays 0.30 m.
-- **Build order:** baseL `/` → baseR `_` → sep `\` → diagL → diagR. Walk only on both-ends-fixed members.
-- **Collision:** Motus.NET against pole, ground, mount, already-placed members, held strut, and self.
-
+- **Truss:** vertical-plane bridge edge cane A–B of length `BambooTrussLayout.StrutLength` (**0.5 m**).
+  Anchor pads at A and D (no earth between). Not freestanding upright poles.
+- **No horizontal hang rod:** `IncludePole = false` — L-grip start dock only; robot must relocate on
+  double-fixed members / anchors (none walkable until a second Motus-clear cane exists).
+- **Motus limit at 0.5 m:** after planting baseL, empty-hand store re-approach collides with the 0.5 m
+  chord (`R-grip rail ↔ placed-baseL`). Upright/diags need hang height the on-cane WalkHang cannot
+  provide. Five-triangle Warren `/_\-/_\` and even baseR leave Motus without a hang rod.
+  Largest Motus-clear 0.5 m edge set: **baseL only**. `/bamboo` stays 0.30 m.
+- **Build order:** baseL `/` only. Walk only on members fixed at both ends.
+- **Collision:** Motus.NET against ground pads, mount, already-placed members, held strut, and self (no pole).
 
 ## What still differs from the HTML preview
 

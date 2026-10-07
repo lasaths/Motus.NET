@@ -316,17 +316,20 @@
     ring.position.set(PLACE.x, 0.0016, PLACE.z);
     scene.add(ring);
 
-    var pole = new THREE.Mesh(new THREE.CylinderGeometry(cell.pole.radius, cell.pole.radius, cell.pole.length, cell.pole.segments), mats.pole);
-    pole.rotation.z = Math.PI / 2;
-    pole.position.set(0, POLE_Y, 0);
-    scene.add(pole);
-    registerCollider('pole', [pole]);
-    [-0.22, 0.16, 0.26].forEach(function (x) {
-      var n = new THREE.Mesh(new THREE.TorusGeometry(0.0126, 0.0013, 6, 18), mats.node);
-      n.rotation.y = Math.PI / 2;
-      n.position.set(x, POLE_Y, 0);
-      scene.add(n);
-    });
+    // /bamboo-truss sets includePole=false: no horizontal hang rod; arm starts at the L-grip dock only.
+    if (cell.includePole !== false && cell.pole) {
+      var pole = new THREE.Mesh(new THREE.CylinderGeometry(cell.pole.radius, cell.pole.radius, cell.pole.length, cell.pole.segments), mats.pole);
+      pole.rotation.z = Math.PI / 2;
+      pole.position.set(0, POLE_Y, 0);
+      scene.add(pole);
+      registerCollider('pole', [pole]);
+      [-0.22, 0.16, 0.26].forEach(function (x) {
+        var n = new THREE.Mesh(new THREE.TorusGeometry(0.0126, 0.0013, 6, 18), mats.node);
+        n.rotation.y = Math.PI / 2;
+        n.position.set(x, POLE_Y, 0);
+        scene.add(n);
+      });
+    }
 
     mount = new THREE.Group();
     mount.position.set(0, POLE_Y, 0);
