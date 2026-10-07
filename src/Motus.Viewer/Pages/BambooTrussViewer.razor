@@ -121,8 +121,8 @@
             Drag the view to orbit. Moving a joint or gripper slider pauses playback and drives the arm from C#.
             Play runs every pick/place pair (object = member id). Vertical footprint: A–B–C + B–D–C in the XY plane, B near ground, C apex, shared upright B–C.
             Bend axes local X, wrists local Y, jaws local X. Viewer is Three.js Y-up; Motus.NET URDF is Z-up (shared θ).
-            Collision: Motus.NET against ground pads, mount, already-placed members, the held strut, and self (no hang rod).
-            Play builds members in order (feed → baseL → baseR → sep → diagL → diagR). Stop on first Motus hit.
+            Collision: Motus.NET against ground pads, mount, already-placed members, the held strut, and self (no hang rod). Motus-clear prefix: lower chord baseL+baseR.
+            Play builds Motus-clear members in order (feed → baseL → baseR at 0.5 m; no hang rod). Stop on first Motus hit.
         </p>
     </aside>
 </div>

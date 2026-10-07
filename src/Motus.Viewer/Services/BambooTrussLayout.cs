@@ -3,23 +3,22 @@ namespace Motus.Viewer.Services;
 /// <summary>
 /// Store/truss member poses for the /bamboo-truss variation.
 /// <para>
-/// Bridge edge cane in the vertical XY plane (constant <see cref="PlaneZ"/>) at
+/// Bridge lower chord in the vertical XY plane (constant <see cref="PlaneZ"/>) at
 /// <see cref="StrutLength"/> = 0.5 m — Motus-reachable stand-in for ASCII <c>/_\-/_\</c>:
 /// <code>
-///    A--B        (baseL / )     D = far anchor (pad only)
+///    A--B--D     (baseL /  +  baseR _ )
 /// </code>
-/// Anchored at A (and pad at D with no earth between). Stock lays flat next to A.
+/// Anchored at A and D (no earth between). Stock lays flat next to the span. No hang rod
+/// (<c>IncludePole=false</c>); start dock at <see cref="StartDock"/>, then Motus-checked
+/// re-approach after baseL (hang-side / Motus-filtered vias).
 /// </para>
 /// <para>
-/// <b>Motus limit (0.5 m edge canes, no horizontal hang rod):</b> the ICD arm hangs downward from its
-/// L-grip start dock (no drawn support pole). After planting baseL, every Motus-checked empty-hand
-/// return to the store feed collides (<c>R-grip rail ↔ placed-baseL</c>) — the 0.5 m chord occupies
-/// the dock approach corridor. On-cane WalkHang is also too low to seat upright B–C or diagonals
-/// A–C / D–C. Largest Motus-clear 0.5 m edge set: <b>baseL only</b>. baseR, sep, diags, and
-/// five-triangle Warren (~1.5 m / 11 edges) leave Motus under the no-hang-rod rule. /bamboo stays 0.30 m.
+/// <b>Motus note:</b> sep / diags / five-triangle still leave on-structure WalkHang reach at 0.5 m
+/// (arm hangs down; chord hang is too low for apex mids). Lower chord baseL+baseR is the target
+/// Motus-clear prefix without a hang rod. /bamboo stays 0.30 m.
 /// </para>
 /// <para>
-/// Build order: baseL <c>/</c> only. Walk rails require a second both-ends-fixed cane (not Motus-clear here).
+/// Build order: baseL <c>/</c> → baseR <c>_</c>. Walk rails after both planted (both-ends-fixed chord).
 /// </para>
 /// </summary>
 public static class BambooTrussLayout
@@ -93,7 +92,8 @@ public static class BambooTrussLayout
     /// beside anchor A’s side of the cell.
     /// </summary>
     public static BambooIcdCell.StrutPlacement Store { get; } =
-        new(0.0, BambooIcdMotion.Pick.Y, 0.05, 0, 90);
+        // Hang-side of PlaneZ: Motus-reachable pick; clears planted baseL on re-approach better than z=0.05.
+        new(0.0, BambooIcdMotion.Pick.Y, -0.02, 0, 90);
 
     /// <summary>
     /// Truss nodes: A/D outer anchors, B lower mid; C is the notional apex of the Motus-unreachable
@@ -120,10 +120,12 @@ public static class BambooTrussLayout
     {
         var A = (-HalfSpan, FootY0 + Height / 2, PlaneZ);
         var B = (0.0, FootY0, PlaneZ);
-        // Motus-clear 0.5 m edge prefix: baseL only (see type summary).
+        var D = (HalfSpan, FootY0 + Height / 2, PlaneZ);
+        // Motus-clear 0.5 m lower-chord prefix (sep/diags leave WalkHang reach — see type summary).
         var edges = new (string Id, string Label, string Glyph, (double X, double Y, double Z) P, (double X, double Y, double Z) Q)[]
         {
-            ("baseL", "base left", "/", A, B)
+            ("baseL", "base left", "/", A, B),
+            ("baseR", "base right", "_", B, D)
         };
         var list = new List<MemberDef>();
         foreach (var e in edges)
@@ -170,8 +172,11 @@ public static class BambooTrussLayout
     {
         var placed = Members.Take(placedCount).Select(m => m.Id).ToHashSet(StringComparer.Ordinal);
         var walkable = new List<string>();
-        // baseR leaves Motus; no both-ends-fixed walk rail in the Motus-clear prefix.
-        _ = placed;
+        if (placed.Contains("baseL") && placed.Contains("baseR"))
+        {
+            walkable.Add("baseL");
+            walkable.Add("baseR");
+        }
         return walkable;
     }
 
@@ -187,7 +192,7 @@ public static class BambooTrussLayout
         }),
         anchors = AnchorPads.Select(a => new { x = a.X, z = a.Z, half = AnchorPadHalf }),
         // Intended but Motus-unreachable at 0.5 m without a hang rod (see type summary).
-        motusLimit = "baseL only at 0.5 m; baseR re-approach / sep / diags / five-triangle leave Motus without hang rod"
+        motusLimit = "lower chord baseL+baseR at 0.5 m (no hang rod); sep/diags/five-triangle leave WalkHang reach"
     };
 
     public static object StoreDescription() => new

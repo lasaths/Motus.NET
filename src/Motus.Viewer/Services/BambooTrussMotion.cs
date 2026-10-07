@@ -377,6 +377,13 @@ public static class BambooTrussMotion
 
         var sa = SolvePick(approach.Value);
         var sg = SolvePick(grasp.Value);
+        if (afterPlaced)
+        {
+            var saClear = sa.Where(q => MotusPoseClear(q, false)).ToList();
+            if (saClear.Count > 0) sa = saClear;
+            var sgClear = sg.Where(q => MotusPoseClear(q, false)).ToList();
+            if (sgClear.Count > 0) sg = sgClear;
+        }
         var sr = Solve(release.Value, PlaceAxisErrDeg);
         var sh = Solve(hold.Value, PlaceAxisErrDeg);
         if (sh.Count == 0 && sr.Count > 0)
@@ -427,23 +434,52 @@ public static class BambooTrussMotion
         CurrentRelease = new BambooIcdCell.StrutPlacement(R.X, R.Y, R.Z, R.Pitch, R.Yaw);
         var placeAxis = R.Axis;
         var stages = new List<Stage>();
+        var G0 = grasp.Value;
+
+        if (afterPlaced)
+        {
+            // Hang-side / +X arc so empty-hand return clears planted baseL (R-grip rail).
+            var via = new List<double[]>();
+            foreach (var (x, y, z) in new (double, double, double)[]
+                     {
+                         (0.10, 0.22, -0.04),
+                         (0.14, 0.20, -0.02),
+                         (0.08, 0.18, G0.Z),
+                         (0.05, 0.16, G0.Z),
+                         (G0.X + 0.04, 0.14, G0.Z),
+                         (0.0, 0.20, -0.05)
+                     })
+            {
+                via.AddRange(SolvePick(new Pose(x, y, z, G0.Pitch, G0.Yaw)));
+                via.AddRange(Solve(new Pose(x, y, z, 0, G0.Yaw), 15));
+            }
+            via = Dedup(via, MotusCandMax);
+            var viaClear = via.Where(q => MotusPoseClear(q, false)).ToList();
+            if (viaClear.Count > 0) via = viaClear;
+            if (via.Count > 0)
+                stages.Add(new Stage { Name = "Reenter", Sols = via });
+        }
 
         stages.Add(new Stage { Name = "pick:approach", Sols = sa });
         stages.Add(new Stage { Name = "pick:grasp", Sols = sg });
 
         List<double[]>? lift = null;
-        foreach (var dy in new[] { TransitDy, 0.04, 0.05, 0.03 })
+        // After baseL is planted, lift while pulling hang-side (−Z) so the 0.5 m held feed clears it.
+        var liftTargets = afterPlaced
+            ? new (double dy, double dz)[] { (TransitDy, -0.04), (0.06, -0.05), (0.05, -0.03), (0.04, -0.02), (TransitDy, 0) }
+            : new (double dy, double dz)[] { (TransitDy, 0), (0.04, 0), (0.05, 0), (0.03, 0) };
+        foreach (var (dy, dz) in liftTargets)
         {
-            lift = SolvePick(G.At(G.X, G.Y + dy, G.Z));
-            if (lift.Count > 0) break;
+            var cand = SolvePick(G.At(G.X, G.Y + dy, G.Z + dz));
+            if (cand.Count > 0) { lift = cand; break; }
         }
         if (lift is null || lift.Count == 0)
             return new BambooIcdMotion.MotionBuild { Error = "transit toward place:hold unreachable (Lift)", Keys = HomeKeys() };
         stages.Add(new Stage { Name = "Lift", Sols = lift });
 
         // Hang-side bay (Z below PlaneZ): pull horizontal, then pitch onto the member axis.
-        var bayZ = Math.Min(G.Z, 0.055);
-        var bayY = Math.Max(0.12, Math.Max(G.Y, R.Y) + 0.05);
+        var bayZ = Math.Min(G.Z, 0.02);
+        var bayY = Math.Max(0.14, Math.Max(G.Y, R.Y) + 0.06);
         {
             var pull = SolvePick(new Pose(0, bayY, bayZ, G.Pitch, G.Yaw));
             if (pull.Count == 0) pull = Solve(new Pose(0, bayY, bayZ, 0, G.Yaw), 15);
@@ -632,6 +668,20 @@ public static class BambooTrussMotion
     /// Conservative capsule clearance: held cane vs already-placed edge canes (Motus-true enough to
     /// reject mid-span leaps through the opposite triangle when Motus IsClear is unavailable).
     /// </summary>
+    static bool MotusPoseClear(double[] q, bool carrying)
+    {
+        if (Placed.Count == 0 || TryCell() is not { } cell) return true;
+        try
+        {
+            var extras = Placed.Select((p, i) => ($"placed-{i}", p)).ToList();
+            var track = PlanningTrack();
+            var hold = carrying ? 1 : 0;
+            var gR = carrying ? BambooTrussLayout.JawClosedMm : BambooTrussLayout.JawOpenMm;
+            return cell.IsClear(q, BambooTrussLayout.JawClosedMm, gR, hold, carrying ? "Lower" : "Approach", track, extras);
+        }
+        catch { return false; }
+    }
+
     static bool GeoClearVsPlaced(double[] q)
     {
         if (Placed.Count == 0) return true;
@@ -733,25 +783,23 @@ public static class BambooTrussMotion
         var n = stages.Count;
         var cost = stages.Select(st => st.Sols.Select(_ => 1e18).ToArray()).ToArray();
         var prev = stages.Select(st => st.Sols.Select(_ => -1).ToArray()).ToArray();
+        var motus0 = Placed.Count > 0 && stages[0].Name is "pick:approach" or "Reenter";
         for (var i = 0; i < stages[0].Sols.Count; i++)
         {
-            var (ok0, pen0) = SegCheck(BambooIcdMotion.HomeDeg, stages[0].Sols[i], false);
+            var (ok0, pen0) = SegCheck(BambooIcdMotion.HomeDeg, stages[0].Sols[i], false, motus0);
             if (ok0) cost[0][i] = pen0;
         }
         for (var s = 1; s < n; s++)
         {
             var leave = stages[s].Name is "Retract" or "Clear";
-            var carry = s >= 2 && !leave;
-            // Motus vs placed on carry Swing/Pitch/Hold/Release/Depart. Intermediate vias used to
-            // skip Motus (floor only) which let diagR:Swing tunnel θ5 through placed-diagL under
-            // WASM when disk MotusCell load failed. Caps (MotusCandMax/beam/MotusPlanStepDeg) keep
-            // BuildAsync interactive; fine 0.5° BambooTrussScan still validates the stamped path.
+            var name = stages[s].Name;
+            // Carrying after Close: Lift onward (not empty-hand Reenter/approach/grasp).
+            var carry = name is "Lift" or "Pitch" or "Swing" or "place:hold" or "place:release" or "Depart";
             var overlap = ReleaseOverlapsPlaced();
             var motus = false;
-            var name = stages[s].Name;
-            // Swing (not bay Pitch): θ5↔placed-diagL tunnels on mid-span Swing leaps. Pitch stays
-            // hang-side at bayZ away from PlaneZ; Motus there adds little vs Caps cost.
-            if (carry && !overlap && name is "Swing" or "place:hold" or "place:release" or "Depart")
+            if (carry && !overlap && name is "Lift" or "Swing" or "place:hold" or "place:release" or "Depart")
+                motus = true;
+            if (!carry && Placed.Count > 0 && name is "pick:approach" or "Reenter")
                 motus = true;
             // Only expand from the cheapest predecessors (beam) — Motus checks dominate WASM startup.
             var prevAlive = new List<int>();
@@ -816,6 +864,8 @@ public static class BambooTrussMotion
         {
             ("Home", BambooIcdMotion.HomeDeg.ToArray(), open, 0)
         };
+        foreach (var s in seq.Where(s => s.Name == "Reenter"))
+            items.Add(("Reenter", s.Q, open, 0));
         foreach (var s in seq.Where(s => s.Name == "pick:approach"))
             items.Add(("Approach", s.Q, open, 0));
         items.Add(("Grasp", grasp.Q, open, 0));

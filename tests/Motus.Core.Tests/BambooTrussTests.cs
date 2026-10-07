@@ -35,28 +35,31 @@ public class BambooTrussTests
     }
 
     [Fact]
-    public void Layout_IsBridgeLowerChord_AtHalfMetre_NoHangRod()
+    public void Layout_IsBridgeLowerChord_TwoMembers_AtHalfMetre_NoHangRod()
     {
         Assert.Equal(0.5, BambooTrussLayout.StrutLength, 9);
-        Assert.Equal(1, BambooTrussLayout.Members.Count);
+        Assert.Equal(2, BambooTrussLayout.Members.Count);
         Assert.Equal(4, BambooTrussLayout.FootNodes.Length); // A,B,D + notional apex C
-        Assert.Equal("baseL", BambooTrussLayout.Members[0].Id);
-        Assert.Equal("/", BambooTrussLayout.Members[0].Glyph);
+        Assert.Equal(new[] { "baseL", "baseR" }, BambooTrussLayout.Members.Select(m => m.Id).ToArray());
+        Assert.Equal(new[] { "/", "_" }, BambooTrussLayout.Members.Select(m => m.Glyph).ToArray());
         Assert.Equal(2, BambooTrussLayout.AnchorPads.Length);
         Assert.All(BambooTrussLayout.FootNodes, n => Assert.Equal(BambooTrussLayout.PlaneZ, n.Z, 9));
-        var m0 = BambooTrussLayout.Members[0];
-        var dx = m0.EdgeB.X - m0.EdgeA.X; var dy = m0.EdgeB.Y - m0.EdgeA.Y; var dz = m0.EdgeB.Z - m0.EdgeA.Z;
-        Assert.Equal(BambooTrussLayout.StrutLength, Math.Sqrt(dx * dx + dy * dy + dz * dz), 6);
+        foreach (var m in BambooTrussLayout.Members)
+        {
+            var dx = m.EdgeB.X - m.EdgeA.X; var dy = m.EdgeB.Y - m.EdgeA.Y; var dz = m.EdgeB.Z - m.EdgeA.Z;
+            Assert.Equal(BambooTrussLayout.StrutLength, Math.Sqrt(dx * dx + dy * dy + dz * dz), 6);
+        }
         Assert.Empty(BambooTrussLayout.WalkableMemberIdsAfter(1));
+        Assert.Equal(new[] { "baseL", "baseR" }, BambooTrussLayout.WalkableMemberIdsAfter(2));
     }
 
     [Fact]
     public void DefaultTasks_AreStoreToMemberPickPlacePairs()
     {
         var tasks = BambooTrussMotion.DefaultTasks();
-        Assert.Equal(2, tasks.Count);
+        Assert.Equal(4, tasks.Count);
         var pairs = BambooTrussMotion.Pairs(tasks);
-        Assert.Equal(1, pairs.Count);
+        Assert.Equal(2, pairs.Count);
         Assert.All(pairs, p =>
         {
             Assert.Equal("pick", p.Pick.Identity);
@@ -112,7 +115,7 @@ public class BambooTrussTests
     public void FullTruss_PathIsCollisionFree_UnderMotus()
     {
         var built = Build();
-        Assert.Equal(1, built.Cycles.Count);
+        Assert.Equal(2, built.Cycles.Count);
 
         var scan = new BambooTrussScan(Cell, built.Keys, built.Cycles, BambooTrussLayout.Members, maxStepDeg: 0.5).RunToEnd();
         Assert.Null(scan.TrackMiss);
@@ -151,6 +154,27 @@ public class BambooTrussTests
     {
         Assert.False(Cell.IncludePole);
         Assert.Equal(2, Cell.AnchorPads.Count);
+    }
+
+    [Fact]
+    public void FullTruss_PlacedMembersAreLiveMotusObstacles()
+    {
+        // Force baseR release onto baseL's place so the second cycle must hit placed-baseL.
+        var members = BambooTrussLayout.Members.ToList();
+        var last = members[^1];
+        members[^1] = last with { Place = members[0].Place };
+        BambooTrussMotion.UseCell(Cell);
+        var built = BambooTrussMotion.Build(BambooTrussMotion.DefaultTasks(members));
+        // Overlapping release may fail IK/link; if Build succeeds, scan must report placed-* contact.
+        if (!string.IsNullOrEmpty(built.Error))
+        {
+            Assert.Contains("baseR", built.Error, StringComparison.OrdinalIgnoreCase);
+            return;
+        }
+        var scan = new BambooTrussScan(Cell, built.Keys, built.Cycles, members, maxStepDeg: 0.5).RunToEnd();
+        var hit = Assert.IsType<BambooTrussScan.Hit>(scan.FirstHit);
+        Assert.Contains(hit.Contacts, c =>
+            c.BodyA.StartsWith("placed-", StringComparison.Ordinal) || c.BodyB.StartsWith("placed-", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -219,10 +243,10 @@ public class BambooTrussTests
     }
 
     [Fact]
-    public void FullTrussMotion_BuildsOneCycle()
+    public void FullTrussMotion_BuildsTwoCycles()
     {
         var built = Build();
-        Assert.Equal(1, built.Cycles.Count);
+        Assert.Equal(2, built.Cycles.Count);
         Assert.Equal(BambooTrussLayout.Members.Select(m => m.Id), built.Cycles.Select(c => c.MemberId));
         Assert.Equal(0, built.Cycles[0].T0, 9);
         Assert.Equal(1, built.Cycles[^1].T1, 9);
