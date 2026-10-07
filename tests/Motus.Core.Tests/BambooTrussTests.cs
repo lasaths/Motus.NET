@@ -1,20 +1,21 @@
 using Motus.Core;
+using Motus.Geometry;
 using Motus.Viewer.Services;
+using K = Motus.Viewer.Services.BambooGripKinematics;
 
 namespace Motus.Core.Tests;
 
 /// <summary>
-/// Store→truss member Motus paths for /bamboo-truss. Exercises the same viewer services the page runs.
+/// Grounded, base-swapping /bamboo-truss motion (true IK). Exercises the same viewer services the page runs and
+/// re-derives every claim from the keys alone: one gripper always clamped on a real fixed object as the IK base,
+/// no rigid moves of the whole robot, FK-exact grips, and a Motus-clear full path.
 /// </summary>
 public class BambooTrussTests
 {
-    // The truss page loads the cell with the truss cane length — collision uses exactly that mesh.
     private static readonly Lazy<BambooIcdCell> LazyCell = new(() =>
     {
         var cell = BambooIcdCell.LoadFile(UrdfPath, BambooTrussLayout.StrutLength);
-        cell.IncludePole = false;
-        cell.SetAnchorPads(BambooTrussLayout.AnchorPads
-            .Select(a => (a.X, a.Z, BambooTrussLayout.AnchorPadHalf)).ToList());
+        BambooTrussLayout.Configure(cell);
         return cell;
     });
 
@@ -23,211 +24,406 @@ public class BambooTrussTests
 
     private static BambooIcdCell Cell => LazyCell.Value;
 
-    private static BambooTrussMotion.TrussBuild Build(List<BambooIcdMotion.TaskEdit>? tasks = null)
+    // The plan is deterministic; build it once for the whole class (≈7 s desktop).
+    private static readonly Lazy<BambooTrussMotion.TrussBuild> LazyBuild = new(() =>
     {
-        // Same binding the Blazor page uses so planner Motus == scan Motus.
         BambooTrussMotion.UseCell(Cell);
-        var built = BambooTrussMotion.Build(tasks);
+        return BambooTrussMotion.Build();
+    });
+
+    private static BambooTrussMotion.TrussBuild Build()
+    {
+        var built = LazyBuild.Value;
         Assert.True(string.IsNullOrEmpty(built.Error), $"truss motion should build: {built.Error}");
         Assert.NotEmpty(built.Keys);
         Assert.NotEmpty(built.Cycles);
         return built;
     }
 
+    private static BambooTrussScan Scan(BambooTrussMotion.TrussBuild built) =>
+        new(Cell, built.Keys, built.Cycles, BambooTrussLayout.Members, BambooTrussLayout.JawClosedMm, 0.5);
+
+    private const double Closed = BambooTrussLayout.JawClosedMm + 1e-9;
+
+    // ---------------- layout ----------------
+
     [Fact]
-    public void Layout_IsBridgeLowerChord_TwoMembers_AtHalfMetre_NoHangRod()
+    public void Layout_IsLowerChord_HalfMetreCanes_NoHangRod_GroundedFixtures()
     {
         Assert.Equal(0.5, BambooTrussLayout.StrutLength, 9);
-        Assert.Equal(2, BambooTrussLayout.Members.Count);
-        Assert.Equal(4, BambooTrussLayout.FootNodes.Length); // A,B,D + notional apex C
         Assert.Equal(new[] { "baseL", "baseR" }, BambooTrussLayout.Members.Select(m => m.Id).ToArray());
-        Assert.Equal(new[] { "/", "_" }, BambooTrussLayout.Members.Select(m => m.Glyph).ToArray());
-        Assert.Equal(2, BambooTrussLayout.AnchorPads.Length);
-        Assert.All(BambooTrussLayout.FootNodes, n => Assert.Equal(BambooTrussLayout.PlaneZ, n.Z, 9));
         foreach (var m in BambooTrussLayout.Members)
         {
             var dx = m.EdgeB.X - m.EdgeA.X; var dy = m.EdgeB.Y - m.EdgeA.Y; var dz = m.EdgeB.Z - m.EdgeA.Z;
             Assert.Equal(BambooTrussLayout.StrutLength, Math.Sqrt(dx * dx + dy * dy + dz * dz), 6);
         }
-        Assert.Empty(BambooTrussLayout.WalkableMemberIdsAfter(1));
-        Assert.Equal(new[] { "baseL", "baseR" }, BambooTrussLayout.WalkableMemberIdsAfter(2));
-    }
-
-    [Fact]
-    public void DefaultTasks_AreStoreToMemberPickPlacePairs()
-    {
-        var tasks = BambooTrussMotion.DefaultTasks();
-        Assert.Equal(4, tasks.Count);
-        var pairs = BambooTrussMotion.Pairs(tasks);
-        Assert.Equal(2, pairs.Count);
-        Assert.All(pairs, p =>
-        {
-            Assert.Equal("pick", p.Pick.Identity);
-            Assert.Equal("place", p.Place.Identity);
-            Assert.Equal(p.MemberId, p.Pick.Object);
-            Assert.Equal(p.MemberId, p.Place.Object);
-            Assert.Contains(p.Pick.Planes, x => x.Name == "grasp");
-            Assert.Contains(p.Place.Planes, x => x.Name == "release");
-        });
-    }
-
-    [Fact]
-    public void StoreToFirstMember_PathIsCollisionFree_UnderMotus()
-    {
-        var tasks = BambooTrussMotion.DefaultTasks().Take(2).ToList();
-        var built = Build(tasks);
-        Assert.Single(built.Cycles);
-        Assert.Equal("baseL", built.Cycles[0].MemberId);
-
-        var scan = new BambooTrussScan(Cell, built.Keys, built.Cycles, BambooTrussLayout.Members, maxStepDeg: 0.5).RunToEnd();
-        Assert.Null(scan.TrackMiss);
-        Assert.True(scan.Complete);
-        Assert.True(scan.FirstHit is null,
-            $"store→baseL should be clear, Motus hit: {scan.FirstHit?.Describe()} at {scan.FirstHit?.T:F3} ({scan.FirstHit?.Label})");
-        Assert.Equal(1.0, scan.LastClearT, 5);
-    }
-
-    [Fact]
-    public void StoreToFirstMember_CollidingGraspNudge_FailsWithNamedContact()
-    {
-        var tasks = BambooTrussMotion.DefaultTasks().Take(2).ToList();
-        tasks[0].Planes.First(p => p.Name == "grasp").YMm = -1.5;
-        BambooTrussMotion.UseCell(Cell);
-        var built = BambooTrussMotion.Build(tasks);
-        Assert.True(string.IsNullOrEmpty(built.Error), built.Error);
-
-        var scan = new BambooTrussScan(Cell, built.Keys, built.Cycles, BambooTrussLayout.Members, maxStepDeg: 0.5).RunToEnd();
-        var hit = Assert.IsType<BambooTrussScan.Hit>(scan.FirstHit);
-        Assert.True(hit.Contacts.Count > 0, "expected Motus contacts");
-        Assert.True(hit.LastClearT < hit.T);
-        Assert.Contains(hit.Contacts, c =>
-            c.BodyA.Contains("strut", StringComparison.OrdinalIgnoreCase) ||
-            c.BodyB.Contains("strut", StringComparison.OrdinalIgnoreCase) ||
-            c.BodyA.Contains("ground", StringComparison.OrdinalIgnoreCase) ||
-            c.BodyB.Contains("ground", StringComparison.OrdinalIgnoreCase) ||
-            c.BodyA.Contains("store-", StringComparison.OrdinalIgnoreCase) ||
-            c.BodyB.Contains("store-", StringComparison.OrdinalIgnoreCase) ||
-            c.BodyA.Contains("neck", StringComparison.OrdinalIgnoreCase) ||
-            c.BodyB.Contains("neck", StringComparison.OrdinalIgnoreCase));
-    }
-
-    [Fact]
-    public void FullTruss_PathIsCollisionFree_UnderMotus()
-    {
-        var built = Build();
-        Assert.Equal(3, built.Cycles.Count); // baseL + baseR + brachiate
-
-        var scan = new BambooTrussScan(Cell, built.Keys, built.Cycles, BambooTrussLayout.Members, maxStepDeg: 0.5).RunToEnd();
-        Assert.Null(scan.TrackMiss);
-        Assert.True(scan.Complete);
-        Assert.True(scan.FirstHit is null,
-            $"full store→truss should be clear, Motus hit: {scan.FirstHit?.Describe()} at {scan.FirstHit?.T:F3} ({scan.FirstHit?.Label})");
-        Assert.Equal(1.0, scan.LastClearT, 5);
-    }
-
-    [Fact]
-    public void FullTruss_EveryCaneIsReleasedExactlyOnItsMember()
-    {
-        var built = Build();
-        var scan = new BambooTrussScan(Cell, built.Keys, built.Cycles, BambooTrussLayout.Members, maxStepDeg: 0.5);
-        Assert.Null(scan.TrackMiss);
-        var memberCycles = built.Cycles.Where(c => c.MemberId != "brachiate").ToList();
-        Assert.Equal(BambooTrussLayout.Members.Count, memberCycles.Count);
-        for (var i = 0; i < memberCycles.Count; i++)
-        {
-            var c = memberCycles[i];
-            var member = BambooTrussLayout.Members[i];
-            // Sample just before the cycle ends while Hold=2 (released on member).
-            var t = c.T0 + (c.T1 - c.T0) * 0.99;
-            var s = BambooIcdMotion.Sample(built.Keys, t);
-            Assert.Equal(2, s.Hold);
-            var active = scan.StrutPoses(t, s.Hold, s.Q).Single(p => p.Name == $"placed-{member.Id}");
-            var want = BambooIcdCell.ToViewerPose(BambooIcdCell.PlacementWorld(member.Place));
-            for (var k = 0; k < 3; k++)
-                Assert.True(Math.Abs(active.Pose[k] - want[k]) < 1e-3, $"{member.Id}: released position off by {Math.Abs(active.Pose[k] - want[k]) * 1000:F2} mm (axis {k})");
-            var a = AxisOf(active.Pose); var b = AxisOf(want);
-            Assert.True(Math.Abs(a.X * b.X + a.Y * b.Y + a.Z * b.Z) > Math.Cos(2 * Math.PI / 180), $"{member.Id}: released cane axis differs");
-            // Vertical-plane truss: canes are not ground-horizontal; they follow triangle edges.
-            Assert.True(active.Pose[1] > BambooIcdCell.StrutRadius - 1e-3, $"{member.Id}: cane below ground");
-        }
-    }
-
-    [Fact]
-    public void TrussCell_OmitsHangPole_AndUsesAnchorPads()
-    {
         Assert.False(Cell.IncludePole);
-        Assert.Equal(2, Cell.AnchorPads.Count);
-    }
-
-    [Fact]
-    public void FullTruss_PlacedMembersAreLiveMotusObstacles()
-    {
-        // Force baseR release onto baseL's place so the second cycle must hit placed-baseL.
-        var members = BambooTrussLayout.Members.ToList();
-        var last = members[^1];
-        members[^1] = last with { Place = members[0].Place };
-        BambooTrussMotion.UseCell(Cell);
-        var built = BambooTrussMotion.Build(BambooTrussMotion.DefaultTasks(members));
-        // Overlapping release may fail IK/link; if Build succeeds, scan must report placed-* contact.
-        if (!string.IsNullOrEmpty(built.Error))
+        var pads = Cell.Pads.Select(p => p.Name).ToList();
+        Assert.Contains("ground-S1", pads);
+        Assert.Contains("ground-S2", pads);
+        // Stakes stand on the ground (posts from y = 0) and the start base sits on S1's axis, slot along it.
+        var posts = BambooTrussLayout.Posts.ToDictionary(p => p.Name);
+        foreach (var st in BambooTrussLayout.Stakes)
         {
-            Assert.Contains("baseR", built.Error, StringComparison.OrdinalIgnoreCase);
-            return;
+            Assert.True(posts.ContainsKey(st.Name));
+            Assert.True(st.ClampY + 0.015 < st.Top, $"{st.Name}: L jaws must fit below the free top");
         }
-        var scan = new BambooTrussScan(Cell, built.Keys, built.Cycles, members, maxStepDeg: 0.5).RunToEnd();
-        var hit = Assert.IsType<BambooTrussScan.Hit>(scan.FirstHit);
-        Assert.Contains(hit.Contacts, c =>
-            c.BodyA.StartsWith("placed-", StringComparison.Ordinal) || c.BodyB.StartsWith("placed-", StringComparison.Ordinal));
+        var b = BambooTrussLayout.StartBase;
+        var (pos, axis) = K.Residual(b, BambooTrussLayout.S1.Grip);
+        Assert.True(pos < 1e-12 && axis < 1e-9);
+        Assert.Equal(new[] { "baseL", "baseR" }, BambooTrussLayout.WalkableMemberIdsAfter(2));
+        Assert.Empty(BambooTrussLayout.WalkableMemberIdsAfter(1));
     }
 
     [Fact]
-    public void Layout_EdgeCanesAreMotusReachable_AndNeverTouch()
+    public void Layout_CanesNeverIntersect_LashedAtB()
     {
         var all = BambooTrussLayout.Members.Select(m => (Id: m.Id, P: m.Place)).Append((Id: "store", P: BambooTrussLayout.Store)).ToList();
-        foreach (var (id, p) in all)
-        {
-            // Store is horizontal pitch 0; truss edges use multi-tilt IK.
-            if (id == "store")
-            {
-                Assert.Equal(0, p.PitchDeg, 9);
-                Assert.NotEmpty(BambooIcdMotion.IkSolveAxis(p.X, p.Y, p.Z, 0, p.Axis));
-            }
-            else
-            {
-                var sols = new List<double[]>();
-                foreach (var tilt in new[] { p.PitchDeg, -Math.Abs(p.PitchDeg), Math.Abs(p.PitchDeg), 0.0, 20.0, -20.0, -40.0, -60.0, -80.0, -90.0 })
-                    sols.AddRange(BambooIcdMotion.IkSolveAxis(p.X, p.Y, p.Z, tilt, p.Axis, BambooIcdMotion.HangPose.Pole, BambooTrussMotion.PlaceAxisErrDeg));
-                Assert.True(sols.Count > 0, $"{id} place unreachable under Motus jaw-axis IK");
-            }
-            Assert.True(p.Y - BambooIcdCell.StrutRadius > -0.002, $"{id} must not sink through the ground slab");
-        }
-        // Adjacent chord canes share node B (d≈0 at the joint); only non-adjacent / store pairs must clear.
-        var memberById = BambooTrussLayout.Members.ToDictionary(m => m.Id);
         for (var i = 0; i < all.Count; i++)
         for (var j = i + 1; j < all.Count; j++)
         {
-            if (all[i].Id != "store" && all[j].Id != "store"
-                && memberById.TryGetValue(all[i].Id, out var mi)
-                && memberById.TryGetValue(all[j].Id, out var mj)
-                && SharesNode(mi, mj))
-                continue;
             var d = SegmentDistance(all[i].P, all[j].P, BambooTrussLayout.StrutLength);
-            Assert.True(d > 2 * BambooIcdCell.StrutRadius + 0.002, $"{all[i].Id}–{all[j].Id} canes too close: {d * 1000:F1} mm");
+            Assert.True(d > 2 * BambooIcdCell.StrutRadius + 0.001, $"{all[i].Id}–{all[j].Id} canes too close: {d * 1000:F1} mm");
+        }
+        // The feed cane rests on its rail (seat gap only).
+        Assert.Equal(BambooTrussLayout.RackTop + BambooIcdCell.StrutRadius + BambooTrussLayout.RackSeatGap, BambooTrussLayout.Store.Y, 9);
+    }
+
+    [Fact]
+    public void GripKinematics_MatchMotusFk()
+    {
+        var rng = new Random(5);
+        var worst = 0.0;
+        for (var n = 0; n < 50; n++)
+        {
+            var q = Enumerable.Range(0, 5).Select(k => BambooIcdMotion.LimitsDeg[k].Min + (BambooIcdMotion.LimitsDeg[k].Max - BambooIcdMotion.LimitsDeg[k].Min) * rng.NextDouble()).ToArray();
+            var lw = K.StakeClampFrame(rng.NextDouble() - 0.5, 0.1 + 0.3 * rng.NextDouble(), rng.NextDouble() - 0.5, 360 * rng.NextDouble());
+            Cell.SetMountViewer(lw);
+            var motus = Cell.JawWorld(q);
+            var mine = BambooTrussPlanner.ToMotus(K.Mul(lw, K.Tlr(q)));
+            for (var i = 0; i < 12; i++) worst = Math.Max(worst, Math.Abs(motus[i] - mine[i]));
+            // R-base inverse chain gives back the same L frame.
+            var back = BambooTrussPlanner.LWorld("R", K.Mul(lw, K.Tlr(q)), q);
+            for (var i = 0; i < 12; i++) Assert.True(Math.Abs(back[i] - lw[i]) < 1e-9);
+        }
+        Cell.SetMountViewer(BambooTrussLayout.StartBase);
+        Assert.True(worst < 1e-9, $"grip FK differs from Motus FK by {worst:E2}");
+    }
+
+    // ---------------- plan structure ----------------
+
+    [Fact]
+    public void Plan_BuildsBothMembers_ThenWalksWithTwoBaseSwaps()
+    {
+        var built = Build();
+        Assert.Equal(new[] { "baseL", "baseR" }, built.Built.ToArray());
+        Assert.Equal(new[] { "start", "baseL", "baseR", "walk" }, built.Cycles.Select(c => c.MemberId).ToArray());
+        Assert.Equal(0, built.Cycles[0].T0, 9);
+        Assert.Equal(1, built.Cycles[^1].T1, 9);
+        var first = built.Keys[0];
+        Assert.Equal("L", first.Base);
+        Assert.Equal(BambooTrussLayout.S1.Name, first.BaseOn);
+        Assert.Equal(BambooTrussLayout.StartBase, first.BaseWorld);
+        var swaps = new List<(string From, string To, string On)>();
+        for (var i = 1; i < built.Keys.Count; i++)
+            if (built.Keys[i].Base != built.Keys[i - 1].Base)
+                swaps.Add((built.Keys[i - 1].Base!, built.Keys[i].Base!, built.Keys[i].BaseOn!));
+        Assert.Equal(2, swaps.Count);
+        Assert.Equal(("L", "R", "placed-baseL"), swaps[0]);
+        Assert.Equal(("R", "L", BambooTrussLayout.S2.Name), swaps[1]);
+        for (var i = 1; i < built.Keys.Count; i++)
+            Assert.True(built.Keys[i].T > built.Keys[i - 1].T, $"key {i} ({built.Keys[i].Label}) not after {built.Keys[i - 1].Label}");
+    }
+
+    // ---------------- grounded base ----------------
+
+    [Fact]
+    public void EverySegment_HasAClampedBase_OnARealFixedObject_ConstantWhileClamped()
+    {
+        var built = Build();
+        var scan = Scan(built);
+        var keys = built.Keys;
+        for (var k = 1; k < keys.Count; k++)
+        {
+            var a = keys[k - 1]; var b = keys[k];
+            Assert.NotNull(b.Base); Assert.NotNull(b.BaseWorld); Assert.NotNull(b.BaseOn);
+            var g = b.Base!;
+            // The base gripper is closed on its object at both ends of the segment (so throughout it).
+            foreach (var key in new[] { a, b })
+            {
+                var jaw = g == "L" ? key.GL : key.GR;
+                var on = (g == "L" ? key.LOn : key.ROn) ?? "";
+                Assert.True(jaw <= Closed, $"{b.Label}: base {g} not closed ({jaw} mm) at {key.Label}");
+                Assert.Contains(b.BaseOn!, on.Split('|'));
+            }
+            // Constant while the same gripper stays base.
+            if (a.Base == b.Base) Assert.Equal(a.BaseWorld, b.BaseWorld);
+            // The base frame coincides with the fixed object's grip frame (FK-exact clamp).
+            var (pos, axis, inRange) = OnObject(scan, b.T, b.BaseOn!, b.BaseWorld!);
+            Assert.True(pos < K.GripPosTolM && axis < K.GripAxisTolDeg && inRange,
+                $"{b.Label}: base {g} {pos * 1000:F4} mm / {axis:F4}° off {b.BaseOn} (in range {inRange})");
+            // Canes used as a base must be fixed at both ends (both chord members already placed).
+            if (b.BaseOn!.StartsWith("placed-", StringComparison.Ordinal))
+            {
+                var placed = scan.World[BambooTrussMotion.MemberIndexAt(built.Cycles, b.T)].Placed.Select(p => p.Name).ToList();
+                Assert.Equal(2, placed.Count);
+                Assert.Contains(b.BaseOn["placed-".Length..], BambooTrussLayout.WalkableMemberIdsAfter(placed.Count));
+            }
         }
     }
 
-    private static bool SharesNode(BambooTrussLayout.MemberDef a, BambooTrussLayout.MemberDef b)
+    [Fact]
+    public void NoSample_HasBothGrippersFree()
     {
-        bool Near((double X, double Y, double Z) p, (double X, double Y, double Z) q) =>
-            (p.X - q.X) * (p.X - q.X) + (p.Y - q.Y) * (p.Y - q.Y) + (p.Z - q.Z) * (p.Z - q.Z) < 1e-8;
-        return Near(a.EdgeA, b.EdgeA) || Near(a.EdgeA, b.EdgeB) || Near(a.EdgeB, b.EdgeA) || Near(a.EdgeB, b.EdgeB);
+        var built = Build();
+        var scan = Scan(built);
+        foreach (var t in scan.SampleTimes)
+        {
+            var s = BambooTrussMotion.SampleState(built.Keys, t);
+            var key = built.Keys[s.SegEnd];
+            var lClamped = s.GL <= Closed && IsFixed(key.LOn);
+            var rClamped = s.GR <= Closed && IsFixed(key.ROn);
+            Assert.True(lClamped || rClamped, $"t={t:F4} ({s.Label}): both grippers free (gL {s.GL:F1}, gR {s.GR:F1})");
+        }
     }
 
-    private static (double X, double Y, double Z) AxisOf(double[] pose7)
+    [Fact]
+    public void NoStep_MovesTheWholeRobotRigidly_AndEverySwingMovesJoints()
     {
-        double x = pose7[3], y = pose7[4], z = pose7[5], w = pose7[6];
-        return (2 * (x * z + w * y), 2 * (y * z - w * x), 1 - 2 * (x * x + y * y));
+        var built = Build();
+        var keys = built.Keys;
+        for (var k = 1; k < keys.Count; k++)
+        {
+            var a = keys[k - 1]; var b = keys[k];
+            // Pose at key k-1 is the same whichever base is used (no teleport at a base swap).
+            var (la, ra) = (BambooTrussPlanner.LWorld(a.Base, a.BaseWorld!, a.Q), BambooTrussPlanner.RWorld(a.Base, a.BaseWorld!, a.Q));
+            var (lb, rb) = (BambooTrussPlanner.LWorld(b.Base, b.BaseWorld!, a.Q), BambooTrussPlanner.RWorld(b.Base, b.BaseWorld!, a.Q));
+            Assert.True(MaxDiff(la, lb) < 1e-9 && MaxDiff(ra, rb) < 1e-9, $"{b.Label}: grippers jump at the segment start");
+            // Frozen joints ⇒ nothing moves.
+            if (K.JointDist(a.Q, b.Q) < 1e-9)
+            {
+                var (l2, r2) = (BambooTrussPlanner.LWorld(b.Base, b.BaseWorld!, b.Q), BambooTrussPlanner.RWorld(b.Base, b.BaseWorld!, b.Q));
+                Assert.True(MaxDiff(la, l2) < 1e-9 && MaxDiff(ra, r2) < 1e-9, $"{b.Label}: robot moved with frozen joints");
+            }
+            if (a.Base != b.Base) Assert.True(K.JointDist(a.Q, b.Q) < 1e-9, $"{b.Label}: base swap must happen at rest");
+        }
+        // Each swing (stretch between base swaps) is joint motion.
+        var start = 0;
+        for (var k = 1; k <= keys.Count; k++)
+        {
+            if (k < keys.Count && keys[k].Base == keys[k - 1].Base) continue;
+            var travel = 0.0;
+            for (var i = start + 1; i < k; i++) travel = Math.Max(travel, K.JointDist(keys[start].Q, keys[i].Q));
+            Assert.True(travel > 10, $"swing from {keys[start].Label} moves joints only {travel:F1}°");
+            start = k;
+        }
     }
+
+    // ---------------- true grips ----------------
+
+    [Fact]
+    public void AllGrips_AreFkExact_WithinTightTolerance()
+    {
+        var built = Build();
+        Assert.NotEmpty(built.Grips);
+        foreach (var g in built.Grips)
+            Assert.True(g.PosM < K.GripPosTolM && g.AxisDeg < K.GripAxisTolDeg,
+                $"{g.Label} {g.Gripper} on {g.On}: {g.PosM * 1000:F4} mm / {g.AxisDeg:F4}°");
+        Assert.True(K.GripPosTolM <= 0.0005 && K.GripAxisTolDeg <= 0.5);
+    }
+
+    [Fact]
+    public void EveryClampedSample_HasTheJawOnItsObject_ByFk()
+    {
+        var built = Build();
+        var scan = Scan(built);
+        Assert.Null(scan.TrackMiss);
+        var worstPos = 0.0; var worstAxis = 0.0; var checkedCount = 0;
+        foreach (var t in scan.SampleTimes)
+        {
+            var s = BambooTrussMotion.SampleState(built.Keys, t);
+            var key = built.Keys[s.SegEnd];
+            var prev = built.Keys[Math.Max(0, s.SegEnd - 1)];
+            var (l, r) = scan.GrippersAt(t);
+            foreach (var (frame, jaw, on, onPrev, jawPrev) in new[] { (l, s.GL, key.LOn, prev.LOn, prev.GL), (r, s.GR, key.ROn, prev.ROn, prev.GR) })
+            {
+                // Clamped through the whole segment on a fixed object.
+                if (jaw > Closed || jawPrev > Closed || !IsFixed(on) || !IsFixed(onPrev)) continue;
+                var obj = on!.Split('|').First(o => !o.StartsWith(BambooIcdCell.Strut, StringComparison.Ordinal) || o.StartsWith("placed-", StringComparison.Ordinal));
+                if (!(onPrev ?? "").Split('|').Contains(obj)) continue;
+                var (pos, axis, inRange) = OnObject(scan, t, obj, frame);
+                Assert.True(inRange, $"t={t:F4}: grip off the end of {obj}");
+                worstPos = Math.Max(worstPos, pos); worstAxis = Math.Max(worstAxis, axis);
+                checkedCount++;
+            }
+        }
+        Assert.True(checkedCount > 1000, $"only {checkedCount} clamped samples checked");
+        Assert.True(worstPos < K.GripPosTolM && worstAxis < K.GripAxisTolDeg, $"worst clamped residual {worstPos * 1000:F4} mm / {worstAxis:F4}°");
+    }
+
+    [Fact]
+    public void EveryCane_IsReleasedExactlyOnItsMember()
+    {
+        var built = Build();
+        var scan = Scan(built);
+        foreach (var m in BambooTrussLayout.Members)
+        {
+            var w = scan.World.Single(x => x.ActiveId == m.Id);
+            Assert.NotNull(w.Released);
+            var want = BambooIcdCell.PlacementWorld(m.Place);
+            var d = Math.Sqrt(Sq(w.Released![3] - want[3]) + Sq(w.Released[7] - want[7]) + Sq(w.Released[11] - want[11]));
+            var dot = Math.Abs(w.Released[2] * want[2] + w.Released[6] * want[6] + w.Released[10] * want[10]);
+            Assert.True(d < K.GripPosTolM, $"{m.Id}: released {d * 1000:F4} mm off design");
+            Assert.True(Math.Acos(Math.Min(1, dot)) * 180 / Math.PI < K.GripAxisTolDeg, $"{m.Id}: released axis off design");
+        }
+    }
+
+    [Fact]
+    public void TamperedGrasp_IsCaughtAsAMiss()
+    {
+        var built = Build();
+        var keys = built.Keys.Select(Clone).ToList();
+        var close = keys.First(k => k.Label == "baseL:Close");
+        close.Q = close.Q.ToArray();
+        close.Q[2] += 2; // a jaw 2° off the planned grasp no longer encloses the cane on its slot axis
+        var scan = new BambooTrussScan(Cell, keys, built.Cycles, BambooTrussLayout.Members, BambooTrussLayout.JawClosedMm, 0.5);
+        Assert.NotNull(scan.TrackMiss);
+        Assert.Contains("baseL", scan.TrackMiss);
+    }
+
+    // ---------------- Motus ----------------
+
+    [Fact]
+    public void FullPath_IsMotusClear()
+    {
+        var built = Build();
+        var scan = Scan(built).RunToEnd();
+        Assert.Null(scan.TrackMiss);
+        Assert.True(scan.Complete);
+        Assert.True(scan.FirstHit is null,
+            $"Motus hit: {scan.FirstHit?.Describe()} at {scan.FirstHit?.T:F4} ({scan.FirstHit?.Label})");
+        Assert.Equal(1.0, scan.LastClearT, 9);
+        Assert.Equal(1.0, scan.Frontier, 9);
+    }
+
+    [Fact]
+    public void PlacedMembers_AreLiveMotusObstacles()
+    {
+        var built = Build();
+        var scan = Scan(built);
+        var walk = built.Cycles.Single(c => c.MemberId == "walk");
+        var env = scan.EnvironmentAt(walk.T0 + 1e-6, 0).Select(o => o.Name).ToList();
+        Assert.Contains("placed-baseL", env);
+        Assert.Contains("placed-baseR", env);
+        Assert.Contains(BambooTrussLayout.S1.Name, env);
+        Assert.Contains("store-rack", env);
+        // The walk's chord grasp, evaluated at a time when the R-grip is not allowed to touch the chord, must hit it.
+        var close = built.Keys.First(k => k.Label == "walk:Close");
+        var t = built.Keys[walk.FirstKey].T;
+        var contacts = scan.ContactsAt(t, close.Q, BambooTrussLayout.JawClosedMm, close.GL, 0);
+        Assert.Contains(contacts, c => c.BodyA == "placed-baseL" || c.BodyB == "placed-baseL");
+    }
+
+    // ---------------- playback ----------------
+
+    private static List<string> PlannedPhases(BambooTrussMotion.TrussBuild built) => built.Keys.Select(k => k.Label).ToList();
+
+    [Theory]
+    [InlineData(0.016)]
+    [InlineData(0.11)]
+    public void Playback_ShowsEveryPlannedPhaseInOrder_EvenAcrossAStall(double frameSec)
+    {
+        var built = Build();
+        var play = new BambooTrussPlayback(built.Keys);
+        var shown = new List<string>();
+        var frames = 0;
+        var stalled = false;
+        while (!play.Done && frames < 400_000)
+        {
+            var dt = frameSec;
+            if (!stalled && play.T > 0.5) { dt = 16.0; stalled = true; }
+            var t = play.Advance(dt);
+            var label = BambooTrussMotion.SampleState(built.Keys, t).Label;
+            if (shown.Count == 0 || shown[^1] != label) shown.Add(label);
+            frames++;
+        }
+        Assert.True(play.Done);
+        Assert.True(stalled);
+        Assert.Equal(1.0, play.T, 9);
+        Assert.Equal(PlannedPhases(built), play.Reached);
+        var plan = PlannedPhases(built);
+        Assert.Equal(plan.Where((l, i) => i == 0 || plan[i - 1] != l).ToList(), shown);
+    }
+
+    [Fact]
+    public void Playback_NeverRunsAheadOfMotusFrontier_AndStillReachesEveryPhase()
+    {
+        var built = Build();
+        var scan = Scan(built);
+        var play = new BambooTrussPlayback(built.Keys);
+        var frames = 0; var waited = 0;
+        while (!play.Done && frames < 400_000)
+        {
+            if (!scan.Complete) scan.Step(3);
+            var t = play.Advance(0.05, scan.Frontier);
+            Assert.True(t <= scan.Frontier + 1e-12, $"playback t={t:F4} ran past Motus frontier {scan.Frontier:F4}");
+            if (play.WaitingForMotus) waited++;
+            frames++;
+        }
+        Assert.Null(scan.FirstHit);
+        Assert.True(play.Done);
+        Assert.True(waited > 0);
+        Assert.Equal(PlannedPhases(built), play.Reached);
+    }
+
+    // ---------------- helpers ----------------
+
+    private static bool IsFixed(string? on) =>
+        !string.IsNullOrEmpty(on) && on.Split('|').Any(o =>
+            o.StartsWith("stake-", StringComparison.Ordinal) || o.StartsWith("placed-", StringComparison.Ordinal));
+
+    /// <summary>Distance (m) of a grip frame (viewer) from a fixed object's axis, slot-axis error (deg), within its length.</summary>
+    private static (double Pos, double Axis, bool InRange) OnObject(BambooTrussScan scan, double t, string obj, double[] frameViewer)
+    {
+        double ox, oy, oz, ux, uy, uz, lo, hi;
+        var stake = BambooTrussLayout.Stakes.FirstOrDefault(s => s.Name == obj);
+        double[] f;
+        if (stake is not null)
+        {
+            f = frameViewer;
+            (ox, oy, oz, ux, uy, uz, lo, hi) = (stake.X, 0, stake.Z, 0, 1, 0, 0, stake.Top - 0.015);
+        }
+        else
+        {
+            Assert.StartsWith("placed-", obj);
+            var w = scan.World.Select(x => x.Placed.FirstOrDefault(p => p.Name == obj).World)
+                .Concat(scan.World.Where(x => "placed-" + x.ActiveId == obj).Select(x => x.Released))
+                .First(m => m is not null)!;
+            f = BambooTrussPlanner.ToMotus(frameViewer);
+            (ox, oy, oz, ux, uy, uz) = (w[3], w[7], w[11], w[2], w[6], w[10]);
+            (lo, hi) = (-BambooTrussLayout.StrutLength / 2, BambooTrussLayout.StrutLength / 2);
+        }
+        var px = f[3] - ox; var py = f[7] - oy; var pz = f[11] - oz;
+        var along = px * ux + py * uy + pz * uz;
+        var d = Math.Sqrt(Sq(px - along * ux) + Sq(py - along * uy) + Sq(pz - along * uz));
+        var dot = Math.Abs(f[2] * ux + f[6] * uy + f[10] * uz);
+        return (d, Math.Acos(Math.Min(1, dot)) * 180 / Math.PI, along >= lo && along <= hi);
+    }
+
+    private static double Sq(double x) => x * x;
+
+    private static double MaxDiff(double[] a, double[] b)
+    {
+        var m = 0.0;
+        for (var i = 0; i < 12; i++) m = Math.Max(m, Math.Abs(a[i] - b[i]));
+        return m;
+    }
+
+    private static BambooIcdMotion.MotionKey Clone(BambooIcdMotion.MotionKey k) => new()
+    {
+        T = k.T, Label = k.Label, Q = k.Q.ToArray(), GR = k.GR, GL = k.GL, Hold = k.Hold, Base = k.Base,
+        BaseWorld = k.BaseWorld?.ToArray(), BaseOn = k.BaseOn, LOn = k.LOn, ROn = k.ROn
+    };
 
     private static double SegmentDistance(BambooIcdCell.StrutPlacement a, BambooIcdCell.StrutPlacement b, double len)
     {
@@ -244,197 +440,4 @@ public class BambooTrussTests
         }
         return best;
     }
-
-    [Fact]
-    public void FullTrussMotion_BuildsMemberCycles_ThenBrachiate()
-    {
-        var built = Build();
-        Assert.Equal(3, built.Cycles.Count);
-        Assert.Equal(new[] { "baseL", "baseR", "brachiate" }, built.Cycles.Select(c => c.MemberId).ToArray());
-        Assert.Equal(0, built.Cycles[0].T0, 9);
-        Assert.Equal(1, built.Cycles[^1].T1, 9);
-        Assert.Equal(BambooTrussLayout.StartDock, built.Cycles[0].PickHang);
-        Assert.Equal(BambooTrussLayout.WalkHang, built.Cycles[^1].PlaceHang);
-    }
-
-
-    [Fact]
-    public void WalkHang_IsOutboardLGripAtA_OnDoubleFixedChord()
-    {
-        var a = BambooTrussLayout.FootNodes[0];
-        var w = BambooTrussLayout.WalkHang;
-        Assert.Equal(a.X - BambooTrussLayout.WalkHangOffset, w.X, 9);
-        Assert.Equal(a.Y, w.Y, 9);
-        Assert.Equal(BambooTrussLayout.PlaneZ, w.Z, 9);
-        Assert.Equal(new[] { "baseL", "baseR" }, BambooTrussLayout.WalkableMemberIdsAfter(2));
-        Assert.True(BambooTrussLayout.BrachiateHangPath.Count >= 4);
-        Assert.Equal(BambooTrussLayout.StartDock, BambooTrussLayout.BrachiateHangPath[0]);
-        Assert.Equal(BambooTrussLayout.WalkHang, BambooTrussLayout.BrachiateHangPath[3]);
-    }
-
-    [Fact]
-    public void SepAndDiags_AreJawAxisUnreachable_FromWalkHang()
-    {
-        // Motus-honest blocker: on-chord WalkHang cannot IK-reach apex members at 0.5 m.
-        static bool Ik(BambooIcdCell.StrutPlacement p, BambooIcdMotion.HangPose hang)
-        {
-            foreach (var tilt in new[] { p.PitchDeg, -Math.Abs(p.PitchDeg), 0.0, -40.0, -60.0, -80.0, -90.0, 20.0, 40.0 })
-                if (BambooIcdMotion.IkSolveAxis(p.X, p.Y, p.Z, tilt, p.Axis, hang, BambooTrussMotion.PlaceAxisErrDeg).Count > 0)
-                    return true;
-            return false;
-        }
-        var hang = BambooTrussLayout.WalkHang;
-        Assert.False(Ik(BambooTrussLayout.NotionalSep, hang));
-        Assert.False(Ik(BambooTrussLayout.NotionalDiagL, hang));
-        Assert.False(Ik(BambooTrussLayout.NotionalDiagR, hang));
-        // Along-chord outboard hangs likewise cannot place sep.
-        for (var t = 0.0; t <= 1.0; t += 0.25)
-            Assert.False(Ik(BambooTrussLayout.NotionalSep, BambooTrussLayout.WalkHangAt(t)), $"sep reachable at WalkHangAt({t:F2})");
-    }
-
-    [Fact]
-    public void WalkHang_HomeIsMotusClear_WithChordPlanted()
-    {
-        var home = BambooIcdMotion.HomeDeg.ToArray();
-        var keys = new List<BambooIcdMotion.MotionKey>
-        {
-            new() { T = 0, Label = "Home", Q = home, GR = BambooTrussLayout.JawOpenMm, Hold = 0 },
-            new() { T = 1, Label = "Home", Q = home, GR = BambooTrussLayout.JawOpenMm, Hold = 0 }
-        };
-        var extras = BambooTrussLayout.Members
-            .Select(m => ($"placed-{m.Id}", m.Place)).ToList();
-        try
-        {
-            Cell.SetHang(BambooTrussLayout.WalkHang);
-            var track = Cell.TrackStrut(keys, BambooTrussLayout.Store);
-            Assert.True(Cell.IsClear(home, BambooTrussLayout.JawOpenMm, 24, 0, "Home", track, extras),
-                "WalkHang Home must be Motus-clear with baseL+baseR planted");
-        }
-        finally
-        {
-            Cell.SetHang(BambooTrussLayout.StartDock);
-        }
-    }
-
-
-    /// <summary>Every motion key label, in plan order — what Play must put on screen, one by one.</summary>
-    private static List<string> PlannedPhases(BambooTrussMotion.TrussBuild built) =>
-        built.Keys.Select(k => k.Label).ToList();
-
-    [Fact]
-    public void Plan_PhaseOrder_IsBaseL_BaseR_ThenBrachiateOntoChord()
-    {
-        var built = Build();
-        var phases = PlannedPhases(built);
-        var baseRDepart = phases.IndexOf("baseR:Depart");
-        Assert.True(baseRDepart > 0, "baseR:Depart missing");
-        Assert.Equal(new[] { "baseR:Depart", "baseR:Release", "baseR:Open", "baseR:Retract" },
-            phases.Skip(baseRDepart).Take(4).ToArray());
-        Assert.Equal(BambooTrussLayout.BrachiatePhaseLabels.Select(l => "brachiate:" + l).ToArray(),
-            phases.Skip(baseRDepart + 4).ToArray());
-        // Keys strictly increasing in T so no phase has zero duration on the timeline.
-        for (var i = 1; i < built.Keys.Count; i++)
-            Assert.True(built.Keys[i].T > built.Keys[i - 1].T, $"key {i} ({built.Keys[i].Label}) not after {built.Keys[i - 1].Label}");
-    }
-
-    [Theory]
-    [InlineData(0.016)]  // desktop frame
-    [InlineData(0.11)]   // slow WASM frame
-    public void Playback_ShowsEveryPlannedPhaseInOrder_EvenAcrossAStall(double frameSec)
-    {
-        var built = Build();
-        var play = new BambooTrussPlayback(built.Keys);
-        var shown = new List<string>();
-        var frames = 0;
-        var stalled = false;
-        while (!play.Done && frames < 200_000)
-        {
-            // One 16 s stall in baseR:Lower (where the recording froze) must not skip any block.
-            var dt = frameSec;
-            if (!stalled && play.T > 0.84 && play.T < 0.845) { dt = 16.0; stalled = true; }
-            var t = play.Advance(dt);
-            var label = BambooIcdMotion.Sample(built.Keys, t).Label;
-            if (shown.Count == 0 || shown[^1] != label) shown.Add(label);
-            frames++;
-        }
-        Assert.True(play.Done, "playback should finish");
-        Assert.Equal(1.0, play.T, 9);
-        Assert.Equal(PlannedPhases(built), play.Reached);
-        // Each planned phase is actually on screen (label sampled at a drawn frame), in order.
-        Assert.True(stalled, "test should inject the stall");
-        var drawn = shown;
-        var dedupPlan = PlannedPhases(built).Where((l, i) => i == 0 || PlannedPhases(built)[i - 1] != l).ToList();
-        Assert.Equal(dedupPlan, drawn);
-    }
-
-    [Fact]
-    public void Playback_NeverRunsAheadOfMotusFrontier_AndStillReachesEveryPhase()
-    {
-        var built = Build();
-        BambooTrussMotion.UseCell(Cell);
-        var scan = new BambooTrussScan(Cell, built.Keys, built.Cycles, BambooTrussLayout.Members, maxStepDeg: 0.5);
-        var play = new BambooTrussPlayback(built.Keys);
-        var frames = 0;
-        var waited = 0;
-        while (!play.Done && frames < 400_000)
-        {
-            if (!scan.Complete) scan.Step(3); // scan lags playback, like WASM with a cold background scan
-            var t = play.Advance(0.05, scan.Frontier);
-            Assert.True(t <= scan.Frontier + 1e-12, $"playback t={t:F4} ran past Motus frontier {scan.Frontier:F4}");
-            if (play.WaitingForMotus) waited++;
-            frames++;
-        }
-        Assert.Null(scan.FirstHit);
-        Assert.True(play.Done);
-        Assert.True(waited > 0, "test should exercise a lagging scan");
-        Assert.Equal(PlannedPhases(built), play.Reached);
-    }
-
-    [Fact]
-    public void Brachiate_HangWalk_IsDenselyMotusChecked_AndDrawnAtTheHang()
-    {
-        var built = Build();
-        var scan = new BambooTrussScan(Cell, built.Keys, built.Cycles, BambooTrussLayout.Members, maxStepDeg: 0.5);
-        var b = built.Cycles.Single(c => c.MemberId == "brachiate");
-        var path = BambooTrussLayout.BrachiateHangPath;
-        var length = 0.0;
-        for (var i = 1; i < path.Count; i++)
-        {
-            var dx = path[i].X - path[i - 1].X; var dy = path[i].Y - path[i - 1].Y; var dz = path[i].Z - path[i - 1].Z;
-            length += Math.Sqrt(dx * dx + dy * dy + dz * dz);
-        }
-        var samples = scan.SampleTimes.Count(t => t > b.T0 && t <= b.T1);
-        Assert.True(samples >= length / BambooTrussScan.MaxHangStepM,
-            $"brachiate hang-walk has {samples} Motus samples for {length:F3} m of hang travel");
-        Assert.Equal(BambooTrussLayout.StartDock, scan.HangAt(b.T0));
-        Assert.Equal(BambooTrussLayout.WalkHang, scan.HangAt(1.0));
-        // Grip key sits exactly on the outboard L-grip at A (walk only on the double-fixed chord).
-        var grip = built.Keys.Single(k => k.Label == "brachiate:Grip");
-        var h = scan.HangAt(grip.T);
-        Assert.Equal(BambooTrussLayout.WalkHang.X, h.X, 6);
-        Assert.Equal(BambooTrussLayout.WalkHang.Y, h.Y, 6);
-        Assert.Equal(BambooTrussLayout.WalkHang.Z, h.Z, 6);
-    }
-
-    [Fact]
-    public void IkSolveAxis_MatchesSpatialForThePlanarStrut()
-    {
-        var spatial = BambooIcdMotion.IkSolveSpatial(0, 0.00778, 0.07, 0);
-        var axis = BambooIcdMotion.IkSolveAxis(0, 0.00778, 0.07, 0, BambooIcdMotion.StrutAxis(0));
-        Assert.NotEmpty(axis);
-        Assert.Contains(axis, q => Enumerable.Range(0, 5).All(k => Math.Abs(q[k] - spatial[0][k]) < 1e-6));
-    }
-
-    [Fact]
-    public void IkSolveSpatial_MatchesPlanarWhenXIsZero()
-    {
-        var planar = BambooIcdMotion.IkSolve(0.00778, 0.07, 0);
-        var spatial = BambooIcdMotion.IkSolveSpatial(0, 0.00778, 0.07, 0);
-        Assert.NotEmpty(planar);
-        Assert.NotEmpty(spatial);
-        Assert.Equal(planar[0][0], spatial[0][0], 6);
-        Assert.Equal(planar[0][1], spatial[0][1], 6);
-    }
-
 }
-

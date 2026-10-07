@@ -17,7 +17,7 @@
 
     <aside class="controls">
         <h1>Bamboo truss (store → bridge span)</h1>
-        <p class="sub">Single truss: two triangles standing in a vertical plane (XY at fixed Z), sharing upright B–C. The store feeds one cane at a time; each is carried onto its true edge member. Motus.NET owns FK/tasks/collision; Three.js only draws.</p>
+        <p class="sub">Bridge lower chord (baseL + baseR, 0.5 m canes) built by a grounded two-gripper arm. One gripper is always clamped on a real fixed object (stake or double-fixed cane) and is the IK base; the other moves by joint IK only. Motus.NET owns FK/IK/collision; Three.js only draws.</p>
         <div class="phase @(!string.IsNullOrEmpty(_motionError) || _collision ? "err" : "")" data-motus="@_motusState">@_phase</div>
 
         <div class="row">
@@ -78,6 +78,15 @@
         </div>
 
         <p class="warn">@_motionError</p>
+        @if (_planNotes.Count > 0)
+        {
+            <ul class="note plan-notes">
+                @foreach (var n in _planNotes)
+                {
+                    <li>@n</li>
+                }
+            </ul>
+        }
         @if (!string.IsNullOrEmpty(_motusNote))
         {
             <p class="warn motus-hit">@_motusNote</p>
@@ -121,13 +130,14 @@
             Drag the view to orbit. Moving a joint or gripper slider pauses playback and drives the arm from C#.
             Play runs every pick/place pair (object = member id). Vertical footprint: A–B–C + B–D–C in the XY plane, B near ground, C apex, shared upright B–C.
             Bend axes local X, wrists local Y, jaws local X. Viewer is Three.js Y-up; Motus.NET URDF is Z-up (shared θ).
-            Collision: Motus.NET against ground pads, mount, already-placed members, the held strut, and self (no hang rod). Motus-clear prefix: lower chord baseL+baseR.
-            Play builds Motus-clear members in order (feed → baseL → baseR at 0.5 m; no hang rod). Stop on first Motus hit.
+            Start: L-grip clamped on anchor stake S1 (amber ring = clamped base and what it is on). The R-grip picks each cane off the feed rail and places it exactly on its member; then it clamps the double-fixed chord, the base swaps to R, the L-grip slides up off S1 and down onto stake S2, the base swaps back to L and the R-grip re-grips the chord.
+            Collision: Motus.NET for every link, both grippers, the mount, the held cane, pads, posts, stakes, rail, placed canes and self; the only allowed touch is a gripper's jaw plates on what it clamps. Play/scrub never pass the Motus-verified frontier.
         </p>
     </aside>
 </div>
 
 @code {
+    private List<string> _planNotes = new();
     private BambooIcdCell? _cell;
     private CancellationTokenSource? _scanCts;
 
@@ -139,7 +149,7 @@
     private string _motusNote = "";
 
     private double[] _qDeg = BambooIcdMotion.HomeDeg.ToArray();
-    private double _gL = 24;
+    private double _gL = BambooTrussLayout.JawClosedMm;
     private double _gR = 40;
     private int _hold;
     private string _label = "Home";
@@ -180,7 +190,13 @@
                     ["includePole"] = false,
                     ["pole"] = new { radius = BambooIcdCell.PoleRadius, length = BambooIcdCell.PoleLength, segments = BambooIcdCell.PoleSegments },
                     ["strut"] = new { radius = BambooIcdCell.StrutRadius, length = _cell.StrutLen, segments = BambooIcdCell.StrutSegments },
-                    ["ground"] = new { size = BambooIcdCell.GroundSize },
+                    // Motus collides pads only (anchors, stakes, stock feed): draw exactly those, not a full slab.
+                    ["ground"] = new
+                    {
+                        size = BambooIcdCell.GroundSize,
+                        pads = BambooTrussLayout.Pads.Select(p => new { name = p.Name, x = p.X, z = p.Z, half = Math.Max(p.HalfX, p.HalfZ), halfX = p.HalfX, halfZ = p.HalfZ }).ToArray()
+                    },
+                    ["posts"] = BambooTrussLayout.Posts.Select(p => new { name = p.Name, x = p.X, z = p.Z, top = p.Top, radius = p.Radius }).ToArray(),
                     ["parts"] = _cell.Parts.Select(p => new { name = p.Name, link = p.Link, size = p.Size, pos = p.Pos }),
                     ["footprint"] = BambooTrussLayout.FootprintDescription(),
                     ["store"] = BambooTrussLayout.StoreDescription()
@@ -217,9 +233,8 @@
             // Hung arm + pole/cane/ground/mount CollisionScene; URDF link frames == drawn groups.
             // Truss canes use BambooTrussLayout.StrutLength (bridge edge canes) — drawn == collided.
             _cell = BambooIcdCell.Load(urdfContent, BambooTrussLayout.StrutLength);
-            _cell.IncludePole = false; // no horizontal hang rod — start dock + walk on double-fixed canes
-            _cell.SetAnchorPads(BambooTrussLayout.AnchorPads
-                .Select(a => (a.X, a.Z, BambooTrussLayout.AnchorPadHalf)).ToList());
+            // No hang rod, pads only; the L-grip starts clamped on anchor stake S1 (grounded base).
+            BambooTrussLayout.Configure(_cell);
             _robotReady = true;
             _initError = null;
         }
@@ -242,6 +257,13 @@
             await Task.Delay(1);
         });
         _motionError = built.Error;
+        _planNotes = built.Notes.ToList();
+        if (built.Grips.Count > 0)
+        {
+            var worst = built.Grips.Where(g => g.Gripper != "cane").ToList();
+            if (worst.Count > 0)
+                _planNotes.Add($"Grip FK residual (worst of {worst.Count}): {worst.Max(g => g.PosM) * 1000:F4} mm, {worst.Max(g => g.AxisDeg):F4}° (tolerance {BambooGripKinematics.GripPosTolM * 1000:F1} mm / {BambooGripKinematics.GripAxisTolDeg:F1}°)");
+        }
         _keys = built.Keys;
         _cycles = built.Cycles;
         _scanCts?.Cancel();
@@ -308,9 +330,9 @@
                 t = Math.Max(0, hit.LastClearT);
             }
         }
-        var sample = BambooIcdMotion.Sample(_keys, t);
+        var sample = BambooTrussMotion.SampleState(_keys, t);
         _qDeg = sample.Q;
-        _gL = 24;
+        _gL = sample.GL;
         _gR = sample.GR;
         _hold = sample.Hold;
         _label = sample.Label;
@@ -336,10 +358,8 @@
     private void RunManualCollision()
     {
         if (_cell is null || _trussScan is null) { _collision = false; return; }
-        var t = _t;
-        var (track, extras, _) = _trussScan.WorldAt(t, _hold);
-        _cell.SetHang(_trussScan.HangAt(t));
-        _contacts = _cell.Contacts(_qDeg, _gR, _gL, _hold, "Manual", track, extras);
+        // Manual sliders move the joints about the plan's clamped base at this time (the base never floats).
+        _contacts = _trussScan.ContactsAt(_t, _qDeg, _gR, _gL, _hold);
         _collision = _contacts.Count > 0;
         _motusState = _collision ? "manual-hit" : "clear";
         _phase = _collision ? $"Manual · Motus collision · {BambooIcdCell.Describe(_contacts)}" : "Manual";
@@ -357,19 +377,24 @@
         if (!_threeReady || _cell is null) return;
         object? strut = null;
         object? struts = null;
-        object? hang = null;
+        object? mount = null;
+        object? anchor = null;
         if (_trussScan is not null)
         {
             var poses = _trussScan.StrutPoses(_t, _hold, _qDeg);
             struts = poses.Select(p => new { name = p.Name, pose = p.Pose }).ToList();
-            // Brachiation relocates the L-grip mount; draw it where Motus collides it.
-            var h = _trussScan.HangAt(_t);
-            hang = new { x = h.X, y = h.Y, z = h.Z };
+            // The L-grip (mount) is wherever FK from the clamped base puts it — drawn exactly where Motus collides it.
+            var (lw, _) = _trussScan.GrippersAt(_t, _qDeg);
+            var f = Transforms.ToFrame(lw);
+            mount = new { p = new[] { f.X, f.Y, f.Z }, q = new[] { f.Qx, f.Qy, f.Qz, f.Qw } };
+            var (g, bw, on) = _trussScan.BaseAt(_t);
+            anchor = new { gripper = g, on, p = new[] { bw[3], bw[7], bw[11] }, axis = new[] { bw[2], bw[6], bw[10] } };
         }
         var payload = new
         {
             q = _qDeg,
-            hang,
+            mount,
+            anchor,
             gL = _gL,
             gR = _gR,
             strut,
@@ -523,7 +548,7 @@
         _tasks = BambooTrussMotion.DefaultTasks();
         _scrub = 0;
         _t = 0;
-        _gL = 24;
+        _gL = BambooTrussLayout.JawClosedMm;
         await RefreshMotionAsync(apply: true);
         await PushFramesAsync();
         await PushPoseAsync();

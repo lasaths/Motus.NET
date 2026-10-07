@@ -3,13 +3,14 @@ namespace Motus.Viewer.Services;
 /// <summary>
 /// Play clock for /bamboo-truss. Keeps motion time as a double (the page used to round it into the
 /// 0..1000 slider each frame), never crosses more than one motion key per <see cref="Advance"/> call,
-/// parks on every key for <see cref="MinDwellSec"/> so each phase is drawn on screen, and never runs
-/// past the Motus-verified frontier. A stalled frame (large dt) can therefore never skip a block.
+/// parks for <see cref="MinDwellSec"/> at the end of every block (the last key of a run of keys with the same
+/// label, e.g. after the last Transit via or at a Close / base swap) so each phase is drawn on screen, and never
+/// runs past the Motus-verified frontier. A stalled frame (large dt) can therefore never skip a block.
 /// </summary>
 public sealed class BambooTrussPlayback
 {
     /// <summary>Wall-clock seconds for the full 0→1 motion (excluding dwells).</summary>
-    public const double DurationSec = 45.0;
+    public const double DurationSec = 60.0;
     /// <summary>Minimum on-screen time parked on each reached key (seconds).</summary>
     public const double MinDwellSec = 0.35;
     /// <summary>Largest dt applied to motion per frame (seconds) — smooth motion after a stall.</summary>
@@ -66,8 +67,9 @@ public sealed class BambooTrussPlayback
         {
             T = keyT;
             Reached.Add(_keys[_next].Label);
+            var blockEnd = _next + 1 >= _keys.Count || _keys[_next + 1].Label != _keys[_next].Label;
             _next++;
-            _dwell = MinDwellSec;
+            _dwell = blockEnd ? MinDwellSec : 0;
         }
         return T;
     }

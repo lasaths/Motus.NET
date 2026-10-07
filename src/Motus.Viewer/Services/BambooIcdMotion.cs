@@ -56,6 +56,17 @@ public static class BambooIcdMotion
         public double[] Q { get; set; } = HomeDeg.ToArray();
         public double GR { get; set; } = 40;
         public int Hold { get; set; }
+        /// <summary>L-grip opening (mm). /bamboo keeps the pole clamp at 24.</summary>
+        public double GL { get; set; } = 24;
+        /// <summary>/bamboo-truss: which gripper is clamped and is the IK base on the segment ending at this key ("L" / "R").</summary>
+        public string? Base { get; set; }
+        /// <summary>/bamboo-truss: world frame (viewer 4×4 row-major) of the clamped base gripper on that segment.</summary>
+        public double[]? BaseWorld { get; set; }
+        /// <summary>/bamboo-truss: fixed object the base gripper is clamped on.</summary>
+        public string? BaseOn { get; set; }
+        /// <summary>/bamboo-truss: objects the L / R jaw plates may touch on that segment ('|'-separated; clamp contact only).</summary>
+        public string? LOn { get; set; }
+        public string? ROn { get; set; }
     }
 
     public sealed class MotionBuild

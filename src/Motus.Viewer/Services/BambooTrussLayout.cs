@@ -1,147 +1,136 @@
+using Motus.Core;
+using K = Motus.Viewer.Services.BambooGripKinematics;
+
 namespace Motus.Viewer.Services;
 
 /// <summary>
-/// Store/truss member poses for the /bamboo-truss variation.
+/// Store/truss member poses and fixed ground fixtures for /bamboo-truss (viewer coordinates, Y-up).
 /// <para>
-/// Bridge lower chord in the vertical XY plane (constant <see cref="PlaneZ"/>) at
-/// <see cref="StrutLength"/> = 0.5 m — Motus-reachable stand-in for ASCII <c>/_\-/_\</c>:
+/// Bridge lower chord in the vertical XY plane at <see cref="StrutLength"/> = 0.5 m:
 /// <code>
-///    A--B--D     (baseL /  +  baseR _ )
+///    A--B--D     (baseL /  +  baseR _ ; baseR lashed 16 mm beside baseL at B)
 /// </code>
-/// Anchored at A and D (no earth between). Stock lays flat next to the span. No hang rod
-/// (<c>IncludePole=false</c>); start dock at <see cref="StartDock"/>, then Motus-checked
-/// re-approach after baseL (hang-side / Motus-filtered vias).
+/// Ends A and D sit on anchor posts (pads under them, no earth between). The two canes meet at B side by side
+/// (<see cref="LashDz"/>): two 14 mm canes cannot occupy the same node, so baseR runs 16 mm nearer the robot.
 /// </para>
 /// <para>
-/// After baseL+baseR the lower chord is both-ends-fixed; the auto path brachiates onto
-/// <see cref="WalkHang"/> (outboard L-grip at A — Motus-clear transfer from the dock).
-/// <b>Motus limit:</b> sep / diags / five-triangle stay jaw-axis unreachable from every Motus-clear
-/// on-chord hang (arm hangs down; apex mids sit above / too far laterally). Motus-clear members:
-/// baseL+baseR only. /bamboo stays 0.30 m.
-/// </para>
-/// <para>
-/// Build order: baseL <c>/</c> → baseR <c>_</c> → brachiate onto the double-fixed chord.
+/// <b>Grounded start, no floating mount.</b> The arm starts with its L-grip clamped on anchor stake
+/// <see cref="S1"/> (a 14 mm post planted on its own pad beside the stock feed). Every instant at least one gripper
+/// is clamped on a real fixed object, and that gripper is the IK base. The L-grip is a closed clamp (rail + body on
+/// one side, base tube on the other, jaws on both — the cane cannot leave it sideways at any opening), so it can only
+/// come off a support by sliding over a free end: the stakes' tops. The R-grip (open slot) clamps the canes.
+/// Walk: from S1, R clamps the double-fixed chord, L slides off S1 and onto stake <see cref="S2"/>, then R re-grips
+/// the chord further along.
 /// </para>
 /// </summary>
 public static class BambooTrussLayout
 {
     /// <summary>Truss cane length (metres). All edge canes are this length.</summary>
     public const double StrutLength = 0.5;
-    /// <summary>Clearance from each outer-edge node to the cane end on AB/BD (metres).</summary>
-    public const double NodeGap = 0.03;
     /// <summary>Design side length for A–B and B–D (equals <see cref="StrutLength"/> — canes meet at node B).</summary>
     public const double Side = 0.5;
-    /// <summary>
-    /// Notional upright B–C length for the Motus-unreachable apex (documented limit only — not placed).
-    /// Kept equal to <see cref="StrutLength"/> so FootNodes sketch the intended two-triangle bay.
-    /// </summary>
+    /// <summary>Notional upright B–C length (apex C is drawn in the footprint only — not built).</summary>
     public const double Height = 0.5;
 
-    public const double StrutY = 0.00778;
-    public const double StoreApproachDy = 0.04;
-    /// <summary>Hold offset along +Y above the release (cane centre).</summary>
-    public const double PlaceHoldDy = 0.012;
     public const double JawClosedMm = 14;
     public const double JawOpenMm = 40;
+    /// <summary>L-grip fully open while sliding along a stake (jaw plates 15 mm off the 14 mm stake).</summary>
+    public const double LJawOpenMm = 45;
 
     /// <summary>Vertical plane of the truss (viewer Z).</summary>
     public const double PlaneZ = 0.11;
-    /// <summary>Ground-side node B height (metres). Slightly elevated so inclined base canes clear the slab.</summary>
+    /// <summary>baseR runs this far off <see cref="PlaneZ"/> (lashed beside baseL at B: 14 mm cane + 2 mm gap).</summary>
+    public const double LashDz = -0.016;
+    /// <summary>Ground-side node B height (metres).</summary>
     public const double FootY0 = 0.06;
     /// <summary>Half-width |x| of A and D.</summary>
     public static readonly double HalfSpan = Math.Sqrt(Side * Side - (Height / 2) * (Height / 2));
     /// <summary>Half-extent of Motus ground pads about anchors A and D (metres).</summary>
     public const double AnchorPadHalf = 0.06;
+    /// <summary>Anchor posts under A and D (radius, and gap below the node so the cane end clears the post top).</summary>
+    public const double AnchorPostRadius = 0.012;
+    public const double AnchorPostGap = 0.02;
 
-    /// <summary>
-    /// Start-dock hang (viewer). Same coordinates as the legacy support-pole hang so ICD IK/Home match,
-    /// but /bamboo-truss draws no horizontal hang rod — only the L-grip mount at this dock. After the
-    /// lower chord is fixed the path brachiates onto <see cref="WalkHang"/>.
-    /// </summary>
-    public static BambooIcdMotion.HangPose StartDock { get; } = BambooIcdMotion.HangPose.Pole;
-
-    /// <summary>L-grip clamp offset from a walk-rail cane axis (metres).</summary>
-    public const double WalkHangOffset = 0.03;
-    /// <summary>Elevated hang Y used while transferring from <see cref="StartDock"/> onto the chord.</summary>
-    public const double BrachiateViaY = 0.42;
-    /// <summary>Hang-side Z for the elevated transfer vias (metres).</summary>
-    public const double BrachiateViaZ = -0.05;
-    /// <summary>
-    /// Walk-rail hang on the planted lower chord at A (both ends fixed: A/D anchors + B junction).
-    /// Outboard −X L-grip so Home is Motus-clear and the dock→chord hang transfer stays Motus-clear
-    /// (inboard / −Z offsets leave a Motus collision band on the transfer).
-    /// </summary>
-    public static BambooIcdMotion.HangPose WalkHang
+    /// <summary>A vertical anchor stake the L-grip clamps (slot axis = stake axis = viewer +Y).</summary>
+    public sealed record Stake(string Name, double X, double Z, double ClampY, double Top, double HeadingDeg)
     {
-        get
-        {
-            var a = FootNodes[0];
-            return new BambooIcdMotion.HangPose(a.X - WalkHangOffset, a.Y, PlaneZ);
-        }
+        /// <summary>L-grip grip target on the stake at <see cref="ClampY"/>.</summary>
+        public K.GripTarget Grip => new(X, ClampY, Z, 0, 1, 0, Name);
+        public K.GripTarget At(double y) => new(X, y, Z, 0, 1, 0, Name);
+    }
+    public const double StakeRadius = 0.007;
+    public const double StakePadHalf = 0.03;
+
+    /// <summary>Start anchor stake beside the stock feed: L-grip clamped at y = 0.313, arm heading −66.2° (chosen by an offline reach + Motus clearance search).</summary>
+    public static Stake S1 { get; } = new("stake-S1", 0.054, -0.092, 0.313, 0.343, -66.2);
+    /// <summary>Second anchor stake (walk target for the L-grip, reached while the R-grip holds the chord).</summary>
+    public static Stake S2 { get; } = new("stake-S2", -0.25, -0.20, 0.24, 0.27, 0);
+    public static IReadOnlyList<Stake> Stakes { get; } = new[] { S1, S2 };
+
+    /// <summary>Exact L-grip clamp frame on <see cref="S1"/> (viewer 4×4): the IK base at t = 0.</summary>
+    public static double[] StartBase => K.StakeClampFrame(S1.X, S1.ClampY, S1.Z, S1.HeadingDeg);
+
+    /// <summary>Stock feed rail: a narrow fixed rail the next cane rests on (top = cane bottom), so the open R jaws
+    /// straddle it without touching the ground (a cane flat on the ground leaves only ~3 mm under the jaw plates).</summary>
+    public const double RackTop = 0.043;
+    public const double RackHalfZ = 0.004;
+    public const double RackHalfX = 0.2;
+    /// <summary>Feed rail centre (viewer x / z): in front of S1, between S1 and the truss plane.</summary>
+    public const double FeedX = 0.054;
+    public const double FeedZ = -0.130;
+    /// <summary>
+    /// Feed cane centre height: on the rail with a 0.5 mm seat gap. Motus reports a resting contact (distance 0) as a
+    /// hit, so the feed cane is modelled 0.5 mm proud of the rail rather than whitelisting cane↔rail.
+    /// </summary>
+    public const double RackSeatGap = 0.0005;
+    public const double StrutY = RackTop + 0.007 + RackSeatGap;
+
+    /// <summary>Ground pads (viewer XZ centre + half extents): anchors, stakes and the stock feed — no earth elsewhere.</summary>
+    public static IReadOnlyList<(string Name, double X, double Z, double HalfX, double HalfZ)> Pads { get; } =
+    [
+        ("ground-A", -HalfSpan, PlaneZ, AnchorPadHalf, AnchorPadHalf),
+        ("ground-D", HalfSpan, PlaneZ + LashDz, AnchorPadHalf, AnchorPadHalf),
+        ("ground-S1", S1.X, S1.Z, StakePadHalf, StakePadHalf),
+        ("ground-S2", S2.X, S2.Z, StakePadHalf, StakePadHalf),
+        ("ground-store", FeedX, FeedZ, 0.22, 0.02)
+    ];
+
+    /// <summary>Anchor posts (A, D) and stakes as vertical cylinders: (name, x, z, top, radius).</summary>
+    public static IReadOnlyList<(string Name, double X, double Z, double Top, double Radius)> Posts { get; } =
+    [
+        ("post-A", -HalfSpan, PlaneZ, FootY0 + Height / 2 - AnchorPostGap, AnchorPostRadius),
+        ("post-D", HalfSpan, PlaneZ + LashDz, FootY0 + Height / 2 - AnchorPostGap, AnchorPostRadius),
+        (S1.Name, S1.X, S1.Z, S1.Top, StakeRadius),
+        (S2.Name, S2.X, S2.Z, S2.Top, StakeRadius)
+    ];
+
+    /// <summary>Feed rails as boxes (viewer): name, centre x/z, half extents x/z, top y (bottom on the ground).</summary>
+    public static IReadOnlyList<(string Name, double X, double Z, double HalfX, double HalfZ, double Top)> Racks { get; } =
+    [
+        ("store-rack", FeedX, FeedZ, RackHalfX, RackHalfZ, RackTop)
+    ];
+
+    static IReadOnlyList<CollisionObject>? _fixtures;
+    /// <summary>Motus objects for <see cref="Posts"/> and <see cref="Racks"/> (built once; pads come from the cell).</summary>
+    public static IReadOnlyList<CollisionObject> FixtureObjects =>
+        _fixtures ??= Posts.Select(p => BambooIcdCell.PostAt(p.Name, p.X, p.Z, 0, p.Top, p.Radius))
+            .Concat(Racks.Select(r => BambooIcdCell.BoxAt(r.Name, r.X, r.Top / 2, r.Z, r.HalfX, r.Top / 2, r.HalfZ)))
+            .ToList();
+
+    /// <summary>Configure a cell for /bamboo-truss: no hang rod, pads only.</summary>
+    public static void Configure(BambooIcdCell cell)
+    {
+        cell.IncludePole = false;
+        cell.SetGroundPads(Pads);
     }
 
-    /// <summary>Outboard L-grip on baseL at parametric t along A→B (0 at A, 1 at B).</summary>
-    public static BambooIcdMotion.HangPose WalkHangAt(double t)
-    {
-        var a = FootNodes[0]; var b = FootNodes[1];
-        t = Math.Clamp(t, 0, 1);
-        var x = a.X + (b.X - a.X) * t;
-        var y = a.Y + (b.Y - a.Y) * t;
-        return new BambooIcdMotion.HangPose(x - WalkHangOffset, y, PlaneZ);
-    }
-
-    /// <summary>
-    /// Motus-clear hang waypoints for brachiating from <see cref="StartDock"/> onto
-    /// <see cref="WalkHang"/> and a short along-chord walk (Home posture throughout).
-    /// </summary>
-    public static IReadOnlyList<BambooIcdMotion.HangPose> BrachiateHangPath
-    {
-        get
-        {
-            var w = WalkHang;
-            return
-            [
-                StartDock,
-                new BambooIcdMotion.HangPose(0, BrachiateViaY, BrachiateViaZ),
-                new BambooIcdMotion.HangPose(w.X, BrachiateViaY, BrachiateViaZ),
-                w,
-                WalkHangAt(0.5),
-                w
-            ];
-        }
-    }
-
-    /// <summary>
-    /// Phase label for each <see cref="BrachiateHangPath"/> waypoint (motion keys are
-    /// <c>brachiate:&lt;label&gt;</c>): Home at the dock → Rise → Traverse (hang-side, above the span) →
-    /// Grip (outboard L-grip on baseL at A) → Walk (along baseL) → Return (back to the A grip).
-    /// </summary>
-    public static IReadOnlyList<string> BrachiatePhaseLabels { get; } =
-        ["Home", "Rise", "Traverse", "Grip", "Walk", "Return"];
-
-    /// <summary>Notional sep / diag place poses (not in <see cref="Members"/> — Motus-unreachable from WalkHang).</summary>
+    /// <summary>Notional sep / diag place poses (not built — see type summary).</summary>
     public static BambooIcdCell.StrutPlacement NotionalSep
     {
         get
         {
             var b = FootNodes[1]; var c = FootNodes[3];
             return AlongEdge((b.X, b.Y, b.Z), (c.X, c.Y, c.Z));
-        }
-    }
-    public static BambooIcdCell.StrutPlacement NotionalDiagL
-    {
-        get
-        {
-            var a = FootNodes[0]; var c = FootNodes[3];
-            return AlongEdge((a.X, a.Y, a.Z), (c.X, c.Y, c.Z));
-        }
-    }
-    public static BambooIcdCell.StrutPlacement NotionalDiagR
-    {
-        get
-        {
-            var d = FootNodes[2]; var c = FootNodes[3];
-            return AlongEdge((d.X, d.Y, d.Z), (c.X, c.Y, c.Z));
         }
     }
 
@@ -154,32 +143,16 @@ public static class BambooTrussLayout
         (double X, double Y, double Z) EdgeA,
         (double X, double Y, double Z) EdgeB);
 
-    /// <summary>
-    /// Stock feed next to the span (proven Motus pick band): cane along +X (yaw 90) at the ICD
-    /// pick height, offset −Z from the truss plane so Lift/Pitch clear placed edge members. Visually
-    /// beside anchor A’s side of the cell.
-    /// </summary>
-    public static BambooIcdCell.StrutPlacement Store { get; } =
-        // Hang-side of PlaneZ: Motus-reachable pick; clears planted baseL on re-approach better than z=0.05.
-        new(0.0, BambooIcdMotion.Pick.Y, -0.02, 0, 90);
+    /// <summary>Stock feed: cane lying on the feed rail along +X (yaw 90), between the stake S1 and the truss plane.</summary>
+    public static BambooIcdCell.StrutPlacement Store { get; } = new(FeedX, StrutY, FeedZ, 0, 90);
 
-    /// <summary>
-    /// Truss nodes: A/D outer anchors, B lower mid; C is the notional apex of the Motus-unreachable
-    /// first bay (drawn in the footprint only).
-    /// </summary>
+    /// <summary>Truss nodes: A/D anchors (on posts), B lower mid (baseR lashed beside it), C notional apex.</summary>
     public static readonly (string Name, double X, double Y, double Z)[] FootNodes =
     [
         ("A", -HalfSpan, FootY0 + Height / 2, PlaneZ),
         ("B", 0, FootY0, PlaneZ),
-        ("D", HalfSpan, FootY0 + Height / 2, PlaneZ),
+        ("D", HalfSpan, FootY0 + Height / 2, PlaneZ + LashDz),
         ("C", 0, FootY0 + Height, PlaneZ)
-    ];
-
-    /// <summary>Motus ground pad centres (viewer XZ) at the two outer anchors — no earth between.</summary>
-    public static readonly (double X, double Z)[] AnchorPads =
-    [
-        (-HalfSpan, PlaneZ),
-        (HalfSpan, PlaneZ)
     ];
 
     public static IReadOnlyList<MemberDef> Members { get; } = BuildMembers();
@@ -188,12 +161,12 @@ public static class BambooTrussLayout
     {
         var A = (-HalfSpan, FootY0 + Height / 2, PlaneZ);
         var B = (0.0, FootY0, PlaneZ);
-        var D = (HalfSpan, FootY0 + Height / 2, PlaneZ);
-        // Motus-clear 0.5 m lower-chord prefix (sep/diags Motus-unreachable from WalkHang — see type summary).
+        var Bl = (0.0, FootY0, PlaneZ + LashDz);
+        var D = (HalfSpan, FootY0 + Height / 2, PlaneZ + LashDz);
         var edges = new (string Id, string Label, string Glyph, (double X, double Y, double Z) P, (double X, double Y, double Z) Q)[]
         {
             ("baseL", "base left", "/", A, B),
-            ("baseR", "base right", "_", B, D)
+            ("baseR", "base right", "_", Bl, D)
         };
         var list = new List<MemberDef>();
         foreach (var e in edges)
@@ -258,9 +231,10 @@ public static class BambooTrussLayout
             ax = m.EdgeA.X, ay = m.EdgeA.Y, az = m.EdgeA.Z,
             bx = m.EdgeB.X, by = m.EdgeB.Y, bz = m.EdgeB.Z
         }),
-        anchors = AnchorPads.Select(a => new { x = a.X, z = a.Z, half = AnchorPadHalf }),
-        // Intended but Motus-unreachable at 0.5 m without a hang rod (see type summary).
-        motusLimit = "lower chord baseL+baseR Motus-clear (no hang rod); brachiate onto outboard WalkHang at A; sep/diags/five-triangle jaw-axis unreachable from on-chord hangs"
+        anchors = Pads.Select(a => new { name = a.Name, x = a.X, z = a.Z, halfX = a.HalfX, halfZ = a.HalfZ }),
+        posts = Posts.Select(p => new { name = p.Name, x = p.X, z = p.Z, top = p.Top, radius = p.Radius }),
+        racks = Racks.Select(r => new { name = r.Name, x = r.X, z = r.Z, halfX = r.HalfX, halfZ = r.HalfZ, top = r.Top }),
+        motusLimit = "L-grip clamped on stake S1 (grounded base); R builds baseL+baseR; walk: R clamps chord, L slides S1→S2, R re-grips chord"
     };
 
     public static object StoreDescription() => new

@@ -21,6 +21,7 @@
   var scene, camera, renderer, view;
   var look, theta, phi, dist;
   var j1, j2, j3, j4, j5, jaw, mount;
+  var anchorGroup = null, anchorLabel = null, anchorText = '';
   var lNeg, lPos, rNeg, rPos, strut;
   var strutPool = [];
   var footprintRoot = null;
@@ -282,14 +283,16 @@
     if (cell.ground.pads && cell.ground.pads.length) {
       var padGroup = [];
       cell.ground.pads.forEach(function (pad, i) {
+        var hx = pad.halfX || pad.half, hz = pad.halfZ || pad.half;
         var g = new THREE.Mesh(
-          new THREE.PlaneGeometry(pad.half * 2, pad.half * 2),
+          new THREE.PlaneGeometry(hx * 2, hz * 2),
           new THREE.MeshStandardMaterial({ color: 0x070707, roughness: 1, metalness: 0 })
         );
         g.rotation.x = -Math.PI / 2;
         g.position.set(pad.x, 0, pad.z);
         scene.add(g);
         padGroup.push(g);
+        if (pad.name) registerCollider(pad.name, [g]);
       });
       registerCollider('ground', padGroup);
       groundMesh = padGroup[0];
@@ -330,6 +333,27 @@
         scene.add(n);
       });
     }
+
+    // /bamboo-truss fixtures: anchor posts, stakes (L-grip anchors) and the feed rail — exactly the Motus objects.
+    (cell.posts || []).forEach(function (post) {
+      var m = new THREE.Mesh(new THREE.CylinderGeometry(post.radius, post.radius, post.top, 20), mats.node);
+      m.position.set(post.x, post.top / 2, post.z);
+      scene.add(m);
+      registerCollider(post.name, [m]);
+    });
+    (cell.racks || []).forEach(function (r) {
+      var m = new THREE.Mesh(new THREE.BoxGeometry(r.halfX * 2, r.top, r.halfZ * 2), mats.node);
+      m.position.set(r.x, r.top / 2, r.z);
+      scene.add(m);
+      registerCollider(r.name, [m]);
+    });
+    // Anchored-base marker: ring around the clamped gripper's slot axis + label naming what it is clamped on.
+    anchorGroup = new THREE.Group();
+    var anchorRing = new THREE.Mesh(new THREE.TorusGeometry(0.03, 0.0022, 8, 40),
+      new THREE.MeshBasicMaterial({ color: 0xffb020 }));
+    anchorGroup.add(anchorRing);
+    anchorGroup.visible = false;
+    scene.add(anchorGroup);
 
     mount = new THREE.Group();
     mount.position.set(0, POLE_Y, 0);
@@ -436,14 +460,39 @@
 
   /**
    * Apply pose from Motus.NET / Blazor.
-   * payload: { q:[5], hang?:{x,y,z}, gL, gR, strut:[...], struts?:[{name,pose:[7]}], axesVisible, hitParts?:[string] }
+   * payload: { q:[5], mount?:{p:[3],q:[4]}, anchor?:{gripper,on,p:[3],axis:[3]}, hang?:{x,y,z}, gL, gR, strut:[...], struts?:[{name,pose:[7]}], axesVisible, hitParts?:[string] }
    * hitParts are Motus contact body names (URDF collision names, 'pole', 'strut', 'ground', mount parts).
    */
   window.setBambooPose = function (payloadJson) {
     if (!ready) return;
     var p = typeof payloadJson === 'string' ? JSON.parse(payloadJson) : payloadJson;
-    // Brachiation: the L-grip mount (and the whole arm under it) moves to the Motus hang pose.
-    if (p.hang && mount && typeof p.hang.x === 'number') mount.position.set(p.hang.x, p.hang.y, p.hang.z);
+    // Grounded base swapping: the L-grip mount pose is FK from whichever gripper is clamped (full pose).
+    if (p.mount && mount && p.mount.p) {
+      mount.position.set(p.mount.p[0], p.mount.p[1], p.mount.p[2]);
+      mount.quaternion.set(p.mount.q[0], p.mount.q[1], p.mount.q[2], p.mount.q[3]);
+    } else if (p.hang && mount && typeof p.hang.x === 'number') mount.position.set(p.hang.x, p.hang.y, p.hang.z);
+    if (anchorGroup) {
+      if (p.anchor && p.anchor.p) {
+        anchorGroup.visible = true;
+        anchorGroup.position.set(p.anchor.p[0], p.anchor.p[1], p.anchor.p[2]);
+        // Torus lies in its XY plane: turn its normal (+Z) onto the clamped slot axis.
+        var ax = new THREE.Vector3(p.anchor.axis[0], p.anchor.axis[1], p.anchor.axis[2]).normalize();
+        anchorGroup.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), ax);
+        var text = p.anchor.gripper + ' clamped on ' + p.anchor.on;
+        if (text !== anchorText) {
+          if (anchorLabel) scene.remove(anchorLabel);
+          anchorLabel = makePlaneLabel(text);
+          anchorLabel.scale.set(0.16, 0.04, 1);
+          scene.add(anchorLabel);
+          anchorText = text;
+        }
+        anchorLabel.position.set(p.anchor.p[0], p.anchor.p[1] + 0.06, p.anchor.p[2]);
+        anchorLabel.visible = true;
+      } else {
+        anchorGroup.visible = false;
+        if (anchorLabel) anchorLabel.visible = false;
+      }
+    }
     if (p.q && p.q.length >= 5) applyJoints(p.q);
     if (typeof p.gL === 'number') setOpening(lNeg, lPos, p.gL);
     if (typeof p.gR === 'number') setOpening(rNeg, rPos, p.gR);

@@ -102,6 +102,7 @@ public sealed class BambooIcdCell
         _defaultMountWorld = Transforms.FromRpy(hang.OriginX, hang.OriginY, hang.OriginZ, hang.Roll, hang.Pitch, hang.Yaw);
         MountWorld = (double[])_defaultMountWorld.Clone();
         Hang = BambooIcdMotion.HangPose.Pole;
+        _mountKey = MountKeyOf(MountWorld);
 
         _mountGeometry = UrdfCollisionLoader.Load(root, new[] { "mount" }, ".")?.Links
                          ?? throw new InvalidOperationException("bamboo URDF: mount has no collision.");
@@ -144,21 +145,55 @@ public sealed class BambooIcdCell
         Load(File.ReadAllText(path), strutLength);
 
     /// <summary>
-    /// Relocate the L-grip hang in viewer space (brachiation). Updates mount collision and Motus base
-    /// so FK/collision match <see cref="BambooIcdMotion.FkJaw"/> with the same hang.
+    /// Relocate the L-grip hang in viewer space (translation only, /bamboo pole hang). Updates mount collision and
+    /// the Motus base so FK/collision match <see cref="BambooIcdMotion.FkJaw"/> with the same hang.
     /// </summary>
     public void SetHang(BambooIcdMotion.HangPose hang)
     {
         // Scan / viewer call this per sample; an unchanged hang must keep the Motus scene + checker caches.
-        if (hang == Hang) return;
+        if (hang == Hang && _mountIsHang) return;
         Hang = hang;
+        _mountIsHang = true;
         // Motus delta: viewer (x,y,z) → Motus (x,−z,y); default hang Motus (0,0,PoleY).
         var dx = hang.X;
         var dy = -hang.Z;
         var dz = hang.Y - BambooIcdMotion.PoleY;
         var delta = Transforms.FromFrame(new Frame(dx, dy, dz));
         MountWorld = Transforms.Multiply(delta, _defaultMountWorld);
-        // Scenes and checkers are keyed by hang, so cached entries for other hangs stay valid.
+        _mountKey = MountKeyOf(MountWorld);
+        // Scenes and checkers are keyed by mount pose, so cached entries for other poses stay valid.
+    }
+
+    bool _mountIsHang = true;
+    int _mountKey;
+
+    /// <summary>
+    /// Full-pose L-grip (URDF <c>mount</c>) frame in viewer coordinates (4×4 row-major; origin = L grasp centre,
+    /// local Z = L slot axis). Brachiation: the mount is wherever the L-grip is — clamped on a fixed object (L-base)
+    /// or carried by the arm (R-base, <c>W_R · T_LR(q)⁻¹</c>). Motus base, FK, mount collision and drawing all follow it.
+    /// </summary>
+    public void SetMountViewer(double[] viewerMount)
+    {
+        var m = Transforms.Multiply(ViewerToMotus, viewerMount);
+        var key = MountKeyOf(m);
+        if (!_mountIsHang && key == _mountKey && MountWorld is not null)
+        {
+            MountWorld = m; // within rounding: keep caches, but use the exact pose
+            return;
+        }
+        _mountIsHang = false;
+        MountWorld = m;
+        _mountKey = key;
+    }
+
+    /// <summary>Current L-grip frame in viewer coordinates (inverse of <see cref="SetMountViewer"/>).</summary>
+    public double[] MountViewer => Transforms.Multiply(Transforms.FromAxisAngle(1, 0, 0, -Math.PI / 2), MountWorld);
+
+    static int MountKeyOf(double[] m)
+    {
+        var h = new HashCode();
+        for (var i = 0; i < 12; i++) h.Add(Math.Round(m[i], i % 4 == 3 ? 6 : 7));
+        return h.ToHashCode();
     }
 
     /// <summary>
@@ -182,17 +217,11 @@ public sealed class BambooIcdCell
         _checkers.Clear();
     }
 
-    /// <summary>Motus <see cref="BaseFrame"/> that places the URDF hang at the current <see cref="Hang"/>.</summary>
-    public BaseFrame HangBaseFrame
-    {
-        get
-        {
-            var dx = Hang.X;
-            var dy = -Hang.Z;
-            var dz = Hang.Y - BambooIcdMotion.PoleY;
-            return new BaseFrame(new Frame(dx, dy, dz));
-        }
-    }
+    /// <summary>
+    /// Motus <see cref="BaseFrame"/> that places the URDF <c>mount</c> at <see cref="MountWorld"/>
+    /// (base = MountWorld · pole_hang⁻¹). Full pose: rotation included when the L-grip is not on the pole.
+    /// </summary>
+    public BaseFrame HangBaseFrame => new(Transforms.ToFrame(Transforms.Multiply(MountWorld, Transforms.Inverse(_defaultMountWorld))));
 
     private static CellPart ToPart(CollisionObject g, string link) =>
         new(g.Name, link,
@@ -215,25 +244,38 @@ public sealed class BambooIcdCell
     }
 
     /// <summary>Three.js CylinderGeometry tessellation (side + fan caps); along local Y, or along Z after rotateX(90°).</summary>
-    public static (List<double[]> Verts, List<int> Idx) CylinderMesh(double r, double h, int seg, bool alongZ)
+    /// <param name="rings">
+    /// Lengthwise subdivisions of the side wall (same surface, shorter triangles). A single 0.5 m sliver per facet
+    /// defeats the BVH (every facet's box overlaps a nearby cane's), so long canes/posts use ~25 mm rings.
+    /// </param>
+    public static (List<double[]> Verts, List<int> Idx) CylinderMesh(double r, double h, int seg, bool alongZ, int rings = 0)
     {
+        if (rings <= 0) rings = Math.Max(1, (int)Math.Ceiling(h / 0.025));
         var verts = new List<double[]>();
         var idx = new List<int>();
         double[] V(double x, double y, double z) => alongZ ? new[] { x, -z, y } : new[] { x, y, z };
-        for (var s = 0; s < seg; s++)
+        // Ring k (0 = top, rings = bottom), facet s: vertex index k * seg + s.
+        for (var k = 0; k <= rings; k++)
         {
-            var th = 2 * Math.PI * s / seg;
-            verts.Add(V(r * Math.Sin(th), h / 2, r * Math.Cos(th)));
-            verts.Add(V(r * Math.Sin(th), -h / 2, r * Math.Cos(th)));
+            var y = h / 2 - h * k / rings;
+            for (var s = 0; s < seg; s++)
+            {
+                var th = 2 * Math.PI * s / seg;
+                verts.Add(V(r * Math.Sin(th), y, r * Math.Cos(th)));
+            }
         }
         var top = verts.Count; verts.Add(V(0, h / 2, 0));
         var bot = verts.Count; verts.Add(V(0, -h / 2, 0));
         for (var s = 0; s < seg; s++)
         {
-            var a = 2 * s; var b = 2 * ((s + 1) % seg);
-            idx.AddRange(new[] { a, a + 1, b + 1, a, b + 1, b });
-            idx.AddRange(new[] { top, a, b });
-            idx.AddRange(new[] { bot, b + 1, a + 1 });
+            var s1 = (s + 1) % seg;
+            for (var k = 0; k < rings; k++)
+            {
+                int a = k * seg + s, b = k * seg + s1, a1 = (k + 1) * seg + s, b1 = (k + 1) * seg + s1;
+                idx.AddRange(new[] { a, a1, b1, a, b1, b });
+            }
+            idx.AddRange(new[] { top, s, s1 });
+            idx.AddRange(new[] { bot, rings * seg + s1, rings * seg + s });
         }
         return (verts, idx);
     }
@@ -247,12 +289,13 @@ public sealed class BambooIcdCell
                 Transforms.FromAxisAngle(1, 0, 0, p.PitchDeg * Math.PI / 180.0))));
 
     /// <summary>Strut mesh at a Motus world pose (scene obstacle).</summary>
-    public CollisionObject StrutAt(double[] motusWorld, string? name = null) =>
-        CollisionObject.Mesh(name ?? Strut, Transforms.ToFrame(motusWorld), _strutVerts, _strutIdx);
+    public CollisionObject StrutAt(double[] motusWorld, string? name = null) => StrutShape(name ?? Strut, Transforms.ToFrame(motusWorld));
+
+    CollisionObject StrutShape(string name, Frame pose) => CollisionObject.Mesh(name, pose, _strutVerts, _strutIdx);
 
     /// <summary>Strut held in the R-grip at its true jaw-local offset (captured when the jaws close).</summary>
     public AttachedBody HeldStrut(Frame tcpLocal) =>
-        new(Strut, tcpLocal, CollisionObject.Mesh(Strut, Frame.Identity, _strutVerts, _strutIdx), Strut);
+        new(Strut, tcpLocal, StrutShape(Strut, Frame.Identity), Strut);
 
     /// <summary>Motus world TCP (jaw) matrix from Motus FK.</summary>
     public double[] JawWorld(IReadOnlyList<double> qDeg) =>
@@ -345,8 +388,7 @@ public sealed class BambooIcdCell
             : extras.Aggregate(0, (acc, e) => HashCode.Combine(acc, e.Name,
                 Math.Round(e.Pose.X, 5), Math.Round(e.Pose.Y, 5), Math.Round(e.Pose.Z, 5), Math.Round(e.Pose.PitchDeg, 3), Math.Round(e.Pose.YawDeg, 3)));
         // Mount collision moves with the hang (brachiation), so the hang is part of the scene key.
-        var hangKey = HashCode.Combine(Math.Round(Hang.X, 5), Math.Round(Hang.Y, 5), Math.Round(Hang.Z, 5));
-        var key = (track, hold, gripping, (int)Math.Round(gLmm * 10), HashCode.Combine(extraKey, hangKey));
+        var key = (track, hold, gripping, (int)Math.Round(gLmm * 10), HashCode.Combine(extraKey, _mountKey));
         if (_scenes.TryGetValue(key, out var cached)) return cached;
         if (_scenes.Count > 64) _scenes.Clear();
         return _scenes[key] = BuildScene(track, hold, gripping, gLmm, qDeg, extras);
@@ -394,8 +436,7 @@ public sealed class BambooIcdCell
         var offKey = heldOffset is { } o
             ? HashCode.Combine(Math.Round(o.X, 6), Math.Round(o.Y, 6), Math.Round(o.Z, 6), Math.Round(o.Qw, 6), Math.Round(o.Qx, 6), Math.Round(o.Qy, 6), Math.Round(o.Qz, 6))
             : 0;
-        var hangKey = HashCode.Combine(Math.Round(Hang.X, 5), Math.Round(Hang.Y, 5), Math.Round(Hang.Z, 5));
-        var key = ((int)Math.Round(gRmm * 10), heldOffset is not null, offKey, hangKey);
+        var key = ((int)Math.Round(gRmm * 10), heldOffset is not null, offKey, _mountKey);
         if (_checkers.TryGetValue(key, out var c)) return c;
         var baseModel = Model.CollisionModel!;
         var links = baseModel.Links.Select(l =>
@@ -416,6 +457,144 @@ public sealed class BambooIcdCell
         if (_checkers.Count > 512) _checkers.Clear();
         _checkers[key] = c;
         return c;
+    }
+
+    // ---------- Brachiation / general-pose queries (/bamboo-truss) ----------
+
+    /// <summary>Ground collision objects currently in use (pads when set, else the full slab).</summary>
+    public IReadOnlyList<CollisionObject> GroundObjects =>
+        _groundPads.Count > 0 ? _groundPads : new[] { _groundObj };
+
+    /// <summary>
+    /// Ground pads as named rectangles (viewer XZ centre + half extents). Replaces <see cref="SetAnchorPads"/> pads;
+    /// /bamboo-truss uses one pad per anchor (A, D), per stake and under the stock feed — no earth elsewhere.
+    /// </summary>
+    public void SetGroundPads(IReadOnlyList<(string Name, double X, double Z, double HalfX, double HalfZ)> pads)
+    {
+        _groundPads.Clear();
+        AnchorPads = pads.Select(p => (p.X, p.Z, Math.Max(p.HalfX, p.HalfZ))).ToList();
+        Pads = pads.ToList();
+        foreach (var (name, x, z, hx, hz) in pads)
+        {
+            var (mx, my, mz) = ViewerToMotusPoint(x, -GroundThickness / 2, z);
+            // viewer X half → Motus X, viewer Z half → Motus Y.
+            _groundPads.Add(CollisionObject.Box(name, new Frame(mx, my, mz), hx, hz, GroundThickness / 2));
+        }
+        _scenes.Clear();
+        _checkers.Clear();
+    }
+
+    /// <summary>Named ground pads (viewer) from <see cref="SetGroundPads"/>, for drawing.</summary>
+    public IReadOnlyList<(string Name, double X, double Z, double HalfX, double HalfZ)> Pads { get; private set; } =
+        Array.Empty<(string, double, double, double, double)>();
+
+    /// <summary>Vertical post (cylinder along viewer Y from <paramref name="y0"/> to <paramref name="y1"/>) as a Motus mesh.</summary>
+    public static CollisionObject PostAt(string name, double x, double z, double y0, double y1, double radius, int segments = StrutSegments)
+    {
+        var (v, i) = CylinderMesh(radius, y1 - y0, segments, alongZ: false);
+        return CollisionObject.Mesh(name, ViewerPoseToMotus(Transforms.FromFrame(new Frame(x, (y0 + y1) / 2, z))), v, i);
+    }
+
+    /// <summary>Axis-aligned box (viewer centre + half extents) as a Motus object.</summary>
+    public static CollisionObject BoxAt(string name, double x, double y, double z, double hx, double hy, double hz)
+    {
+        var (mx, my, mz) = ViewerToMotusPoint(x, y, z);
+        // viewer X → Motus X, viewer Z → Motus Y, viewer Y → Motus Z.
+        return CollisionObject.Box(name, new Frame(mx, my, mz), hx, hz, hy);
+    }
+
+    /// <summary>Strut mesh at a viewer placement (scene obstacle).</summary>
+    public CollisionObject StrutAtPlacement(StrutPlacement p, string name) => StrutAt(PlacementWorld(p), name);
+
+    /// <summary>
+    /// All Motus contacts for one pose of the free-standing two-gripper arm at the current mount pose
+    /// (<see cref="SetMountViewer"/>): robot links + R-grip + held cane vs <paramref name="environment"/> and the
+    /// L-grip/mount parts, self, and — new for brachiation — the L-grip/mount parts vs <paramref name="environment"/>
+    /// (Motus exact narrow phase), so a moving L-grip is checked as physically as the R-grip.
+    /// <paramref name="allowed"/> lists the only permitted touches (a gripper's jaw plates on the object it clamps).
+    /// </summary>
+    public IReadOnlyList<CollisionContact> PoseContacts(
+        IReadOnlyList<double> qDeg, double gRmm, double gLmm, Frame? heldOffset,
+        IReadOnlyList<CollisionObject> environment, IReadOnlyList<(string A, string B)> allowed, int maxContacts = 32)
+    {
+        var objects = new List<CollisionObject>(environment.Count + 6);
+        objects.AddRange(environment);
+        objects.AddRange(MountObjects(gLmm));
+        var allow = new List<(string, string)>(allowed.Count + 1) { ("θ1", "base tube") };
+        foreach (var a in allowed) allow.Add((a.A, a.B));
+        var scene = new CollisionScene(objects, allow);
+        var contacts = new List<CollisionContact>(Checker(gRmm, heldOffset).FindContacts(new JointState(RadFromDeg(qDeg)), scene, maxContacts));
+        if (contacts.Count < maxContacts)
+            contacts.AddRange(MountEnvironmentContacts(gLmm, environment, allow));
+        return contacts;
+    }
+
+    public bool PoseClear(IReadOnlyList<double> qDeg, double gRmm, double gLmm, Frame? heldOffset,
+        IReadOnlyList<CollisionObject> environment, IReadOnlyList<(string A, string B)> allowed) =>
+        PoseContacts(qDeg, gRmm, gLmm, heldOffset, environment, allowed, 1).Count == 0;
+
+    sealed class NoInnerCollision : IBaseFrameCollisionChecker
+    {
+        public static readonly NoInnerCollision Instance = new();
+        public bool IsCollisionFree(JointState state, CollisionScene scene) => true;
+        public bool IsCollisionFree(JointState state, CollisionScene scene, BaseFrame baseFrame) => true;
+        public bool SegmentCollisionFree(JointState from, JointState to, CollisionScene scene, double configurationStep) => true;
+    }
+
+    readonly Dictionary<(int gL, string part), BaseFrameAttachCollisionChecker> _mountPartCheckers = new();
+    readonly Dictionary<CollisionObject, (double X, double Y, double Z, double R)> _objSpheres = new(ReferenceEqualityComparer.Instance);
+
+    (double X, double Y, double Z, double R) BoundingSphere(CollisionObject o)
+    {
+        if (_objSpheres.TryGetValue(o, out var bs)) return bs;
+        double r;
+        if (o.Shape == CollisionShape.Mesh && o.MeshVertices is { } verts)
+            r = verts.Max(v => Math.Sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]));
+        else if (o.Shape == CollisionShape.Box)
+            r = Math.Sqrt(o.ExtentX * o.ExtentX + o.ExtentY * o.ExtentY + o.ExtentZ * o.ExtentZ);
+        else if (o.Shape == CollisionShape.Sphere) r = o.ExtentX;
+        else if (o.Shape == CollisionShape.Capsule) r = o.ExtentX + o.ExtentY;
+        else r = double.MaxValue;
+        if (_objSpheres.Count > 4096) _objSpheres.Clear();
+        return _objSpheres[o] = (o.Pose.X, o.Pose.Y, o.Pose.Z, r);
+    }
+
+    /// <summary>L-grip / base tube parts at <see cref="MountWorld"/> vs the environment (exact Motus narrow phase).</summary>
+    public IReadOnlyList<CollisionContact> MountEnvironmentContacts(double gLmm, IReadOnlyList<CollisionObject> environment,
+        IReadOnlyList<(string A, string B)> allowed)
+    {
+        var result = new List<CollisionContact>();
+        if (environment.Count == 0) return result;
+        var baseFrame = new BaseFrame(Transforms.ToFrame(MountWorld));
+        var mx = MountWorld[3]; var my = MountWorld[7]; var mz = MountWorld[11];
+        const double mountRadius = 0.05; // every mount part lies within 5 cm of the mount origin
+        var gKey = (int)Math.Round(gLmm * 10);
+        foreach (var g in _mountGeometry)
+        {
+            var local = g.LocalGeometry;
+            if (!_mountPartCheckers.TryGetValue((gKey, local.Name), out var chk))
+            {
+                var pose = local.Pose;
+                var li = Array.IndexOf(LGripPlates, local.Name);
+                if (li >= 0) pose = new Frame((li == 0 ? -1 : 1) * PlateShift(gLmm), pose.Y, pose.Z, pose.Qw, pose.Qx, pose.Qy, pose.Qz);
+                var body = new AttachedBody(local.Name, pose,
+                    CollisionObject.Box(local.Name, Frame.Identity, local.ExtentX, local.ExtentY, local.ExtentZ));
+                chk = new BaseFrameAttachCollisionChecker(NoInnerCollision.Instance, new[] { body });
+                if (_mountPartCheckers.Count > 256) _mountPartCheckers.Clear();
+                _mountPartCheckers[(gKey, local.Name)] = chk;
+            }
+            foreach (var obj in environment)
+            {
+                var (ox, oy, oz, orad) = BoundingSphere(obj);
+                var dx = ox - mx; var dy = oy - my; var dz = oz - mz;
+                if (orad < 1e6 && dx * dx + dy * dy + dz * dz > (orad + mountRadius) * (orad + mountRadius)) continue;
+                if (allowed.Any(a => (a.A == local.Name && a.B == obj.Name) || (a.B == local.Name && a.A == obj.Name))) continue;
+                var one = new CollisionScene(new[] { obj });
+                if (!chk.IsCollisionFree(JointState.Wrap(new double[5]), one, baseFrame))
+                    result.Add(new CollisionContact(local.Name, obj.Name, CollisionContactKind.Scene, "mount", null));
+            }
+        }
+        return result;
     }
 
     /// <summary>Gripping = R-grip closed on a captured strut, or closing/opening around it.</summary>
