@@ -110,3 +110,13 @@ Open `http://127.0.0.1:5268/bamboo` (single strut pick/place) or
 
 - Retired visual reference: `/workspace/bamboo-viewer/next.html`
 - Motus.NET, Three.js r128, Blazor WebAssembly
+
+## `/bamboo-truss` WASM startup
+
+Vertical-plane Motus path-build used to block the first paint for minutes under Blazor WASM: the Motus-aware
+stage linker ran `IsClear` on every Swing/Hold candidate pair (≈39k Motus checks on desktop CLR ≈ 4.4 s
+Release; ×60-ish under WASM). The planner now caps Motus-stage candidates, beam-prunes `LinkStages`, uses
+coarser Motus samples while planning (fine 0.5° `BambooTrussScan` still validates), Motus-checks only the
+place approach + release/depart, and `BuildAsync` yields between members so the page can paint. Desktop
+Release `BambooTrussMotion.Build` is ≈0.4–0.9 s; box headless Chrome reaches Play-enabled in ≈17 s.
+

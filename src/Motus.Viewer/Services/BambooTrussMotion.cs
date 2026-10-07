@@ -26,6 +26,16 @@ public static class BambooTrussMotion
     /// <summary>Jaw-axis alignment tolerance for place grasps on inclined vertical-plane edges (degrees).</summary>
     public const double PlaceAxisErrDeg = 10;
 
+    /// <summary>
+    /// Planner Motus sample count along a carrying segment vs placed members.
+    /// Coarser than the viewer/test 0.5° scan: enough to reject colliding vias, cheap enough for WASM.
+    /// </summary>
+    const int MotusPlanSteps = 4;
+    /// <summary>Max IK candidates kept on Motus-checked stages (Swing/Hold/Release/Depart).</summary>
+    const int MotusCandMax = 6;
+    /// <summary>Beam width: after each stage, keep only the cheapest predecessors.</summary>
+    const int LinkBeamWidth = 5;
+
     static readonly object CellGate = new();
     static BambooIcdCell? MotusCell;
     static List<BambooIcdCell.StrutPlacement> Placed = new();
@@ -153,7 +163,38 @@ public static class BambooTrussMotion
         return pairs;
     }
 
-    public static TrussBuild Build(IReadOnlyList<BambooIcdMotion.TaskEdit>? tasks = null)
+    public static TrussBuild Build(IReadOnlyList<BambooIcdMotion.TaskEdit>? tasks = null) =>
+        BuildCore(tasks);
+
+    /// <summary>
+    /// Same as <see cref="Build"/> but awaits <paramref name="onMember"/> between members so Blazor WASM can paint.
+    /// </summary>
+    public static async Task<TrussBuild> BuildAsync(
+        IReadOnlyList<BambooIcdMotion.TaskEdit>? tasks = null,
+        Func<string, Task>? onMember = null)
+    {
+        // Drive the sync core between awaits so we never block a sync context with GetResult.
+        tasks ??= DefaultTasks();
+        var pairs = Pairs(tasks);
+        if (pairs.Count == 0)
+            return new TrussBuild { Error = "No pick/place pairs (object-matched).", Tasks = tasks.ToList() };
+
+        var allKeys = new List<BambooIcdMotion.MotionKey>();
+        var cycles = new List<CycleBound>();
+        var n = pairs.Count;
+        for (var i = 0; i < n; i++)
+        {
+            if (onMember is not null) await onMember(pairs[i].MemberId);
+            else await Task.Yield();
+            var slice = BuildMember(pairs, i, n, allKeys, cycles);
+            if (slice is not null)
+                return new TrussBuild { Error = slice, Tasks = tasks.ToList(), Keys = HomeKeys() };
+        }
+        StampKeyTimes(allKeys);
+        return new TrussBuild { Error = "", Keys = allKeys, Cycles = cycles, Tasks = tasks.ToList() };
+    }
+
+    static TrussBuild BuildCore(IReadOnlyList<BambooIcdMotion.TaskEdit>? tasks)
     {
         tasks ??= DefaultTasks();
         var pairs = Pairs(tasks);
@@ -165,36 +206,51 @@ public static class BambooTrussMotion
         var n = pairs.Count;
         for (var i = 0; i < n; i++)
         {
-            var (pick, place, memberId) = pairs[i];
-            Placed = pairs.Take(i)
-                .Select(p => BambooTrussLayout.Members.First(m => m.Id == p.MemberId).Place)
-                .ToList();
-            var one = BuildOne(pick, place, memberId, afterPlaced: i > 0);
-            if (!string.IsNullOrEmpty(one.Error))
-                return new TrussBuild { Error = $"{memberId}: {one.Error}", Tasks = tasks.ToList(), Keys = HomeKeys() };
-
-            var t0 = i / (double)n;
-            var t1 = (i + 1) / (double)n;
-            cycles.Add(new CycleBound { MemberId = memberId, T0 = t0, T1 = t1 });
-            foreach (var k in one.Keys)
-            {
-                allKeys.Add(new BambooIcdMotion.MotionKey
-                {
-                    T = t0 + k.T * (t1 - t0),
-                    Label = $"{memberId}:{k.Label}",
-                    Q = k.Q.ToArray(),
-                    GR = k.GR,
-                    Hold = k.Hold
-                });
-            }
+            var slice = BuildMember(pairs, i, n, allKeys, cycles);
+            if (slice is not null)
+                return new TrussBuild { Error = slice, Tasks = tasks.ToList(), Keys = HomeKeys() };
         }
+        StampKeyTimes(allKeys);
+        return new TrussBuild { Error = "", Keys = allKeys, Cycles = cycles, Tasks = tasks.ToList() };
+    }
 
+    static string? BuildMember(
+        List<(BambooIcdMotion.TaskEdit Pick, BambooIcdMotion.TaskEdit Place, string MemberId)> pairs,
+        int i, int n,
+        List<BambooIcdMotion.MotionKey> allKeys,
+        List<CycleBound> cycles)
+    {
+        var (pick, place, memberId) = pairs[i];
+        Placed = pairs.Take(i)
+            .Select(p => BambooTrussLayout.Members.First(m => m.Id == p.MemberId).Place)
+            .ToList();
+        var one = BuildOne(pick, place, memberId, afterPlaced: i > 0);
+        if (!string.IsNullOrEmpty(one.Error))
+            return $"{memberId}: {one.Error}";
+
+        var t0 = i / (double)n;
+        var t1 = (i + 1) / (double)n;
+        cycles.Add(new CycleBound { MemberId = memberId, T0 = t0, T1 = t1 });
+        foreach (var k in one.Keys)
+        {
+            allKeys.Add(new BambooIcdMotion.MotionKey
+            {
+                T = t0 + k.T * (t1 - t0),
+                Label = $"{memberId}:{k.Label}",
+                Q = k.Q.ToArray(),
+                GR = k.GR,
+                Hold = k.Hold
+            });
+        }
+        return null;
+    }
+
+    static void StampKeyTimes(List<BambooIcdMotion.MotionKey> allKeys)
+    {
         for (var i = 1; i < allKeys.Count; i++)
             if (allKeys[i].T <= allKeys[i - 1].T)
                 allKeys[i].T = allKeys[i - 1].T + 1e-6;
         allKeys[^1].T = 1;
-
-        return new TrussBuild { Error = "", Keys = allKeys, Cycles = cycles, Tasks = tasks.ToList() };
     }
 
     static List<BambooIcdMotion.MotionKey> HomeKeys() =>
@@ -251,7 +307,7 @@ public static class BambooTrussMotion
         var sols = new List<double[]>();
         foreach (var t in tilts)
             sols.AddRange(BambooIcdMotion.IkSolveAxis(x, y, z, t, axis, BambooIcdMotion.HangPose.Pole, 15));
-        return Dedup(sols, 24);
+        return Dedup(sols, MotusCandMax);
     }
 
     /// <summary>
@@ -297,10 +353,14 @@ public static class BambooTrussMotion
                 holdAlts.AddRange(Solve(new Pose(x, y, z, release.Value.Pitch, release.Value.Yaw), PlaceAxisErrDeg));
                 holdAlts.AddRange(AxisIk(x, y, z, release.Value.Axis, release.Value.Pitch, 0, -40));
             }
-            holdAlts = Dedup(holdAlts, 20);
+            holdAlts = Dedup(holdAlts, MotusCandMax);
             if (holdAlts.Count > 0)
-                sh = Dedup(holdAlts.Concat(sh).ToList(), 28);
+                sh = Dedup(holdAlts.Concat(sh).ToList(), MotusCandMax);
         }
+        // Motus-checked stages explode as O(|prev|·|next|·steps); keep place sols bounded.
+        sh = Dedup(sh, MotusCandMax);
+        sr = Dedup(sr, MotusCandMax);
+
         var bad = new List<string>();
         if (sa.Count == 0) bad.Add("pick:approach");
         if (sg.Count == 0) bad.Add("pick:grasp");
@@ -330,7 +390,7 @@ public static class BambooTrussMotion
                 via.AddRange(SolvePick(new Pose(x, y, z, G.Pitch, G.Yaw)));
                 via.AddRange(Solve(new Pose(x, y, z, 0, G.Yaw), 15));
             }
-            via = Dedup(via, 16);
+            via = Dedup(via, MotusCandMax);
             if (via.Count > 0)
                 stages.Add(new Stage { Name = "pick:approach", Sols = via });
         }
@@ -397,7 +457,7 @@ public static class BambooTrussMotion
                     var f = BambooIcdMotion.FkJaw(q);
                     return Math.Sign(f.Pos[0]) == 0 || Math.Sign(f.Pos[0]) == side || Math.Abs(f.Pos[0]) < 0.02;
                 }).ToList();
-            ps = Dedup(ps, 14);
+            ps = Dedup(ps, MotusCandMax);
             if (ps.Count > 0)
                 stages.Add(new Stage { Name = z >= R.Z - 0.005 ? "Swing" : "Pitch", Sols = ps });
         }
@@ -414,7 +474,7 @@ public static class BambooTrussMotion
                 swingRaw.AddRange(Solve(new Pose(x, y, z, R.Pitch, R.Yaw), 15));
                 swingRaw.AddRange(AxisIk(x, y, z, placeAxis, R.Pitch, 0, -Math.Abs(R.Pitch), -40));
             }
-            swingRaw = Dedup(swingRaw, 40);
+            swingRaw = Dedup(swingRaw, MotusCandMax * 2);
             var anchors = sh.Concat(sr).ToList();
             var swing = new List<double[]>();
             foreach (var maxDeg in new[] { 55.0, 85.0, 120.0 })
@@ -433,7 +493,7 @@ public static class BambooTrussMotion
                 if (swing.Count > 0) break;
             }
             if (swing.Count == 0) swing = swingRaw.Count > 0 ? swingRaw : sh;
-            swing = Dedup(swing.Concat(sh).ToList(), 28);
+            swing = Dedup(swing.Concat(sh).ToList(), MotusCandMax);
             stages.Add(new Stage { Name = "Swing", Sols = swing });
         }
 
@@ -453,7 +513,7 @@ public static class BambooTrussMotion
                 via.AddRange(Solve(new Pose(x, y, z, R.Pitch, R.Yaw), PlaceAxisErrDeg));
                 via.AddRange(AxisIk(x, y, z, placeAxis, R.Pitch, 0, -40));
             }
-            via = Dedup(via, 16);
+            via = Dedup(via, MotusCandMax);
             if (via.Count > 0)
                 stages.Add(new Stage { Name = "Swing", Sols = via }); // Motus-checked like Swing
         }
@@ -480,7 +540,7 @@ public static class BambooTrussMotion
                 depRaw.AddRange(Solve(new Pose(x, y, z, R.Pitch, R.Yaw), 15));
                 depRaw.AddRange(AxisIk(x, y, z, placeAxis, R.Pitch, 0, -40));
             }
-            depRaw = Dedup(depRaw, 48);
+            depRaw = Dedup(depRaw, MotusCandMax * 2);
             var dep = depRaw.Where(q =>
             {
                 var f = BambooIcdMotion.FkJaw(q);
@@ -490,7 +550,7 @@ public static class BambooTrussMotion
             }).ToList();
             if (dep.Count == 0) dep = depRaw;
             if (dep.Count > 0)
-                stages.Add(new Stage { Name = "Depart", Sols = Dedup(dep, 16) });
+                stages.Add(new Stage { Name = "Depart", Sols = Dedup(dep, MotusCandMax) });
             else
                 stages.Add(new Stage { Name = "Depart", Sols = [BambooIcdMotion.HomeDeg.ToArray()] });
         }
@@ -528,7 +588,7 @@ public static class BambooTrussMotion
     static (bool Ok, double Penalty) SegCheck(double[] a, double[] b, bool carrying, bool motusVsPlaced = false)
     {
         var floorBad = false;
-        var steps = carrying && motusVsPlaced && Placed.Count > 0 ? 24 : 20;
+        var steps = carrying && motusVsPlaced && Placed.Count > 0 ? MotusPlanSteps : 12;
         for (var s = 0; s <= steps; s++)
         {
             var u = s / (double)steps;
@@ -588,18 +648,34 @@ public static class BambooTrussMotion
         {
             var leave = stages[s].Name is "Retract" or "Clear";
             var carry = s >= 2 && !leave;
-            for (var j = 0; j < stages[s].Sols.Count; j++)
+            // Motus vs placed on Swing/Hold/Lower/Depart. Skip Lower Motus when the release pose sits on
+            // an already-placed centre (live-obstacle regression intentionally overlaps).
+            var overlap = ReleaseOverlapsPlaced();
+            // Motus vs placed only on Hold/Release/Depart (and the Swing that feeds them).
+            // Intermediate Pitch/Swing vias use floor+limits only — full 0.5° BambooTrussScan
+            // still Motus-validates the stamped path. Checking every Swing cand×cand under WASM
+            // was the /bamboo-truss startup hang (~39k IsClear on CLR desktop ≈ minutes in WASM).
+            var motus = false;
+            var name = stages[s].Name;
+            if (carry && name is "place:hold" && !overlap) motus = true;
+            if (carry && name is "place:release" && !overlap) motus = true;
+            if (carry && name is "Depart" && !overlap) motus = true;
+            // Motus-check the Swing that feeds Hold (final approach over placed members).
+            if (carry && name is "Swing" && !overlap && s + 1 < n &&
+                stages[s + 1].Name is "place:hold" or "place:release")
+                motus = true;
+            // Only expand from the cheapest predecessors (beam) — Motus checks dominate WASM startup.
+            var prevAlive = new List<int>();
             for (var i = 0; i < stages[s - 1].Sols.Count; i++)
+                if (cost[s - 1][i] < 1e17) prevAlive.Add(i);
+            if (prevAlive.Count > LinkBeamWidth)
             {
-                if (cost[s - 1][i] >= 1e17) continue;
-                // Motus vs placed on Swing/Hold/Lower. Skip Lower Motus when the release pose sits on
-                // an already-placed centre (live-obstacle regression intentionally overlaps).
-                var motus = false;
-                var overlap = ReleaseOverlapsPlaced();
-                if (carry && stages[s].Name is "Swing") motus = true;
-                if (carry && stages[s].Name is "place:hold" && !overlap) motus = true;
-                if (carry && stages[s].Name is "place:release" && !overlap) motus = true;
-                if (carry && stages[s].Name is "Depart" && !overlap) motus = true;
+                prevAlive.Sort((a, b) => cost[s - 1][a].CompareTo(cost[s - 1][b]));
+                prevAlive.RemoveRange(LinkBeamWidth, prevAlive.Count - LinkBeamWidth);
+            }
+            for (var j = 0; j < stages[s].Sols.Count; j++)
+            foreach (var i in prevAlive)
+            {
                 var (segOk, pen) = SegCheck(stages[s - 1].Sols[i], stages[s].Sols[j], carry, motus);
                 if (!segOk) continue;
                 var qa = stages[s - 1].Sols[i];
