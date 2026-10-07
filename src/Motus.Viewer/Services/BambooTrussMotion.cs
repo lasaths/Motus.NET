@@ -27,10 +27,13 @@ public static class BambooTrussMotion
     public const double PlaceAxisErrDeg = 10;
 
     /// <summary>
-    /// Planner Motus sample count along a carrying segment vs placed members.
-    /// Coarser than the viewer/test 0.5° scan: enough to reject colliding vias, cheap enough for WASM.
+    /// Target joint step (deg) for Motus samples while linking. Coarser than the viewer 0.5° scan,
+    /// but fine enough that Swing vias which clear the planner also clear BambooTrussScan when Motus
+    /// actually runs (WASM must UseCell — disk LoadFile is unavailable in the browser).
     /// </summary>
-    const int MotusPlanSteps = 4;
+    const double MotusPlanStepDeg = 5;
+    /// <summary>Hard cap on Motus samples per carrying segment (keeps WASM Build bounded).</summary>
+    const int MotusPlanStepsMax = 12;
     /// <summary>Max IK candidates kept on Motus-checked stages (Swing/Hold/Release/Depart).</summary>
     const int MotusCandMax = 6;
     /// <summary>Beam width: after each stage, keep only the cheapest predecessors.</summary>
@@ -40,6 +43,20 @@ public static class BambooTrussMotion
     static BambooIcdCell? MotusCell;
     static List<BambooIcdCell.StrutPlacement> Placed = new();
     static BambooIcdCell.StrutPlacement? CurrentRelease;
+
+    /// <summary>
+    /// Bind the Motus collision cell used while planning. Required under Blazor WASM (no disk URDF);
+    /// the /bamboo-truss page passes the same cell the viewer scan uses so planner Motus == Play Motus.
+    /// </summary>
+    public static void UseCell(BambooIcdCell cell)
+    {
+        ArgumentNullException.ThrowIfNull(cell);
+        lock (CellGate)
+        {
+            MotusCell = cell;
+            _planTrack = null;
+        }
+    }
 
     static bool ReleaseOverlapsPlaced()
     {
@@ -65,7 +82,8 @@ public static class BambooTrussMotion
             new() { T = 0, Label = "Close", Q = q, GR = BambooTrussLayout.JawClosedMm, Hold = 1 },
             new() { T = 1, Label = "Open", Q = q, GR = BambooTrussLayout.JawOpenMm, Hold = 2 }
         };
-        _planTrack = Cell.TrackStrut(keys, rest);
+        var cell = TryCell() ?? throw new InvalidOperationException("Motus cell required for PlanningTrack");
+        _planTrack = cell.TrackStrut(keys, rest);
         if (_planTrack.Miss is not null || _planTrack.HeldOffset is null)
         {
             // Fallback: strut mesh at jaw origin along tool Z.
@@ -79,23 +97,36 @@ public static class BambooTrussMotion
         return _planTrack;
     }
 
-    static BambooIcdCell Cell
+    static BambooIcdCell? TryCell()
     {
-        get
+        if (MotusCell is not null) return MotusCell;
+        lock (CellGate)
         {
             if (MotusCell is not null) return MotusCell;
-            lock (CellGate)
+            try
             {
-                if (MotusCell is not null) return MotusCell;
                 var urdf = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..",
                     "tests", "fixtures", "bamboo_icd", "bamboo_icd.urdf"));
                 if (!File.Exists(urdf))
                     urdf = Path.GetFullPath(Path.Combine("tests", "fixtures", "bamboo_icd", "bamboo_icd.urdf"));
-                MotusCell = BambooIcdCell.LoadFile(urdf, BambooTrussLayout.StrutLength);
+                if (!File.Exists(urdf)) return null;
+                var cell = BambooIcdCell.LoadFile(urdf, BambooTrussLayout.StrutLength);
+                cell.SetAnchorPads(BambooTrussLayout.AnchorPads
+                    .Select(a => (a.X, a.Z, BambooTrussLayout.AnchorPadHalf)).ToList());
+                MotusCell = cell;
                 return MotusCell;
+            }
+            catch
+            {
+                // WASM / missing fixture: caller must UseCell. SegCheck falls back to geometry.
+                return null;
             }
         }
     }
+
+    static BambooIcdCell Cell =>
+        TryCell() ?? throw new InvalidOperationException(
+            "BambooTrussMotion Motus cell unset — call UseCell with the viewer BambooIcdCell.");
 
     public static List<BambooIcdMotion.TaskEdit> DefaultTasks(IReadOnlyList<BambooTrussLayout.MemberDef>? members = null)
     {
@@ -169,6 +200,13 @@ public static class BambooTrussMotion
         var pairs = Pairs(tasks);
         if (pairs.Count == 0)
             return new TrussBuild { Error = "No pick/place pairs (object-matched).", Tasks = tasks.ToList() };
+        if (pairs.Count > 1 && TryCell() is null)
+            return new TrussBuild
+            {
+                Error = "Motus cell required for multi-member path (call UseCell with the viewer BambooIcdCell).",
+                Tasks = tasks.ToList(),
+                Keys = HomeKeys()
+            };
 
         var allKeys = new List<BambooIcdMotion.MotionKey>();
         var cycles = new List<CycleBound>();
@@ -218,6 +256,13 @@ public static class BambooTrussMotion
         var pairs = Pairs(tasks);
         if (pairs.Count == 0)
             return new TrussBuild { Error = "No pick/place pairs (object-matched).", Tasks = tasks.ToList() };
+        if (pairs.Count > 1 && TryCell() is null)
+            return new TrussBuild
+            {
+                Error = "Motus cell required for multi-member path (call UseCell with the viewer BambooIcdCell).",
+                Tasks = tasks.ToList(),
+                Keys = HomeKeys()
+            };
 
         var allKeys = new List<BambooIcdMotion.MotionKey>();
         var cycles = new List<CycleBound>();
@@ -591,10 +636,73 @@ public static class BambooTrussMotion
         return a;
     }
 
+    static int MotusStepsFor(double[] a, double[] b)
+    {
+        var jump = 0.0;
+        for (var k = 0; k < 5; k++)
+            jump = Math.Max(jump, Math.Abs(Wrap180(b[k] - a[k])));
+        var steps = (int)Math.Ceiling(jump / MotusPlanStepDeg);
+        return Math.Clamp(steps, 4, MotusPlanStepsMax);
+    }
+
+    /// <summary>
+    /// Conservative capsule clearance: held cane vs already-placed edge canes (Motus-true enough to
+    /// reject mid-span leaps through the opposite triangle when Motus IsClear is unavailable).
+    /// </summary>
+    static bool GeoClearVsPlaced(double[] q)
+    {
+        if (Placed.Count == 0) return true;
+        var f = BambooIcdMotion.FkJaw(q);
+        var ax = f.Z;
+        var half = BambooTrussLayout.StrutLength / 2;
+        var r = BambooIcdCell.StrutRadius;
+        // Inflate slightly so geo rejects before Motus θ-housing grazes a placed cane.
+        var minDist = 2 * r + 0.006;
+        var a0 = (f.Pos[0] - ax[0] * half, f.Pos[1] - ax[1] * half, f.Pos[2] - ax[2] * half);
+        var a1 = (f.Pos[0] + ax[0] * half, f.Pos[1] + ax[1] * half, f.Pos[2] + ax[2] * half);
+        // Also keep the jaw frame centre off placed cane axes (θ5 housing proxy).
+        var jaw = (f.Pos[0], f.Pos[1], f.Pos[2]);
+        foreach (var p in Placed)
+        {
+            var bx = p.Axis;
+            var b0 = (p.X - bx.X * half, p.Y - bx.Y * half, p.Z - bx.Z * half);
+            var b1 = (p.X + bx.X * half, p.Y + bx.Y * half, p.Z + bx.Z * half);
+            if (SegSegDist(a0, a1, b0, b1) < minDist) return false;
+            if (PointSegDist(jaw, b0, b1) < r + 0.018) return false;
+        }
+        return true;
+    }
+
+    static double PointSegDist((double X, double Y, double Z) p, (double X, double Y, double Z) a, (double X, double Y, double Z) b)
+    {
+        var dx = b.X - a.X; var dy = b.Y - a.Y; var dz = b.Z - a.Z;
+        var len2 = dx * dx + dy * dy + dz * dz;
+        var t = len2 < 1e-18 ? 0 : Math.Clamp(((p.X - a.X) * dx + (p.Y - a.Y) * dy + (p.Z - a.Z) * dz) / len2, 0, 1);
+        var qx = a.X + dx * t - p.X; var qy = a.Y + dy * t - p.Y; var qz = a.Z + dz * t - p.Z;
+        return Math.Sqrt(qx * qx + qy * qy + qz * qz);
+    }
+
+    static double SegSegDist(
+        (double X, double Y, double Z) a0, (double X, double Y, double Z) a1,
+        (double X, double Y, double Z) b0, (double X, double Y, double Z) b1)
+    {
+        var best = double.MaxValue;
+        for (var i = 0; i <= 12; i++)
+        {
+            var u = i / 12.0;
+            var p = (a0.X + (a1.X - a0.X) * u, a0.Y + (a1.Y - a0.Y) * u, a0.Z + (a1.Z - a0.Z) * u);
+            best = Math.Min(best, PointSegDist(p, b0, b1));
+        }
+        return best;
+    }
+
     static (bool Ok, double Penalty) SegCheck(double[] a, double[] b, bool carrying, bool motusVsPlaced = false)
     {
         var floorBad = false;
-        var steps = carrying && motusVsPlaced && Placed.Count > 0 ? MotusPlanSteps : 12;
+        var steps = carrying && motusVsPlaced && Placed.Count > 0 ? MotusStepsFor(a, b) : 12;
+        // Geometric placed clearance only when Motus cell is missing (WASM without UseCell).
+        // With Motus available, IsClear is the source of truth — geo alone over-rejects at shared nodes.
+        var geoVsPlaced = carrying && motusVsPlaced && Placed.Count > 0 && TryCell() is null;
         for (var s = 0; s <= steps; s++)
         {
             var u = s / (double)steps;
@@ -612,28 +720,22 @@ public static class BambooTrussMotion
                 var bot = f.Pos[1] - BambooTrussLayout.StrutLength / 2 * Math.Abs(ay) - BambooIcdCell.StrutRadius * Math.Sqrt(Math.Max(0, 1 - ay * ay));
                 if (bot < -0.006) return (false, 0);
                 if (bot < -0.002) floorBad = true;
-                if (motusVsPlaced && Placed.Count > 0)
+                if (geoVsPlaced && !GeoClearVsPlaced(q))
+                    return (false, 0);
+                if (motusVsPlaced && Placed.Count > 0 && TryCell() is { } cell)
                 {
                     try
                     {
                         var extras = Placed.Select((p, i) => ($"placed-{i}", p)).ToList();
-                        if (carrying)
-                        {
-                            var track = PlanningTrack();
-                            if (!Cell.IsClear(q, BambooTrussLayout.JawClosedMm, BambooTrussLayout.JawOpenMm, 1, "Lower", track, extras))
-                                return (false, 0);
-                        }
-                        else
-                        {
-                            var track = new BambooIcdCell.StrutTrack
-                            {
-                                Rest = BambooIcdCell.PlacementWorld(new BambooIcdCell.StrutPlacement(0, 0.5, 0, 0, 0))
-                            };
-                            if (!Cell.IsClear(q, BambooTrussLayout.JawOpenMm, BambooTrussLayout.JawOpenMm, 0, "Approach", track, extras))
-                                return (false, 0);
-                        }
+                        var track = PlanningTrack();
+                        if (!cell.IsClear(q, BambooTrussLayout.JawClosedMm, BambooTrussLayout.JawOpenMm, 1, "Lower", track, extras))
+                            return (false, 0);
                     }
-                    catch { /* planning without Motus cell still floors/limits */ }
+                    catch
+                    {
+                        // Motus threw mid-check: reject unless conservative geo says clear.
+                        if (!GeoClearVsPlaced(q)) return (false, 0);
+                    }
                 }
             }
         }
@@ -654,19 +756,16 @@ public static class BambooTrussMotion
         {
             var leave = stages[s].Name is "Retract" or "Clear";
             var carry = s >= 2 && !leave;
-            // Motus vs placed on Hold/Release/Depart (and the Swing that feeds them).
-            // Intermediate Pitch/Swing vias use floor+limits only — full 0.5° BambooTrussScan
-            // still Motus-validates the stamped path. Checking every Swing cand×cand under WASM
-            // was the /bamboo-truss startup hang.
+            // Motus vs placed on carry Swing/Pitch/Hold/Release/Depart. Intermediate vias used to
+            // skip Motus (floor only) which let diagR:Swing tunnel θ5 through placed-diagL under
+            // WASM when disk MotusCell load failed. Caps (MotusCandMax/beam/MotusPlanStepDeg) keep
+            // BuildAsync interactive; fine 0.5° BambooTrussScan still validates the stamped path.
             var overlap = ReleaseOverlapsPlaced();
             var motus = false;
             var name = stages[s].Name;
-            if (carry && name is "place:hold" && !overlap) motus = true;
-            if (carry && name is "place:release" && !overlap) motus = true;
-            if (carry && name is "Depart" && !overlap) motus = true;
-            // Motus-check the Swing that feeds Hold (final approach over placed members).
-            if (carry && name is "Swing" && !overlap && s + 1 < n &&
-                stages[s + 1].Name is "place:hold" or "place:release")
+            // Swing (not bay Pitch): θ5↔placed-diagL tunnels on mid-span Swing leaps. Pitch stays
+            // hang-side at bayZ away from PlaneZ; Motus there adds little vs Caps cost.
+            if (carry && !overlap && name is "Swing" or "place:hold" or "place:release" or "Depart")
                 motus = true;
             // Only expand from the cheapest predecessors (beam) — Motus checks dominate WASM startup.
             var prevAlive = new List<int>();

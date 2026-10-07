@@ -24,6 +24,8 @@ public class BambooTrussTests
 
     private static BambooTrussMotion.TrussBuild Build(List<BambooIcdMotion.TaskEdit>? tasks = null)
     {
+        // Same binding the Blazor page uses so planner Motus == scan Motus.
+        BambooTrussMotion.UseCell(Cell);
         var built = BambooTrussMotion.Build(tasks);
         Assert.True(string.IsNullOrEmpty(built.Error), $"truss motion should build: {built.Error}");
         Assert.NotEmpty(built.Keys);
@@ -93,6 +95,7 @@ public class BambooTrussTests
     {
         var tasks = BambooTrussMotion.DefaultTasks().Take(2).ToList();
         tasks[0].Planes.First(p => p.Name == "grasp").YMm = -1.5;
+        BambooTrussMotion.UseCell(Cell);
         var built = BambooTrussMotion.Build(tasks);
         Assert.True(string.IsNullOrEmpty(built.Error), built.Error);
 
@@ -155,7 +158,7 @@ public class BambooTrussTests
         var members = BambooTrussLayout.Members.ToList();
         var last = members[^1];
         members[^1] = last with { Place = members[1].Place };
-        var built = Build(BambooTrussMotion.DefaultTasks(members));
+        var built = Build(BambooTrussMotion.DefaultTasks(members)); // UseCell via Build()
         var scan = new BambooTrussScan(Cell, built.Keys, built.Cycles, members, maxStepDeg: 0.5).RunToEnd();
         var hit = Assert.IsType<BambooTrussScan.Hit>(scan.FirstHit);
         Assert.Equal(last.Id, BambooTrussMotion.MemberIdAt(built.Cycles, hit.T));

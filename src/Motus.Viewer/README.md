@@ -103,9 +103,13 @@ Open `http://127.0.0.1:5268/bamboo` (single strut pick/place) or
 
 Bridge-edge Motus path-build used to block the first paint for minutes under Blazor WASM: the Motus-aware
 stage linker ran `IsClear` on every Swing/Hold candidate pair (desktop CLR Release `Build` ≈ 28 s;
-×60-ish under WASM), blocking `OnAfterRender` before Play. The planner now caps Motus-stage candidates,
-beam-prunes `LinkStages`, uses coarser Motus samples while planning (fine 0.5° `BambooTrussScan` still
-validates), Motus-checks only the place approach + release/depart, and `BuildAsync` yields between
-members so the page can paint. Desktop Release `BambooTrussMotion.Build` ≈ 0.9 s; box headless Chrome
-reaches Play-enabled in ≈ 17 s (was hang). Bridge story (edge canes, pads A&D, walk rules) unchanged.
+×60-ish under WASM), blocking `OnAfterRender` before Play. The planner caps Motus-stage candidates,
+beam-prunes `LinkStages`, samples Motus at ≈5° while linking (fine 0.5° `BambooTrussScan` still
+validates Play), Motus-checks carry Swing/Hold/Release/Depart, and `BuildAsync` yields between
+members so the page can paint. The page calls `BambooTrussMotion.UseCell` with the viewer cell before
+`BuildAsync` — under WASM there is no disk URDF, so without `UseCell` Motus checks were silently
+skipped and Play stopped ~92% (`diagR:Swing · θ5 ↔ placed-diagL`). Multi-member Build refuses to run without a Motus cell (no silent Motus-skip). Geometric capsule
+clearance backs up Swing samples only if Motus throws mid-check. Desktop Release Build ≈ 1.3 s with
+caps; prefer Motus-clear Play over scaling the edge span. Bridge story (edge canes, pads A&D, walk
+rules) unchanged.
 

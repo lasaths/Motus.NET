@@ -228,6 +228,8 @@
 
     private async Task RefreshMotionAsync(bool apply)
     {
+        // Same Motus cell the 0.5° Play scan uses — required under WASM (planner cannot LoadFile).
+        if (_cell is not null) BambooTrussMotion.UseCell(_cell);
         var built = await BambooTrussMotion.BuildAsync(_tasks, async memberId =>
         {
             _phase = $"Planning {memberId}…";
