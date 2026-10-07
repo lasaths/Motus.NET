@@ -63,6 +63,9 @@ public sealed class BambooIcdCell
     private readonly List<int> _strutIdx;
     private readonly CollisionObject _poleObj;
     private readonly CollisionObject _groundObj;
+    private readonly List<CollisionObject> _groundPads = new();
+    /// <summary>When non-empty, Motus uses these pads instead of the full ground slab (bridge void).</summary>
+    public IReadOnlyList<(double X, double Z, double Half)> AnchorPads { get; private set; } = Array.Empty<(double, double, double)>();
     private readonly Dictionary<(int gR, bool held, int off, int hang), RobotMeshCollisionChecker> _checkers = new();
 
     public sealed record CellPart(string Name, string Link, double[] Size, double[] Pos);
@@ -148,6 +151,27 @@ public sealed class BambooIcdCell
         var dz = hang.Y - BambooIcdMotion.PoleY;
         var delta = Transforms.FromFrame(new Frame(dx, dy, dz));
         MountWorld = Transforms.Multiply(delta, _defaultMountWorld);
+        _scenes.Clear();
+        _checkers.Clear();
+    }
+
+    /// <summary>
+    /// Use discrete ground pads (viewer XZ centres + half-extent) instead of the full slab — for
+    /// /bamboo-truss so Motus has no earth between the two bridge anchors. Empty restores the slab.
+    /// </summary>
+    public void SetAnchorPads(IReadOnlyList<(double X, double Z, double Half)>? pads)
+    {
+        _groundPads.Clear();
+        AnchorPads = pads ?? Array.Empty<(double, double, double)>();
+        foreach (var (x, z, half) in AnchorPads)
+        {
+            // Viewer (x, 0, z) pad on y=0 → Motus box centred at (x, -z, -thickness/2).
+            var (mx, my, mz) = ViewerToMotusPoint(x, -GroundThickness / 2, z);
+            _groundPads.Add(CollisionObject.Box(
+                $"{Ground}-pad-{_groundPads.Count}",
+                new Frame(mx, my, mz),
+                half, half, GroundThickness / 2));
+        }
         _scenes.Clear();
         _checkers.Clear();
     }
@@ -325,7 +349,9 @@ public sealed class BambooIcdCell
     private CollisionScene BuildScene(StrutTrack track, int hold, bool gripping, double gLmm, IReadOnlyList<double> qDeg,
         IReadOnlyList<(string Name, StrutPlacement Pose)>? extras)
     {
-        var objects = new List<CollisionObject> { _poleObj, _groundObj };
+        var objects = new List<CollisionObject> { _poleObj };
+        if (_groundPads.Count > 0) objects.AddRange(_groundPads);
+        else objects.Add(_groundObj);
         objects.AddRange(MountObjects(gLmm));
         var held = hold == 1 && track.Captured;
         if (!held) objects.Add(StrutAt(StrutWorld(track, hold, qDeg)));
@@ -430,7 +456,13 @@ public sealed class BambooIcdCell
         poleY = BambooIcdMotion.PoleY,
         pole = new { radius = PoleRadius, length = PoleLength, segments = PoleSegments },
         strut = new { radius = StrutRadius, length = StrutLen, segments = StrutSegments },
-        ground = new { size = GroundSize },
+        ground = new
+        {
+            size = GroundSize,
+            pads = _groundPads.Count == 0
+                ? null
+                : AnchorPads.Select(p => new { x = p.X, z = p.Z, half = p.Half }).ToArray()
+        },
         parts = Parts.Select(p => new { name = p.Name, link = p.Link, size = p.Size, pos = p.Pos })
     };
 

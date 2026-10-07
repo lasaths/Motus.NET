@@ -279,14 +279,30 @@
     fill.position.set(-0.7, 0.4, -0.4);
     scene.add(fill);
 
-    var ground = new THREE.Mesh(
-      new THREE.PlaneGeometry(cell.ground.size, cell.ground.size),
-      new THREE.MeshStandardMaterial({ color: 0x070707, roughness: 1, metalness: 0 })
-    );
-    ground.rotation.x = -Math.PI / 2;
-    scene.add(ground);
-    registerCollider('ground', [ground]);
-    groundMesh = ground;
+    if (cell.ground.pads && cell.ground.pads.length) {
+      var padGroup = [];
+      cell.ground.pads.forEach(function (pad, i) {
+        var g = new THREE.Mesh(
+          new THREE.PlaneGeometry(pad.half * 2, pad.half * 2),
+          new THREE.MeshStandardMaterial({ color: 0x070707, roughness: 1, metalness: 0 })
+        );
+        g.rotation.x = -Math.PI / 2;
+        g.position.set(pad.x, 0, pad.z);
+        scene.add(g);
+        padGroup.push(g);
+      });
+      registerCollider('ground', padGroup);
+      groundMesh = padGroup[0];
+    } else {
+      var ground = new THREE.Mesh(
+        new THREE.PlaneGeometry(cell.ground.size, cell.ground.size),
+        new THREE.MeshStandardMaterial({ color: 0x070707, roughness: 1, metalness: 0 })
+      );
+      ground.rotation.x = -Math.PI / 2;
+      scene.add(ground);
+      registerCollider('ground', [ground]);
+      groundMesh = ground;
+    }
 
     var grid = new THREE.GridHelper(1.4, 14, 0x3a3a3a, 0x242424);
     grid.position.y = 0.0006;

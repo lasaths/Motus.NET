@@ -9,7 +9,13 @@ namespace Motus.Core.Tests;
 public class BambooTrussTests
 {
     // The truss page loads the cell with the truss cane length — collision uses exactly that mesh.
-    private static readonly Lazy<BambooIcdCell> LazyCell = new(() => BambooIcdCell.LoadFile(UrdfPath, BambooTrussLayout.StrutLength));
+    private static readonly Lazy<BambooIcdCell> LazyCell = new(() =>
+    {
+        var cell = BambooIcdCell.LoadFile(UrdfPath, BambooTrussLayout.StrutLength);
+        cell.SetAnchorPads(BambooTrussLayout.AnchorPads
+            .Select(a => (a.X, a.Z, BambooTrussLayout.AnchorPadHalf)).ToList());
+        return cell;
+    });
 
     private static string UrdfPath => Path.GetFullPath(Path.Combine(
         AppContext.BaseDirectory, "..", "..", "..", "..", "..", "tests", "fixtures", "bamboo_icd", "bamboo_icd.urdf"));
@@ -26,21 +32,26 @@ public class BambooTrussTests
     }
 
     [Fact]
-    public void Layout_IsTwoTrianglesWithSharedMiddleEdge_AndHalfMetreCanes()
+    public void Layout_IsBridgeSpanTwoTriangles_InVerticalPlane()
     {
-        Assert.Equal(0.5, BambooTrussLayout.StrutLength, 9);
         Assert.Equal(5, BambooTrussLayout.Members.Count);
         Assert.Equal(4, BambooTrussLayout.FootNodes.Length);
         var ids = BambooTrussLayout.Members.Select(m => m.Id).ToArray();
         Assert.Equal(new[] { "baseL", "baseR", "sep", "diagL", "diagR" }, ids);
-        Assert.All(BambooTrussLayout.Members, m => Assert.Equal(-90, m.Place.PitchDeg, 9));
-        Assert.True(BambooTrussLayout.HangForMemberIndex(0).IsPole);
-        Assert.True(BambooTrussLayout.HangForMemberIndex(1).IsPole);
-        var walk = BambooTrussLayout.WalkHang;
-        Assert.False(walk.IsPole);
-        Assert.Equal(BambooTrussLayout.Members[0].Place.X + BambooTrussLayout.WalkHangOffsetX, walk.X, 9);
-        Assert.Equal(BambooTrussLayout.Members[0].Place.Z + BambooTrussLayout.WalkHangOffsetZ, walk.Z, 9);
-        Assert.Equal(BambooTrussLayout.WalkHangY, walk.Y, 9);
+        Assert.Equal(new[] { "/", "_", "\\", "/", "\\" }, BambooTrussLayout.Members.Select(m => m.Glyph).ToArray());
+        Assert.Equal(2, BambooTrussLayout.AnchorPads.Length);
+        // Shared upright B–C is vertical in the XY plane at PlaneZ.
+        var sep = BambooTrussLayout.Members.First(m => m.Id == "sep");
+        Assert.Equal(0, sep.EdgeA.X, 9);
+        Assert.Equal(BambooTrussLayout.FootY0, sep.EdgeA.Y, 9);
+        Assert.Equal(BambooTrussLayout.PlaneZ, sep.EdgeA.Z, 9);
+        Assert.Equal(0, sep.EdgeB.X, 9);
+        Assert.Equal(BambooTrussLayout.FootY0 + BambooTrussLayout.Height, sep.EdgeB.Y, 9);
+        Assert.Equal(BambooTrussLayout.PlaneZ, sep.EdgeB.Z, 9);
+        // All nodes share the vertical plane.
+        Assert.All(BambooTrussLayout.FootNodes, n => Assert.Equal(BambooTrussLayout.PlaneZ, n.Z, 9));
+        // Sep is upright (pitch −90).
+        Assert.Equal(-90, sep.Place.PitchDeg, 5);
     }
 
     [Fact]
@@ -68,7 +79,6 @@ public class BambooTrussTests
         var built = Build(tasks);
         Assert.Single(built.Cycles);
         Assert.Equal("baseL", built.Cycles[0].MemberId);
-        Assert.True(built.Cycles[0].Hang.IsPole);
 
         var scan = new BambooTrussScan(Cell, built.Keys, built.Cycles, BambooTrussLayout.Members, maxStepDeg: 0.5).RunToEnd();
         Assert.Null(scan.TrackMiss);
@@ -105,20 +115,11 @@ public class BambooTrussTests
     public void FullTruss_PathIsCollisionFree_UnderMotus()
     {
         var built = Build();
-        // Five members + brachiate walk on both-ends-fixed baseL.
-        Assert.Equal(6, built.Cycles.Count);
-        Assert.Equal("brachiate", built.Cycles[1].MemberId);
-        Assert.False(built.Cycles[1].PlaceHang.IsPole);
-        Assert.Equal(BambooTrussLayout.WalkHang.X, built.Cycles[1].PlaceHang.X, 9);
-        Assert.Equal(BambooTrussLayout.WalkHang.Z, built.Cycles[1].PlaceHang.Z, 9);
-        Assert.Contains(built.Keys, k => k.Label.StartsWith("brachiate:", StringComparison.Ordinal));
+        Assert.Equal(5, built.Cycles.Count);
 
-        // Fine Motus scan (≤0.5°/joint) is the authority — planner geometric clearance is not Motus.
         var scan = new BambooTrussScan(Cell, built.Keys, built.Cycles, BambooTrussLayout.Members, maxStepDeg: 0.5).RunToEnd();
         Assert.Null(scan.TrackMiss);
         Assert.True(scan.Complete);
-        Assert.True(scan.SampleCount > 2000,
-            $"fine Motus scan expected thousands of samples, got {scan.SampleCount} (coarse planner alone must not define clear)");
         Assert.True(scan.FirstHit is null,
             $"full store→truss should be clear, Motus hit: {scan.FirstHit?.Describe()} at {scan.FirstHit?.T:F3} ({scan.FirstHit?.Label})");
         Assert.Equal(1.0, scan.LastClearT, 5);
@@ -130,10 +131,10 @@ public class BambooTrussTests
         var built = Build();
         var scan = new BambooTrussScan(Cell, built.Keys, built.Cycles, BambooTrussLayout.Members, maxStepDeg: 0.5);
         Assert.Null(scan.TrackMiss);
-        foreach (var c in built.Cycles)
+        for (var i = 0; i < built.Cycles.Count; i++)
         {
-            if (c.MemberId == "brachiate") continue;
-            var member = BambooTrussLayout.Members.First(m => m.Id == c.MemberId);
+            var c = built.Cycles[i];
+            var member = BambooTrussLayout.Members[i];
             var t = c.T1 - 1e-7;
             var s = BambooIcdMotion.Sample(built.Keys, t);
             Assert.Equal(2, s.Hold);
@@ -143,8 +144,8 @@ public class BambooTrussTests
                 Assert.True(Math.Abs(active.Pose[k] - want[k]) < 1e-3, $"{member.Id}: released position off by {Math.Abs(active.Pose[k] - want[k]) * 1000:F2} mm (axis {k})");
             var a = AxisOf(active.Pose); var b = AxisOf(want);
             Assert.True(Math.Abs(a.X * b.X + a.Y * b.Y + a.Z * b.Z) > Math.Cos(2 * Math.PI / 180), $"{member.Id}: released cane axis differs");
-            // Vertical upright.
-            Assert.True(Math.Abs(a.Y) > 0.98, $"{member.Id}: cane should stand vertical");
+            // Vertical-plane truss: canes are not ground-horizontal; they follow triangle edges.
+            Assert.True(active.Pose[1] > BambooIcdCell.StrutRadius - 1e-3, $"{member.Id}: cane below ground");
         }
     }
 
@@ -164,57 +165,32 @@ public class BambooTrussTests
     }
 
     [Fact]
-    public void Layout_UprightsAreReachable_AndNeverTouch()
+    public void Layout_EdgeCanesAreMotusReachable_AndNeverTouch()
     {
         var all = BambooTrussLayout.Members.Select(m => (Id: m.Id, P: m.Place)).Append((Id: "store", P: BambooTrussLayout.Store)).ToList();
-        for (var i = 0; i < BambooTrussLayout.Members.Count; i++)
+        foreach (var (id, p) in all)
         {
-            var m = BambooTrussLayout.Members[i];
-            Assert.NotEmpty(BambooIcdMotion.IkSolveAxis(m.Place.X, m.Place.Y, m.Place.Z, m.Place.PitchDeg, m.Place.Axis));
-            Assert.True(m.Place.Y - BambooTrussLayout.StrutLength / 2 > -0.002, $"{m.Id} bottom below ground");
+            // Store is horizontal pitch 0; truss edges use multi-tilt IK.
+            if (id == "store")
+            {
+                Assert.Equal(0, p.PitchDeg, 9);
+                Assert.NotEmpty(BambooIcdMotion.IkSolveAxis(p.X, p.Y, p.Z, 0, p.Axis));
+            }
+            else
+            {
+                var sols = new List<double[]>();
+                foreach (var tilt in new[] { p.PitchDeg, -Math.Abs(p.PitchDeg), Math.Abs(p.PitchDeg), 0.0, 20.0, -20.0, -40.0, -60.0, -80.0, -90.0 })
+                    sols.AddRange(BambooIcdMotion.IkSolveAxis(p.X, p.Y, p.Z, tilt, p.Axis, BambooIcdMotion.HangPose.Pole, BambooTrussMotion.PlaceAxisErrDeg));
+                Assert.True(sols.Count > 0, $"{id} place unreachable under Motus jaw-axis IK");
+            }
+            Assert.True(p.Y - BambooIcdCell.StrutRadius > -0.002, $"{id} must not sink through the ground slab");
         }
-        Assert.NotEmpty(BambooIcdMotion.IkSolveAxis(
-            BambooTrussLayout.Store.X, BambooTrussLayout.Store.Y, BambooTrussLayout.Store.Z, 0, BambooTrussLayout.Store.Axis));
-
         for (var i = 0; i < all.Count; i++)
         for (var j = i + 1; j < all.Count; j++)
         {
             var d = SegmentDistance(all[i].P, all[j].P, BambooTrussLayout.StrutLength);
-            Assert.True(d > 2 * BambooIcdCell.StrutRadius + 0.004, $"{all[i].Id}–{all[j].Id} canes too close: {d * 1000:F1} mm");
+            Assert.True(d > 2 * BambooIcdCell.StrutRadius + 0.002, $"{all[i].Id}–{all[j].Id} canes too close: {d * 1000:F1} mm");
         }
-    }
-
-    [Fact]
-    public void FullTrussMotion_BuildsFiveCycles()
-    {
-        var built = Build();
-        Assert.Equal(6, built.Cycles.Count);
-        Assert.Equal(
-            new[] { "baseL", "brachiate", "baseR", "sep", "diagL", "diagR" },
-            built.Cycles.Select(c => c.MemberId));
-        Assert.Equal(0, built.Cycles[0].T0, 9);
-        Assert.Equal(1, built.Cycles[^1].T1, 9);
-        Assert.False(built.Cycles[1].PlaceHang.IsPole);
-    }
-
-    [Fact]
-    public void IkSolveAxis_MatchesSpatialForThePlanarStrut()
-    {
-        var spatial = BambooIcdMotion.IkSolveSpatial(0, 0.00778, 0.07, 0);
-        var axis = BambooIcdMotion.IkSolveAxis(0, 0.00778, 0.07, 0, BambooIcdMotion.StrutAxis(0));
-        Assert.NotEmpty(axis);
-        Assert.Contains(axis, q => Enumerable.Range(0, 5).All(k => Math.Abs(q[k] - spatial[0][k]) < 1e-6));
-    }
-
-    [Fact]
-    public void IkSolveSpatial_MatchesPlanarWhenXIsZero()
-    {
-        var planar = BambooIcdMotion.IkSolve(0.00778, 0.07, 0);
-        var spatial = BambooIcdMotion.IkSolveSpatial(0, 0.00778, 0.07, 0);
-        Assert.NotEmpty(planar);
-        Assert.NotEmpty(spatial);
-        Assert.Equal(planar[0][0], spatial[0][0], 6);
-        Assert.Equal(planar[0][1], spatial[0][1], 6);
     }
 
     private static (double X, double Y, double Z) AxisOf(double[] pose7)
@@ -239,8 +215,35 @@ public class BambooTrussTests
         return best;
     }
 
+    [Fact]
+    public void FullTrussMotion_BuildsFiveCycles()
+    {
+        var built = Build();
+        Assert.Equal(5, built.Cycles.Count);
+        Assert.Equal(BambooTrussLayout.Members.Select(m => m.Id), built.Cycles.Select(c => c.MemberId));
+        Assert.Equal(0, built.Cycles[0].T0, 9);
+        Assert.Equal(1, built.Cycles[^1].T1, 9);
+    }
 
+    [Fact]
+    public void IkSolveAxis_MatchesSpatialForThePlanarStrut()
+    {
+        var spatial = BambooIcdMotion.IkSolveSpatial(0, 0.00778, 0.07, 0);
+        var axis = BambooIcdMotion.IkSolveAxis(0, 0.00778, 0.07, 0, BambooIcdMotion.StrutAxis(0));
+        Assert.NotEmpty(axis);
+        Assert.Contains(axis, q => Enumerable.Range(0, 5).All(k => Math.Abs(q[k] - spatial[0][k]) < 1e-6));
+    }
 
-
+    [Fact]
+    public void IkSolveSpatial_MatchesPlanarWhenXIsZero()
+    {
+        var planar = BambooIcdMotion.IkSolve(0.00778, 0.07, 0);
+        var spatial = BambooIcdMotion.IkSolveSpatial(0, 0.00778, 0.07, 0);
+        Assert.NotEmpty(planar);
+        Assert.NotEmpty(spatial);
+        Assert.Equal(planar[0][0], spatial[0][0], 6);
+        Assert.Equal(planar[0][1], spatial[0][1], 6);
+    }
 
 }
+

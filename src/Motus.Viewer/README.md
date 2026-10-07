@@ -74,23 +74,15 @@ Open `http://127.0.0.1:5268/bamboo` (single strut pick/place) or
 
 ### `/bamboo-truss` layout
 
-- **Store:** single feed at the default ICD pick pose; one cane is presented per cycle (waiting stock is
-  not in the Motus scene).
-- **Truss:** two triangles A–B–C and B–D–C on a compact ground footprint, sharing edge B–C. Each member is
-  a **0.5 m vertical upright** planted at the edge midpoint (pitch −90°) — Motus jaw-axis reach cannot
-  place 0.5 m *along-edge* canes at true vertical-plane diamond midpoints, so uprights at edge midpoints
-  keep the two-triangle topology Motus-true. `/bamboo` keeps the 0.30 m ICD strut.
-- **Walk / brachiate:** after baseL is planted it is treated as fixed at both ends (ground stake + pole
-  sleeve). The auto path inserts a Motus-clear brachiate segment that hang-walks along that upright
-  (WalkHang clamp beside the cane) before later members. Unsupported/cantilevered canes are never walk
-  rails. Place hangs stay on the pole.
-- **Motion:** grasp store, lift, Motus-aware pitch/swing vias vs planted uprights (geometric cane/gripper
-  clearance in the planner), place, depart, Home. Build order baseL → brachiate → baseR → sep → diagL →
-  diagR. Fine 0.5° `BambooTrussScan` is the Motus judge (planner clearance is not Motus IsClear).
-- **Tasks:** Motus string-identity pick/place pairs (`object` = member id).
-- **Collision:** Motus.NET vs pole, ground, mount, placed members, the active cane, held cane, and self.
-  Full path Motus-clear, LastClearT = 1.0
-  (`BambooTrussTests.FullTruss_PathIsCollisionFree_UnderMotus`).
+- **Store:** stock laying flat next to first anchor A (single feed; one cane per cycle).
+- **Truss:** vertical-plane bridge span — two triangles A–B–C and B–D–C sharing upright B–C (Motus-reachable
+  stand-in for ASCII `/_\-/_\`). True edge canes of length `BambooTrussLayout.StrutLength` (0.08 m), not
+  freestanding uprights and not a flat ground diamond. Anchors at A and D.
+- **Prefer 0.5 m / five-triangle Warren:** midpoints of a 0.5 m five-cell span leave Motus jaw-axis reach even
+  with brachiation; largest Motus-clear edge prefix found is the first `/_\` bay (~0.22 m side). This page
+  keeps a full Motus-clear path for the two-triangle five-edge span. `/bamboo` stays 0.30 m.
+- **Build order:** baseL `/` → baseR `_` → sep `\` → diagL → diagR. Walk only on both-ends-fixed members.
+- **Collision:** Motus.NET against pole, ground, mount, already-placed members, held strut, and self.
 
 
 ## What still differs from the HTML preview
@@ -106,10 +98,3 @@ Open `http://127.0.0.1:5268/bamboo` (single strut pick/place) or
 
 - Retired visual reference: `/workspace/bamboo-viewer/next.html`
 - Motus.NET, Three.js r128, Blazor WebAssembly
-
-## `/bamboo-truss` WASM startup
-
-Path-build uses geometric cane/gripper clearance (no Motus `IsClear` in the linker), so Blazor WASM
-startup stays in the tens of seconds. `BuildAsync` yields between members and paints before planning.
-Fine 0.5° `BambooTrussScan` (viewer + BambooTruss tests) is the Motus authority — coarse planner samples
-alone never define “clear”.
