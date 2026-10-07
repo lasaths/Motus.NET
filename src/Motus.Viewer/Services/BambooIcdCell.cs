@@ -387,7 +387,7 @@ public sealed class BambooIcdCell
     public bool IsGripping(StrutTrack track, int hold, string label) =>
         track.Captured && (
             hold == 1
-            || label is "Close" or "Open" or "Depart" or "Clear"
+            || label is "Close" or "Open" or "Depart" or "Clear" or "Release" or "Swing" or "Pitch" or "Lift" or "Hold" or "Lower"
             || (StrutLen > 0.35 && hold == 2 && label is "Retract"));
 
     /// <summary>All Motus contacts for one pose. Empty = clear.</summary>

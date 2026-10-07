@@ -76,17 +76,22 @@ Open `http://127.0.0.1:5268/bamboo` (single strut pick/place) or
 
 - **Store:** single feed at the default ICD pick pose; one cane is presented per cycle (waiting stock is
   not in the Motus scene).
-- **Truss:** two equilateral triangles A–B–C and B–D–C lying flat on the ground, sharing B–C (a 60°
-  rhombus). Each member is a **horizontal cane lying on its edge** (pitch 0, yaw along the edge), ending
-  a node gap short of every node so canes never touch — a real edge truss, not five upright poles.
-- **Cane length:** 0.10 m. A flat two-triangle edge truss of 0.5 m canes cannot keep all five midpoints
-  Motus-reachable from the pole hang while clearing the 0.5 m store feed (medial-triangle spacing and
-  store capsule). The hung arm grips ground canes only within ≈0.095 m of the pole. The page loads the
-  cell with this length so drawn cane == collided cane. `/bamboo` keeps the 0.30 m ICD strut.
-- **Walk / brachiate:** not used — every place is reachable from the support-pole hang, and ground edge
-  members are not double-fixed elevated rails. Hang relocation stays on the pole only.
-- **Motion:** grip straight down, lift vertically, swing at transit height, lower vertically, release,
-  back off, Home. θ5 rolls the jaw onto each cane's direction.
+- **Truss:** two isosceles triangles A–B–C and B–D–C **standing in the vertical XY plane** (constant Z),
+  sharing upright B–C. B is near the ground, C the top apex, A/D left/right — a diamond on point B.
+  Each member is a **true edge cane** (pitch/yaw along the edge), ending short of every node so canes
+  never touch — not five freestanding upright poles.
+- **Cane length:** 0.08 m. A 0.5 m vertical edge truss cannot keep all five midpoints Motus-graspable
+  from the pole hang (inclined yaw±90 members leave the compact Y/|x| band where jaw-axis IK succeeds);
+  walk on a double-fixed rail does not enlarge that grasp envelope enough for five true edge centres.
+  The page loads the cell with this length so drawn cane == collided cane. `/bamboo` keeps the 0.30 m
+  ICD strut.
+- **Walk / brachiate:** not used — every place is reachable from the support-pole hang with multi-tilt
+  jaw-axis IK. Hang relocation stays on the pole only. (A 0.5 m vertical *edge* frame still cannot put
+  all five midpoints in the Motus grasp band even with walk on a double-fixed rail.)
+- **Motion:** grasp store horizontally, hang-side pitch, Z-step into the vertical plane, place on the
+  edge, depart to the store bay, Home. Build order baseL → baseR → sep → diagL → diagR. Stage linking
+  Motus-checks carry segments against already-placed members. θ5 rolls the jaw onto each cane axis;
+  jaw tilt may differ from strut pitch.
 - **Tasks:** Motus string-identity pick/place pairs (`object` = member id) build members in order.
 - **Collision:** Motus.NET vs pole, ground, mount, placed members, the active cane, held cane, and self.
   Full five-cycle path Motus-clear, LastClearT = 1.0

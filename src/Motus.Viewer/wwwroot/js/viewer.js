@@ -225,21 +225,24 @@
     while (footprintRoot.children.length) footprintRoot.remove(footprintRoot.children[0]);
     var edgeMat = new THREE.LineBasicMaterial({ color: 0xd7c392 });
     (fp.edges || []).forEach(function (e) {
+      var ay = (e.ay != null) ? e.ay : 0.002;
+      var by = (e.by != null) ? e.by : 0.002;
       var geo = new THREE.BufferGeometry().setFromPoints([
-        new THREE.Vector3(e.ax, 0.002, e.az),
-        new THREE.Vector3(e.bx, 0.002, e.bz)
+        new THREE.Vector3(e.ax, ay, e.az),
+        new THREE.Vector3(e.bx, by, e.bz)
       ]);
       footprintRoot.add(new THREE.Line(geo, edgeMat));
     });
     (fp.nodes || []).forEach(function (n) {
+      var ny = (n.y != null) ? n.y : 0.006;
       var dot = new THREE.Mesh(
         new THREE.SphereGeometry(0.006, 12, 10),
         new THREE.MeshBasicMaterial({ color: 0xe8d5a3 })
       );
-      dot.position.set(n.x, 0.006, n.z);
+      dot.position.set(n.x, ny, n.z);
       footprintRoot.add(dot);
       var lab = makePlaneLabel(String(n.name));
-      lab.position.set(n.x, 0.028, n.z);
+      lab.position.set(n.x, ny + 0.022, n.z);
       footprintRoot.add(lab);
     });
   }

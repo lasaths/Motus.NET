@@ -17,7 +17,7 @@
 
     <aside class="controls">
         <h1>Bamboo truss (store → 2 triangles)</h1>
-        <p class="sub">Single truss: two triangles lying on the ground, sharing the middle edge B–C. The store feeds one cane at a time; each is carried flat and laid on its truss edge. Motus.NET owns FK/tasks/collision; Three.js only draws.</p>
+        <p class="sub">Single truss: two triangles standing in a vertical plane (XY at fixed Z), sharing upright B–C. The store feeds one cane at a time; each is carried onto its true edge member. Motus.NET owns FK/tasks/collision; Three.js only draws.</p>
         <div class="phase @(!string.IsNullOrEmpty(_motionError) || _collision ? "err" : "")" data-motus="@_motusState">@_phase</div>
 
         <div class="row">
@@ -119,7 +119,7 @@
         </label>
         <p class="note">
             Drag the view to orbit. Moving a joint or gripper slider pauses playback and drives the arm from C#.
-            Play runs every pick/place pair (object = member id). Footprint: A–B–C + B–D–C (rhombus), bottoms A–B / B–D, apex C, shared B–C.
+            Play runs every pick/place pair (object = member id). Vertical footprint: A–B–C + B–D–C in the XY plane, B near ground, C apex, shared upright B–C.
             Bend axes local X, wrists local Y, jaws local X. Viewer is Three.js Y-up; Motus.NET URDF is Z-up (shared θ).
             Collision: Motus.NET against pole, ground, mount, already-placed members, the held strut, and self.
             Play builds members in order (feed → baseL → baseR → sep → diagL → diagR). Stop on first Motus hit.
@@ -202,7 +202,7 @@
         {
             var urdfContent = await JS.InvokeAsync<string>("fetchFile", "/fixtures/bamboo_icd/bamboo_icd.urdf");
             // Hung arm + pole/cane/ground/mount CollisionScene; URDF link frames == drawn groups.
-            // Truss canes are shorter than the ICD strut (see BambooTrussLayout) — drawn == collided.
+            // Truss canes use BambooTrussLayout.StrutLength (vertical edge frame) — drawn == collided.
             _cell = BambooIcdCell.Load(urdfContent, BambooTrussLayout.StrutLength);
             _robotReady = true;
             _initError = null;

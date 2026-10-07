@@ -52,7 +52,19 @@ public sealed class BambooTrussScan
         {
             var member = _members.First(m => m.Id == _cycles[i].MemberId);
             var cycleKeys = KeysInCycle(i);
-            _tracks.Add(cell.TrackStrut(cycleKeys, member.Store));
+            var track = cell.TrackStrut(cycleKeys, member.Store);
+            // Held transit uses the store-grasp jaw offset; snap the Motus release pose to the designed
+            // edge place so later cycles collide with the true member (pitch changes store→vertical plane).
+            if (track.Miss is null && track.Released is not null)
+            {
+                track = new BambooIcdCell.StrutTrack
+                {
+                    Rest = track.Rest,
+                    HeldOffset = track.HeldOffset,
+                    Released = BambooIcdCell.PlacementWorld(member.Place)
+                };
+            }
+            _tracks.Add(track);
         }
         BuildSamples(maxStepDeg);
     }

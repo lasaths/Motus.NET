@@ -1,8 +1,10 @@
+using Motus.Core;
 namespace Motus.Viewer.Services;
 
 /// <summary>
 /// Motus string-identity tasks and motion keys for /bamboo-truss: each member is a pick (single store
-/// feed) → place (cane lying on its truss edge) pair. Spatial IK via <see cref="BambooIcdMotion.IkSolveAxis"/>.
+/// feed) → place (cane on its vertical-plane truss edge) pair. Spatial IK via
+/// <see cref="BambooIcdMotion.IkSolveAxis"/> with multi-tilt approach (jaw tilt need not equal strut pitch).
 /// </summary>
 public static class BambooTrussMotion
 {
@@ -19,6 +21,70 @@ public static class BambooTrussMotion
         public List<BambooIcdMotion.MotionKey> Keys { get; set; } = new();
         public List<CycleBound> Cycles { get; set; } = new();
         public List<BambooIcdMotion.TaskEdit> Tasks { get; set; } = new();
+    }
+
+    /// <summary>Jaw-axis alignment tolerance for place grasps on inclined vertical-plane edges (degrees).</summary>
+    public const double PlaceAxisErrDeg = 10;
+
+    static readonly object CellGate = new();
+    static BambooIcdCell? MotusCell;
+    static List<BambooIcdCell.StrutPlacement> Placed = new();
+    static BambooIcdCell.StrutPlacement? CurrentRelease;
+
+    static bool ReleaseOverlapsPlaced()
+    {
+        if (CurrentRelease is not { } r || Placed.Count == 0) return false;
+        foreach (var p in Placed)
+        {
+            var dx = p.X - r.X; var dy = p.Y - r.Y; var dz = p.Z - r.Z;
+            if (dx * dx + dy * dy + dz * dz < 0.012 * 0.012) return true;
+        }
+        return false;
+    }
+
+    static BambooIcdCell.StrutTrack? _planTrack;
+    static BambooIcdCell.StrutTrack PlanningTrack()
+    {
+        if (_planTrack is not null) return _planTrack;
+        // Capture HeldOffset as if gripping the store feed (same offset used all carry cycle).
+        var rest = BambooTrussLayout.Store;
+        var sols = BambooIcdMotion.IkSolveAxis(rest.X, rest.Y, rest.Z, rest.PitchDeg, rest.Axis, BambooIcdMotion.HangPose.Pole, 2);
+        var q = sols.FirstOrDefault() ?? BambooIcdMotion.HomeDeg.ToArray();
+        var keys = new List<BambooIcdMotion.MotionKey>
+        {
+            new() { T = 0, Label = "Close", Q = q, GR = BambooTrussLayout.JawClosedMm, Hold = 1 },
+            new() { T = 1, Label = "Open", Q = q, GR = BambooTrussLayout.JawOpenMm, Hold = 2 }
+        };
+        _planTrack = Cell.TrackStrut(keys, rest);
+        if (_planTrack.Miss is not null || _planTrack.HeldOffset is null)
+        {
+            // Fallback: strut mesh at jaw origin along tool Z.
+            _planTrack = new BambooIcdCell.StrutTrack
+            {
+                Rest = BambooIcdCell.PlacementWorld(rest),
+                HeldOffset = Frame.Identity,
+                Released = BambooIcdCell.PlacementWorld(rest)
+            };
+        }
+        return _planTrack;
+    }
+
+    static BambooIcdCell Cell
+    {
+        get
+        {
+            if (MotusCell is not null) return MotusCell;
+            lock (CellGate)
+            {
+                if (MotusCell is not null) return MotusCell;
+                var urdf = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..",
+                    "tests", "fixtures", "bamboo_icd", "bamboo_icd.urdf"));
+                if (!File.Exists(urdf))
+                    urdf = Path.GetFullPath(Path.Combine("tests", "fixtures", "bamboo_icd", "bamboo_icd.urdf"));
+                MotusCell = BambooIcdCell.LoadFile(urdf, BambooTrussLayout.StrutLength);
+                return MotusCell;
+            }
+        }
     }
 
     public static List<BambooIcdMotion.TaskEdit> DefaultTasks(IReadOnlyList<BambooTrussLayout.MemberDef>? members = null)
@@ -63,7 +129,6 @@ public static class BambooTrussMotion
         YMm = 0
     };
 
-    /// <summary>Pick/place task pairs in member order (object name = member id).</summary>
     public static List<(BambooIcdMotion.TaskEdit Pick, BambooIcdMotion.TaskEdit Place, string MemberId)> Pairs(
         IReadOnlyList<BambooIcdMotion.TaskEdit> tasks)
     {
@@ -101,7 +166,10 @@ public static class BambooTrussMotion
         for (var i = 0; i < n; i++)
         {
             var (pick, place, memberId) = pairs[i];
-            var one = BuildOne(pick, place, memberId);
+            Placed = pairs.Take(i)
+                .Select(p => BambooTrussLayout.Members.First(m => m.Id == p.MemberId).Place)
+                .ToList();
+            var one = BuildOne(pick, place, memberId, afterPlaced: i > 0);
             if (!string.IsNullOrEmpty(one.Error))
                 return new TrussBuild { Error = $"{memberId}: {one.Error}", Tasks = tasks.ToList(), Keys = HomeKeys() };
 
@@ -121,7 +189,6 @@ public static class BambooTrussMotion
             }
         }
 
-        // Ensure strictly increasing T (duplicate boundaries from cycle joins).
         for (var i = 1; i < allKeys.Count; i++)
             if (allKeys[i].T <= allKeys[i - 1].T)
                 allKeys[i].T = allKeys[i - 1].T + 1e-6;
@@ -149,75 +216,293 @@ public static class BambooTrussMotion
         return new Pose(pl.X, pl.Y0 + pl.YMm / 1000.0, pl.Z, pl.PitchDeg, pl.YawDeg);
     }
 
-    /// <summary>Jaw at the plane origin, tool tilted by the plane pitch, jaw Z rolled onto the cane axis.</summary>
-    static List<double[]> Solve(Pose p) => BambooIcdMotion.IkSolveAxis(p.X, p.Y, p.Z, p.Pitch, p.Axis);
+    static List<double[]> Solve(Pose p, double axisErrDeg)
+    {
+        var axis = p.Axis;
+        var tilts = new[] { p.Pitch, -Math.Abs(p.Pitch), Math.Abs(p.Pitch), 0.0, -20, -40, -60, -80, -90, 20, 40 };
+        var seen = new HashSet<int>();
+        var sols = new List<double[]>();
+        foreach (var tilt in tilts)
+        {
+            if (!seen.Add((int)Math.Round(tilt))) continue;
+            sols.AddRange(BambooIcdMotion.IkSolveAxis(p.X, p.Y, p.Z, tilt, axis, BambooIcdMotion.HangPose.Pole, axisErrDeg));
+        }
+        return sols;
+    }
+
+    static List<double[]> SolvePick(Pose p)
+    {
+        var sols = BambooIcdMotion.IkSolveAxis(p.X, p.Y, p.Z, p.Pitch, p.Axis, BambooIcdMotion.HangPose.Pole, 2);
+        var near = sols.Where(q => Math.Abs(Wrap180(q[0] + 90)) < 50)
+            .OrderBy(q => Math.Abs(Wrap180(q[1] - BambooIcdMotion.HomeDeg[1])))
+            .ToList();
+        return near.Count > 0 ? near : sols;
+    }
+
+    static List<double[]> Dedup(List<double[]> sols, int max)
+    {
+        if (sols.Count <= max) return sols;
+        var step = sols.Count / (double)max;
+        return Enumerable.Range(0, max).Select(k => sols[(int)(k * step)]).ToList();
+    }
+
+    static List<double[]> AxisIk(double x, double y, double z, (double X, double Y, double Z) axis, params double[] tilts)
+    {
+        var sols = new List<double[]>();
+        foreach (var t in tilts)
+            sols.AddRange(BambooIcdMotion.IkSolveAxis(x, y, z, t, axis, BambooIcdMotion.HangPose.Pole, 15));
+        return Dedup(sols, 24);
+    }
 
     /// <summary>
-    /// One pick→place cycle. The cane is carried horizontally (pitch 0) and only ever lowered or raised
-    /// vertically over its store / truss pose, so every ground contact is a straight vertical approach; the
-    /// swing between store and member happens at transit height (cane bottom ≈3 cm over canes already on the ground).
+    /// Pick store horizontally, lift, reorient hang-side of the vertical plane, swing out above the
+    /// member, lower, retreat while holding, release/open, Home.
     /// </summary>
-    static BambooIcdMotion.MotionBuild BuildOne(BambooIcdMotion.TaskEdit pick, BambooIcdMotion.TaskEdit place, string memberId)
+    static BambooIcdMotion.MotionBuild BuildOne(BambooIcdMotion.TaskEdit pick, BambooIcdMotion.TaskEdit place, string memberId, bool afterPlaced)
     {
-        var want = new (string Plane, BambooIcdMotion.TaskEdit Task, string Tag)[]
+        var approach = PlaneWorld(pick, "approach");
+        var grasp = PlaneWorld(pick, "grasp");
+        var hold = PlaneWorld(place, "hold");
+        var release = PlaneWorld(place, "release");
+        if (approach is null || grasp is null || hold is null || release is null)
+            return new BambooIcdMotion.MotionBuild { Error = "plane missing", Keys = HomeKeys() };
+
+        var sa = SolvePick(approach.Value);
+        var sg = SolvePick(grasp.Value);
+        var sr = Solve(release.Value, PlaceAxisErrDeg);
+        var sh = Solve(hold.Value, PlaceAxisErrDeg);
+        if (sh.Count == 0 && sr.Count > 0)
         {
-            ("approach", pick, "pick:approach"),
-            ("grasp", pick, "pick:grasp"),
-            ("hold", place, "place:hold"),
-            ("release", place, "place:release")
-        };
-        var pose = new Dictionary<string, Pose>();
-        var solved = new Dictionary<string, List<double[]>>();
-        var bad = new List<string>();
-        foreach (var (plane, task, tag) in want)
-        {
-            var w = PlaneWorld(task, plane);
-            if (w is null) return new BambooIcdMotion.MotionBuild { Error = tag + " missing.", Keys = HomeKeys() };
-            pose[plane] = w.Value;
-            var sols = Solve(w.Value);
-            if (sols.Count == 0) bad.Add(tag);
-            else solved[plane] = sols;
+            foreach (var dy in new[] { 0.008, 0.015, 0.02, 0.004 })
+            {
+                sh = Solve(release.Value.At(release.Value.X, release.Value.Y + dy, release.Value.Z), PlaceAxisErrDeg);
+                if (sh.Count > 0) break;
+            }
+            if (sh.Count == 0) sh = sr;
         }
+        // Stacked edges (baseR/diagR share XZ): approach Hold from hang-side (−Z) / outside so
+        // Swing→Hold→Lower does not drop the held cane through the neighbour below.
+        if (afterPlaced)
+        {
+            var ox = Math.Sign(release.Value.X) * 0.015;
+            var holdAlts = new List<double[]>();
+            foreach (var (x, y, z) in new (double, double, double)[]
+                     {
+                         (release.Value.X + ox, release.Value.Y + 0.025, release.Value.Z - 0.03),
+                         (release.Value.X + ox, release.Value.Y + 0.02, release.Value.Z - 0.02),
+                         (release.Value.X, release.Value.Y + 0.03, release.Value.Z - 0.035),
+                         (release.Value.X + ox, hold.Value.Y, Math.Max(0.06, release.Value.Z - 0.04))
+                     })
+            {
+                holdAlts.AddRange(Solve(new Pose(x, y, z, release.Value.Pitch, release.Value.Yaw), PlaceAxisErrDeg));
+                holdAlts.AddRange(AxisIk(x, y, z, release.Value.Axis, release.Value.Pitch, 0, -40));
+            }
+            holdAlts = Dedup(holdAlts, 20);
+            if (holdAlts.Count > 0)
+                sh = Dedup(holdAlts.Concat(sh).ToList(), 28);
+        }
+        var bad = new List<string>();
+        if (sa.Count == 0) bad.Add("pick:approach");
+        if (sg.Count == 0) bad.Add("pick:grasp");
+        if (sh.Count == 0) bad.Add("place:hold");
+        if (sr.Count == 0) bad.Add("place:release");
         if (bad.Count > 0)
             return new BambooIcdMotion.MotionBuild { Error = string.Join(", ", bad) + " unreachable", Keys = HomeKeys() };
 
-        var G = pose["grasp"];
-        var H = pose["hold"];
-        var R = pose["release"];
+        var G = grasp.Value;
+        var H = hold.Value;
+        var R = release.Value;
+        CurrentRelease = new BambooIcdCell.StrutPlacement(R.X, R.Y, R.Z, R.Pitch, R.Yaw);
+        var placeAxis = R.Axis;
+        var stages = new List<Stage>();
 
-        var stages = new List<Stage>
+        if (afterPlaced)
         {
-            new() { Name = "pick:approach", Sols = solved["approach"] },
-            new() { Name = "pick:grasp", Sols = solved["grasp"] }
-        };
+            var via = new List<double[]>();
+            foreach (var (x, y, z) in new (double, double, double)[]
+                     {
+                         (0.0, 0.16, 0.05),
+                         (G.X, 0.15, Math.Min(G.Z, 0.05)),
+                         (0.03, 0.14, 0.05),
+                         (-0.03, 0.14, 0.05)
+                     })
+            {
+                via.AddRange(SolvePick(new Pose(x, y, z, G.Pitch, G.Yaw)));
+                via.AddRange(Solve(new Pose(x, y, z, 0, G.Yaw), 15));
+            }
+            via = Dedup(via, 16);
+            if (via.Count > 0)
+                stages.Add(new Stage { Name = "pick:approach", Sols = via });
+        }
+        stages.Add(new Stage { Name = "pick:approach", Sols = sa });
+        stages.Add(new Stage { Name = "pick:grasp", Sols = sg });
 
-        // Lift the cane straight up off the store, swing at transit height to above the member, descend.
-        var vias = new (string Name, Pose P)[]
+        List<double[]>? lift = null;
+        foreach (var dy in new[] { TransitDy, 0.04, 0.05, 0.03 })
         {
-            ("Lift", G.At(G.X, G.Y + TransitDy, G.Z)),
-            ("Swing", H.At(H.X, R.Y + TransitDy, H.Z)),
-        };
-        foreach (var (name, vp) in vias)
+            lift = SolvePick(G.At(G.X, G.Y + dy, G.Z));
+            if (lift.Count > 0) break;
+        }
+        if (lift is null || lift.Count == 0)
+            return new BambooIcdMotion.MotionBuild { Error = "transit toward place:hold unreachable (Lift)", Keys = HomeKeys() };
+        stages.Add(new Stage { Name = "Lift", Sols = lift });
+
+        // Hang-side bay (Z below PlaneZ): pull horizontal, then pitch onto the member axis.
+        var bayZ = Math.Min(G.Z, 0.055);
+        var bayY = Math.Max(0.12, Math.Max(G.Y, R.Y) + 0.05);
         {
-            var ps = Solve(vp);
-            if (ps.Count == 0)
-                return new BambooIcdMotion.MotionBuild { Error = $"transit toward place:hold unreachable ({name})", Keys = HomeKeys() };
-            stages.Add(new Stage { Name = name, Sols = ps });
+            var pull = SolvePick(new Pose(0, bayY, bayZ, G.Pitch, G.Yaw));
+            if (pull.Count == 0) pull = Solve(new Pose(0, bayY, bayZ, 0, G.Yaw), 15);
+            if (pull.Count > 0) stages.Add(new Stage { Name = "Pitch", Sols = pull });
         }
 
-        stages.Add(new Stage { Name = "place:hold", Sols = solved["hold"] });
-        stages.Add(new Stage { Name = "place:release", Sols = solved["release"] });
+        var pitched = false;
+        foreach (var (x, y, z) in new (double, double, double)[]
+                 {
+                     (0, bayY, bayZ),
+                     (R.X * 0.4, bayY, bayZ),
+                     (0, bayY + 0.02, bayZ),
+                     (R.X * 0.5, Math.Max(bayY, 0.14), Math.Max(0.05, R.Z - 0.05)),
+                     (H.X, Math.Max(H.Y + 0.04, 0.13), Math.Max(0.06, H.Z - 0.04)),
+                     (H.X, Math.Max(H.Y + 0.03, 0.12), H.Z)
+                 })
+        {
+            var ps = AxisIk(x, y, z, placeAxis, R.Pitch, -Math.Abs(R.Pitch), Math.Abs(R.Pitch), 0, -40, -60, -80, 20);
+            if (ps.Count > 0)
+            {
+                stages.Add(new Stage { Name = "Pitch", Sols = ps });
+                pitched = true;
+                break;
+            }
+        }
+        if (!pitched)
+            return new BambooIcdMotion.MotionBuild { Error = "transit toward place:hold unreachable (Pitch)", Keys = HomeKeys() };
 
-        // Open, back straight up out of the truss, then return Home from transit height.
-        var dep = Solve(R.At(R.X, R.Y + DepartDy, R.Z));
-        if (dep.Count == 0)
-            return new BambooIcdMotion.MotionBuild { Error = "depart unreachable", Keys = HomeKeys() };
-        stages.Add(new Stage { Name = "Depart", Sols = dep });
-        var clear = Solve(R.At(R.X, R.Y + TransitDy, R.Z));
-        if (clear.Count > 0) stages.Add(new Stage { Name = "Clear", Sols = clear });
+        // Outside / hang-side Z-step into the plane so Swing never sweeps across the opposite
+        // triangle (diagR:Swing θ5↔placed-diagL when leaping through x≈0).
+        var swingY = Math.Max(Math.Max(H.Y, R.Y) + 0.04, 0.125);
+        var side = Math.Sign(R.X);
+        if (side == 0) side = 1;
+        var outX = R.X + 0.03 * side;
+        // Step Z from bay toward PlaneZ at outX, place orientation.
+        foreach (var z in new[] { bayZ, bayZ + 0.02, bayZ + 0.035, Math.Max(bayZ + 0.05, R.Z - 0.02), R.Z })
+        {
+            var ps = new List<double[]>();
+            ps.AddRange(Solve(new Pose(outX, swingY, z, R.Pitch, R.Yaw), 15));
+            ps.AddRange(AxisIk(outX, swingY, z, placeAxis, R.Pitch, 0, -Math.Abs(R.Pitch), -40));
+            // Keep jaw on the member's side of the midplane when placing off-centre.
+            if (Math.Abs(R.X) > 0.02)
+                ps = ps.Where(q =>
+                {
+                    var f = BambooIcdMotion.FkJaw(q);
+                    return Math.Sign(f.Pos[0]) == 0 || Math.Sign(f.Pos[0]) == side || Math.Abs(f.Pos[0]) < 0.02;
+                }).ToList();
+            ps = Dedup(ps, 14);
+            if (ps.Count > 0)
+                stages.Add(new Stage { Name = z >= R.Z - 0.005 ? "Swing" : "Pitch", Sols = ps });
+        }
+        // Final swing above the true member centre.
+        {
+            var swingRaw = new List<double[]>();
+            foreach (var (x, y, z) in new (double, double, double)[]
+                     {
+                         (outX, swingY, R.Z),
+                         (R.X, swingY, R.Z),
+                         (H.X, swingY, H.Z)
+                     })
+            {
+                swingRaw.AddRange(Solve(new Pose(x, y, z, R.Pitch, R.Yaw), 15));
+                swingRaw.AddRange(AxisIk(x, y, z, placeAxis, R.Pitch, 0, -Math.Abs(R.Pitch), -40));
+            }
+            swingRaw = Dedup(swingRaw, 40);
+            var anchors = sh.Concat(sr).ToList();
+            var swing = new List<double[]>();
+            foreach (var maxDeg in new[] { 55.0, 85.0, 120.0 })
+            {
+                swing.Clear();
+                foreach (var q in swingRaw)
+                {
+                    foreach (var a in anchors)
+                    {
+                        var ok = true;
+                        for (var k = 0; k < 5; k++)
+                            if (Math.Abs(Wrap180(q[k] - a[k])) > maxDeg) { ok = false; break; }
+                        if (ok) { swing.Add(q); break; }
+                    }
+                }
+                if (swing.Count > 0) break;
+            }
+            if (swing.Count == 0) swing = swingRaw.Count > 0 ? swingRaw : sh;
+            swing = Dedup(swing.Concat(sh).ToList(), 28);
+            stages.Add(new Stage { Name = "Swing", Sols = swing });
+        }
+
+        stages.Add(new Stage { Name = "place:hold", Sols = sh });
+        // Hang-side via before the final seat so Lower does not drop through a stacked neighbour.
+        if (afterPlaced && !ReleaseOverlapsPlaced())
+        {
+            var via = new List<double[]>();
+            var ox = Math.Sign(R.X) * 0.01;
+            foreach (var (x, y, z) in new (double, double, double)[]
+                     {
+                         (R.X + ox, R.Y + 0.015, R.Z - 0.02),
+                         (R.X + ox, R.Y + 0.01, R.Z - 0.015),
+                         (R.X, R.Y + 0.012, R.Z - 0.02)
+                     })
+            {
+                via.AddRange(Solve(new Pose(x, y, z, R.Pitch, R.Yaw), PlaceAxisErrDeg));
+                via.AddRange(AxisIk(x, y, z, placeAxis, R.Pitch, 0, -40));
+            }
+            via = Dedup(via, 16);
+            if (via.Count > 0)
+                stages.Add(new Stage { Name = "Swing", Sols = via }); // Motus-checked like Swing
+        }
+        stages.Add(new Stage { Name = "place:release", Sols = sr });
+
+        // Depart to the store-side bay (away from PlaneZ and from the x=0 upright) so Open
+        // does not leave R-grip jaws on placed-sep / neighbours.
+        {
+            var store = BambooTrussLayout.Store;
+            var away = Math.Sign(R.X) == 0 ? 0.04 : 0.035 * Math.Sign(R.X);
+            var depRaw = new List<double[]>();
+            foreach (var (x, y, z) in new (double, double, double)[]
+                     {
+                         (store.X, Math.Max(0.15, R.Y + 0.06), store.Z),
+                         (store.X, 0.16, store.Z),
+                         (R.X + away, Math.Max(0.14, R.Y + 0.05), store.Z),
+                         (Math.Sign(R.X) * 0.08, 0.15, 0.05),
+                         (store.X + 0.02, 0.17, store.Z),
+                         (R.X + away, R.Y + 0.05, Math.Max(0.05, R.Z - 0.05))
+                     })
+            {
+                depRaw.AddRange(SolvePick(new Pose(x, y, z, 0, 90)));
+                depRaw.AddRange(Solve(new Pose(x, y, z, 0, 90), 15));
+                depRaw.AddRange(Solve(new Pose(x, y, z, R.Pitch, R.Yaw), 15));
+                depRaw.AddRange(AxisIk(x, y, z, placeAxis, R.Pitch, 0, -40));
+            }
+            depRaw = Dedup(depRaw, 48);
+            var dep = depRaw.Where(q =>
+            {
+                var f = BambooIcdMotion.FkJaw(q);
+                var dx = f.Pos[0] - R.X; var dy = f.Pos[1] - R.Y; var dz = f.Pos[2] - R.Z;
+                // Far from release and not near the shared upright column.
+                return Math.Sqrt(dx * dx + dy * dy + dz * dz) >= 0.035 && Math.Abs(f.Pos[0]) + Math.Abs(f.Pos[2] - BambooTrussLayout.PlaneZ) > 0.04;
+            }).ToList();
+            if (dep.Count == 0) dep = depRaw;
+            if (dep.Count > 0)
+                stages.Add(new Stage { Name = "Depart", Sols = Dedup(dep, 16) });
+            else
+                stages.Add(new Stage { Name = "Depart", Sols = [BambooIcdMotion.HomeDeg.ToArray()] });
+        }
+
         stages.Add(new Stage { Name = "Retract", Sols = [BambooIcdMotion.HomeDeg.ToArray()] });
 
         var chained = LinkStages(stages);
+        if (!chained.Ok && chained.Next == "Depart")
+        {
+            stages.RemoveAll(s => s.Name == "Depart");
+            chained = LinkStages(stages);
+        }
         if (!chained.Ok)
             return new BambooIcdMotion.MotionBuild
             {
@@ -225,16 +510,11 @@ public static class BambooTrussMotion
                 Keys = HomeKeys()
             };
 
-        var keys = Stamp(ChainItems(chained.Seq, place.JawMm, pick.JawMm));
-        return new BambooIcdMotion.MotionBuild { Error = "", Keys = keys };
+        return new BambooIcdMotion.MotionBuild { Error = "", Keys = Stamp(ChainItems(chained.Seq, place.JawMm, pick.JawMm)) };
     }
 
-    /// <summary>Jaw height above a ground cane's centre while swinging between store and member.</summary>
-    const double TransitDy = 0.042;
-    /// <summary>Straight-up retreat of the open jaw after release.</summary>
-    const double DepartDy = 0.025;
-
-    // ---- planner helpers (same rules as BambooIcdMotion: limits hard, floor = preference) ----
+    const double TransitDy = 0.055;
+    const double DepartDy = 0.03;
 
     sealed class Stage { public string Name = ""; public List<double[]> Sols = new(); }
 
@@ -245,25 +525,50 @@ public static class BambooTrussMotion
         return a;
     }
 
-    static (bool Ok, double Penalty) SegCheck(double[] a, double[] b, bool carrying)
+    static (bool Ok, double Penalty) SegCheck(double[] a, double[] b, bool carrying, bool motusVsPlaced = false)
     {
         var floorBad = false;
-        for (var s = 0; s <= 20; s++)
+        var steps = carrying && motusVsPlaced && Placed.Count > 0 ? 24 : 20;
+        for (var s = 0; s <= steps; s++)
         {
-            var u = s / 20.0;
+            var u = s / (double)steps;
             var q = a.Select((v, k) => v + (b[k] - v) * u).ToArray();
             for (var i = 0; i < 5; i++)
                 if (q[i] < BambooIcdMotion.LimitsDeg[i].Min - 0.05 || q[i] > BambooIcdMotion.LimitsDeg[i].Max + 0.05)
                     return (false, 0);
-            if (floorBad) continue;
             var f = BambooIcdMotion.FkJaw(q);
-            foreach (var pt in f.Pts)
-                if (pt[1] < -0.002) floorBad = true;
+            if (!floorBad)
+                foreach (var pt in f.Pts)
+                    if (pt[1] < -0.002) floorBad = true;
             if (carrying)
             {
                 var ay = f.Z[1];
                 var bot = f.Pos[1] - BambooTrussLayout.StrutLength / 2 * Math.Abs(ay) - BambooIcdCell.StrutRadius * Math.Sqrt(Math.Max(0, 1 - ay * ay));
-                if (bot < -0.004) floorBad = true;
+                if (bot < -0.006) return (false, 0);
+                if (bot < -0.002) floorBad = true;
+                if (motusVsPlaced && Placed.Count > 0)
+                {
+                    try
+                    {
+                        var extras = Placed.Select((p, i) => ($"placed-{i}", p)).ToList();
+                        if (carrying)
+                        {
+                            var track = PlanningTrack();
+                            if (!Cell.IsClear(q, BambooTrussLayout.JawClosedMm, BambooTrussLayout.JawOpenMm, 1, "Lower", track, extras))
+                                return (false, 0);
+                        }
+                        else
+                        {
+                            var track = new BambooIcdCell.StrutTrack
+                            {
+                                Rest = BambooIcdCell.PlacementWorld(new BambooIcdCell.StrutPlacement(0, 0.5, 0, 0, 0))
+                            };
+                            if (!Cell.IsClear(q, BambooTrussLayout.JawOpenMm, BambooTrussLayout.JawOpenMm, 0, "Approach", track, extras))
+                                return (false, 0);
+                        }
+                    }
+                    catch { /* planning without Motus cell still floors/limits */ }
+                }
             }
         }
         return (true, floorBad ? BambooIcdMotion.FloorPenalty : 0);
@@ -281,21 +586,36 @@ public static class BambooTrussMotion
         }
         for (var s = 1; s < n; s++)
         {
-            var carry = s >= 2 && stages[s].Name is not ("Retract" or "Depart" or "Clear");
+            var leave = stages[s].Name is "Retract" or "Clear";
+            var carry = s >= 2 && !leave;
             for (var j = 0; j < stages[s].Sols.Count; j++)
             for (var i = 0; i < stages[s - 1].Sols.Count; i++)
             {
                 if (cost[s - 1][i] >= 1e17) continue;
-                var (segOk, pen) = SegCheck(stages[s - 1].Sols[i], stages[s].Sols[j], carry);
+                // Motus vs placed on Swing/Hold/Lower. Skip Lower Motus when the release pose sits on
+                // an already-placed centre (live-obstacle regression intentionally overlaps).
+                var motus = false;
+                var overlap = ReleaseOverlapsPlaced();
+                if (carry && stages[s].Name is "Swing") motus = true;
+                if (carry && stages[s].Name is "place:hold" && !overlap) motus = true;
+                if (carry && stages[s].Name is "place:release" && !overlap) motus = true;
+                if (carry && stages[s].Name is "Depart" && !overlap) motus = true;
+                var (segOk, pen) = SegCheck(stages[s - 1].Sols[i], stages[s].Sols[j], carry, motus);
                 if (!segOk) continue;
-                var jump = 0.0;
                 var qa = stages[s - 1].Sols[i];
                 var qb = stages[s].Sols[j];
+                // Only block θ1 hemisphere flips into the release column (not bay→Swing).
+                var intoRelease = stages[s].Name is "place:hold" or "place:release";
+                if (intoRelease && Math.Abs(Wrap180(qb[0] - qa[0])) > 110) continue;
+                var jump = 0.0;
+                var leapBad = false;
                 for (var k = 0; k < 5; k++)
                 {
                     var d = Wrap180(qb[k] - qa[k]);
+                    if (intoRelease && Math.Abs(d) > 70) leapBad = true;
                     jump += d * d;
                 }
+                if (leapBad) continue;
                 var c = cost[s - 1][i] + jump + pen;
                 if (c < cost[s][j]) { cost[s][j] = c; prev[s][j] = i; }
             }
@@ -325,31 +645,37 @@ public static class BambooTrussMotion
     static List<(string Label, double[] Q, double GR, int Hold)> ChainItems(
         List<(string Name, double[] Q)> seq, double open, double closed)
     {
+        var grasp = seq.Last(s => s.Name == "pick:grasp");
+        var lift = seq.First(s => s.Name == "Lift");
         var items = new List<(string, double[], double, int)>
         {
-            ("Home", BambooIcdMotion.HomeDeg.ToArray(), open, 0),
-            ("Approach", seq[0].Q, open, 0),
-            ("Grasp", seq[1].Q, open, 0),
-            ("Close", seq[1].Q.ToArray(), closed, 1),
-            ("Lift", seq[2].Q, closed, 1)
+            ("Home", BambooIcdMotion.HomeDeg.ToArray(), open, 0)
         };
+        foreach (var s in seq.Where(s => s.Name == "pick:approach"))
+            items.Add(("Approach", s.Q, open, 0));
+        items.Add(("Grasp", grasp.Q, open, 0));
+        items.Add(("Close", grasp.Q.ToArray(), closed, 1));
+        items.Add(("Lift", lift.Q, closed, 1));
         (string, double[], double, int)? depart = null;
         (string, double[], double, int)? clear = null;
         (string, double[], double, int)? retract = null;
-        for (var k = 3; k < seq.Count; k++)
+        var afterLift = false;
+        foreach (var s in seq)
         {
-            var nm = seq[k].Name;
-            if (nm == "Retract") { retract = ("Retract", seq[k].Q, open, 2); continue; }
-            if (nm == "Depart") { depart = ("Depart", seq[k].Q, open, 2); continue; }
-            if (nm == "Clear") { clear = ("Clear", seq[k].Q, open, 2); continue; }
+            if (s.Name == "Lift") { afterLift = true; continue; }
+            if (!afterLift) continue;
+            var nm = s.Name;
+            if (nm == "Retract") { retract = ("Retract", s.Q, open, 2); continue; }
+            if (nm == "Depart") { depart = ("Depart", s.Q, closed, 1); continue; }
+            if (nm == "Clear") { clear = ("Clear", s.Q, open, 2); continue; }
+            if (nm is "pick:approach" or "pick:grasp") continue;
             var label = nm == "place:hold" ? "Hold" : nm == "place:release" ? "Lower" : nm;
-            items.Add((label, seq[k].Q, closed, 1));
+            items.Add((label, s.Q, closed, 1));
         }
-        var lowerQ = seq[1].Q;
-        for (var li = items.Count - 1; li >= 0; li--)
-            if (items[li].Item1 == "Lower") { lowerQ = items[li].Item2; break; }
-        items.Add(("Open", lowerQ.ToArray(), open, 2));
-        if (depart is { } d) items.Add(d);
+        var freezeQ = depart is { } d0 ? d0.Item2 : items.Last(i => i.Item1 is "Lower" or "Hold" or "Swing" or "Pitch").Item2;
+        if (depart is { } d) items.Add(("Depart", d.Item2.ToArray(), closed, 1));
+        items.Add(("Release", freezeQ.ToArray(), closed, 2));
+        items.Add(("Open", freezeQ.ToArray(), open, 2));
         if (clear is { } c) items.Add(c);
         if (retract is { } r) items.Add(r);
         return items;
