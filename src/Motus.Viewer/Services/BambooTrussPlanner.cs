@@ -758,6 +758,75 @@ public sealed class BambooTrussPlanner
         return Fail(string.IsNullOrEmpty(Error) ? $"brachiate: no Motus-clear move onto {name} via {anchor}" : "brachiate: " + Error);
     }
 
+    /// <summary>
+    /// Hand-over-hand along the chord: with L clamped on a placed cane (fixed at both ends), R side-clamps a double-fixed
+    /// cane <paramref name="rCane"/> ("placed-X"), the base swaps to R at rest, L opens and backs off the cane sideways
+    /// (out of its open side), side-clamps <paramref name="lCane"/> at <paramref name="lOffsetFraction"/>·(half − 3 cm)
+    /// from its centre (IK solution <paramref name="lSolution"/>), the base swaps back to L and R parks.
+    /// </summary>
+    public bool HandOverHand(string rCane, string lCane, double lOffsetFraction, int lSolution = -1)
+    {
+        BeginCycle("hand-over-hand");
+        var startKeys = Keys.Count;
+        var snap = Snapshot();
+        var placedIds = _placed.Select(p => p.Name["placed-".Length..]).ToList();
+        var fixedBoth = BambooTrussLayout.FixedBothEnds(placedIds);
+        if (!_lStake.StartsWith("placed-", StringComparison.Ordinal) || _base != K.Gripper.L)
+            return Fail("hand-over-hand: L must be the base, clamped on a placed cane");
+        if (!fixedBoth.Contains(lCane) || !fixedBoth.Contains(rCane["placed-".Length..]))
+            return Fail("hand-over-hand: both canes must be fixed at both ends");
+        var oldL = _lStake;
+        var oldLine = PlacedPlacement(BambooTrussLayout.Members.First(x => x.Id == oldL["placed-".Length..]));
+        var m = BambooTrussLayout.Members.First(x => x.Id == lCane);
+        var name = "placed-" + lCane;
+        var target = K.OnStrut(PlacedPlacement(m), lOffsetFraction * (BambooTrussLayout.StrutLength / 2 - 0.03), name);
+        foreach (var anchorGrip in AnchorGrips(rCane))
+            for (var idx = 0; idx < 3; idx++)
+            {
+                Restore(snap, startKeys);
+                if (!RGrasp(anchorGrip, anchorGrip.On, 0, pickActive: false, solutionIndex: idx)) continue;
+                if (!SwapTo(K.Gripper.R, anchorGrip.On)) continue;
+                // L (now free, jaws open) backs off its cane out of the open side.
+                var lf = K.Free(_base, _baseWorld, _q);
+                var a = oldLine.Axis;
+                var from = new K.GripTarget(lf[3], lf[7], lf[11], a.X, a.Y, a.Z, oldL);
+                if (!LBackOff(from)) continue;
+                if (!LSideGrasp(target, name, lSolution)) continue;
+                if (!SwapTo(K.Gripper.L, name)) continue;
+                if (!RRetreat(anchorGrip)) continue;
+                if (!RPark()) continue;
+                _lStake = name;
+                Notes.Add($"hand-over-hand: R clamps {anchorGrip.On} at ({anchorGrip.X:F3},{anchorGrip.Y:F3},{anchorGrip.Z:F3}); L {oldL} → {name} at {lOffsetFraction * (BambooTrussLayout.StrutLength / 2 - 0.03):+0.000;-0.000} m from its centre; R parks");
+                return true;
+            }
+        Restore(snap, startKeys);
+        return Fail(string.IsNullOrEmpty(Error) ? $"hand-over-hand: no Motus-clear step onto {name}" : "hand-over-hand: " + Error);
+    }
+
+    /// <summary>Open L-grip (R-base) backs straight off the cane it released, out of its open side (+y), Motus-checked.</summary>
+    bool LBackOff(K.GripTarget from)
+    {
+        var sign = FreeAxisSign(from, _q);
+        foreach (var side in new[] { -1.0, 1.0 })
+        {
+            var outward = new List<(K.GripTarget, double)>();
+            for (var d = CartStepM; d <= ApproachM + 1e-9; d += CartStepM) outward.Add((from, side * d));
+            var back = Cartesian(_q, outward, sign);
+            if (back is null) continue;
+            var ok = true; var prev = _q;
+            foreach (var q in back)
+            {
+                if (!SegOk(prev, q, _gR, _gR, _gL, _gL, _hold, _hold, null, _rOn, VerifyStepDeg)) { ok = false; break; }
+                prev = q;
+            }
+            if (!ok) continue;
+            _lOn = null;
+            foreach (var q in back) Emit($"L:Back off {from.On}", q);
+            return true;
+        }
+        return Fail($"{_cycle}: L cannot back off {from.On} Motus-clear");
+    }
+
     /// <summary>Clamp points along the target cane, as fractions of (half − 3 cm) from its centre.</summary>
     public static double[] BrachiateOffsets { get; set; } = { -1.0, -0.75, -0.5, 1.0, 0.75, 0.5, -0.25, 0.25, 0.0 };
 
