@@ -709,20 +709,42 @@ public class BambooTrussTests
             var placed = scan.World[BambooTrussMotion.CycleIndexAt(built.Keys, built.Cycles, k.T)].Placed.Select(p => p.Name["placed-".Length..]);
             Assert.Contains(id, BambooTrussLayout.FixedBothEnds(placed));
         }
-        if (!built.Built.Contains("sep") || !built.Built.Contains("diagR"))
-            Assert.Contains(built.Notes, n => n.StartsWith("brachiate onto the chord: not planned", StringComparison.Ordinal));
-        // The URDF geometry behind it: the L slot (cane axis = jaw z) is closed at +y by the body and at −y by the base tube.
+        // Every member still missing after brachiation is reported, never silently dropped.
+        foreach (var id in BambooTrussLayout.Members.Select(m => m.Id).Where(id => !built.Built.Contains(id)))
+            Assert.Contains(built.Notes, n => n.StartsWith(id + ": not built", StringComparison.Ordinal) || n.StartsWith("brachiate", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// Approved deviation from the ICD URDF: the L-grip is opened on one side (+y) to allow side clamping. The slot axis
+    /// is the jaw z; the jaws slide along x. Everything except the jaw plates (carriage, rail, base tube, and the joint-1
+    /// housing, whose y extent is invariant under the Y-axis joint 1) lies at y ≤ −r − 0.5 mm, so a cane fixed at both
+    /// ends can enter the slot from +y. Joint 1 stays at (0, −0.03, 0): kinematics are unchanged.
+    /// </summary>
+    [Fact]
+    public void LGrip_IsOpenOnPlusY_ForSideClamping()
+    {
         var xml = System.Xml.Linq.XDocument.Load(UrdfPath);
+        double[] V(string s) => s.Split(' ').Select(x => double.Parse(x, System.Globalization.CultureInfo.InvariantCulture)).ToArray();
         (double Lo, double Hi) Y(string name)
         {
             var c = xml.Descendants("collision").First(e => (string?)e.Attribute("name") == name);
-            var y = double.Parse(c.Element("origin")!.Attribute("xyz")!.Value.Split(' ')[1], System.Globalization.CultureInfo.InvariantCulture);
-            var h = double.Parse(c.Element("geometry")!.Element("box")!.Attribute("size")!.Value.Split(' ')[1], System.Globalization.CultureInfo.InvariantCulture) / 2;
+            var y = V(c.Element("origin")!.Attribute("xyz")!.Value)[1];
+            var h = V(c.Element("geometry")!.Element("box")!.Attribute("size")!.Value)[1] / 2;
             return (y - h, y + h);
         }
-        var body = Y("L-grip body"); var tube = Y("base tube");
-        Assert.True(body.Lo > 0 && tube.Hi < 0, "L slot bounded on both sides in y");
-        Assert.True(body.Lo - tube.Hi < 2 * BambooIcdCell.StrutRadius + 0.01, $"slot gap {(body.Lo - tube.Hi) * 1000:F0} mm");
+        var r = BambooIcdCell.StrutRadius;
+        var j1 = V(xml.Descendants("joint").First(e => (string?)e.Attribute("name") == "joint_1").Element("origin")!.Attribute("xyz")!.Value);
+        Assert.Equal(new[] { 0.0, -0.03, 0.0 }, j1);
+        foreach (var name in new[] { "L-grip body", "L-grip rail", "base tube" })
+            Assert.True(Y(name).Hi <= -r - 0.0005 + 1e-9, $"{name} reaches y {Y(name).Hi * 1000:F1} mm — must stay on the −y side of the slot");
+        var t1 = Y("θ1");
+        Assert.True(j1[1] + t1.Hi <= -r - 0.0005 + 1e-9, $"joint-1 housing reaches y {(j1[1] + t1.Hi) * 1000:F1} mm");
+        // +y is open: only the jaw plates extend there, and they reach past the cane so it is held across its diameter.
+        var mount = xml.Descendants("link").First(e => (string?)e.Attribute("name") == "mount");
+        var plusY = mount.Elements("collision").Where(c => Y((string)c.Attribute("name")!).Hi > 0).Select(c => (string)c.Attribute("name")!).ToList();
+        Assert.Equal(new[] { "L-grip jaw-", "L-grip jaw+" }, plusY);
+        Assert.True(Y("L-grip jaw+").Hi >= r, "jaw plates cover the cane");
+        Assert.Contains("DEVIATION", System.IO.File.ReadAllText(UrdfPath));
     }
 
     // ---------------- playback ----------------

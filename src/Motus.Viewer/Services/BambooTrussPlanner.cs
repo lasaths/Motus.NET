@@ -198,7 +198,8 @@ public sealed class BambooTrussPlanner
             if (!PoseOk(v, _gR, _gL, _hold, _lOn, _rOn)) continue;
             if (Seg(qa, v) && Seg(v, qb)) return new List<double[]> { v };
         }
-        return Rrt(qa, qb);
+        // Up to three RRT-Connect attempts (the shared seeded RNG moves on, so each attempt explores differently).
+        return Rrt(qa, qb) ?? Rrt(qa, qb) ?? Rrt(qa, qb);
     }
 
     const int RrtIters = 1500;
@@ -708,13 +709,14 @@ public sealed class BambooTrussPlanner
 
     /// <summary>
     /// Brachiate onto the built structure: R clamps <paramref name="anchor"/> (a stake "stake-X@y" or a placed cane
-    /// fixed at both ends), the base swaps to R, L leaves its stake (slides up off the free top), then — the L jaw is a
-    /// linear jaw open in a straight line like R's — approaches placed cane <paramref name="memberId"/> from the side
-    /// (along its jaw axis, either way), clamps it, the base swaps back to L and R parks. Only canes fixed at both
-    /// ends may be clamped. Every step is Motus-checked with the full L-grip / mount geometry (incl. the base tube on
-    /// the jaw-opening side).
+    /// fixed at both ends), the base swaps to R, L leaves its stake (slides up off the free top), then — the L-grip is
+    /// opened on one side (+y) to allow side clamping (differs from the ICD URDF, see gen_bamboo_urdf.py) — approaches
+    /// placed cane <paramref name="memberId"/> from the side, clamps it, the base swaps back to L and R parks. Only
+    /// canes fixed at both ends may be clamped. Every step is Motus-checked with the full L-grip / mount geometry.
+    /// <paramref name="offsetFraction"/> / <paramref name="lSolution"/> pin the clamp point and L IK solution (roll
+    /// about the cane) so callers can search them against what R must reach next.
     /// </summary>
-    public bool Brachiate(string anchor, string memberId)
+    public bool Brachiate(string anchor, string memberId, double? offsetFraction = null, int lSolution = -1)
     {
         BeginCycle("brachiate");
         var startKeys = Keys.Count;
@@ -730,7 +732,7 @@ public sealed class BambooTrussPlanner
         var name = "placed-" + memberId;
         var half = BambooTrussLayout.StrutLength / 2;
         // Clamp points along the cane: near either end first (where the stock and the remaining members are closest).
-        var offsets = BrachiateOffsets.Select(f => f * (half - 0.03)).ToList();
+        var offsets = (offsetFraction is { } only ? new[] { only } : BrachiateOffsets).Select(f => f * (half - 0.03)).ToList();
         foreach (var anchorGrip in AnchorGrips(anchor))
             for (var idx = 0; idx < 3; idx++)
             {
@@ -743,7 +745,7 @@ public sealed class BambooTrussPlanner
                 {
                     Restore(s1, k1);
                     var target = K.OnStrut(line, off, name);
-                    if (!LSideGrasp(target, name)) continue;
+                    if (!LSideGrasp(target, name, lSolution)) continue;
                     if (!SwapTo(K.Gripper.L, name)) continue;
                     if (!RRetreat(anchorGrip)) continue;
                     if (!RPark()) continue;
@@ -784,13 +786,15 @@ public sealed class BambooTrussPlanner
     /// L-grip (free, R-base, jaws open) clamps a cane from the side: transit → pre-grasp backed off along the jaw axis
     /// (either side; the jaw opens in a straight line) → straight approach → close.
     /// </summary>
-    bool LSideGrasp(K.GripTarget target, string onName)
+    bool LSideGrasp(K.GripTarget target, string onName, int solutionIndex = -1)
     {
         if (_base != K.Gripper.R) return Fail("L side grasp needs the R-grip as base");
         var open = BambooTrussLayout.LJawOpenMm;
         var closed = BambooTrussLayout.JawClosedMm;
         var sols = K.SolveGrip(_base, _baseWorld, target, new[] { _q }, 32)
             .OrderBy(x => K.JointDist(x, _q)).Take(8).ToList();
+        // A given IK solution fixes the L roll about the cane, i.e. what R can reach afterwards: callers may pick one.
+        if (solutionIndex >= 0) sols = sols.Skip(solutionIndex).Take(1).ToList();
         Diag.Add($"{_cycle}: L side grasp {onName} ({target.X:F3},{target.Y:F3},{target.Z:F3}): {sols.Count} IK solutions");
         foreach (var qg in sols)
         {
@@ -888,6 +892,24 @@ public sealed class BambooTrussPlanner
 
     State Snapshot() => new(_base, _baseWorld.ToArray(), _baseOn, _q.ToArray(), _gR, _gL, _hold, _lOn, _rOn, _held,
         _activeRest, _activeReleased, _activeId, _placed.Count, Grips.Count, Notes.Count, _lStake);
+
+    /// <summary>Opaque planner checkpoint (state, keys, cycles) for goal-driven search over alternatives.</summary>
+    public sealed class Checkpoint
+    {
+        internal Checkpoint(object state, int keys, int cycles) { State = state; KeyCount = keys; CycleCount = cycles; }
+        internal object State { get; }
+        internal int KeyCount { get; }
+        internal int CycleCount { get; }
+    }
+
+    public Checkpoint Save() => new(Snapshot(), Keys.Count, CycleKeys.Count);
+
+    public void Rollback(Checkpoint c)
+    {
+        Restore((State)c.State, c.KeyCount);
+        if (CycleKeys.Count > c.CycleCount) CycleKeys.RemoveRange(c.CycleCount, CycleKeys.Count - c.CycleCount);
+        Error = "";
+    }
 
     void Restore(State s, int keyCount)
     {

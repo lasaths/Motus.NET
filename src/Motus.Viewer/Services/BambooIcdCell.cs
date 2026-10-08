@@ -414,6 +414,8 @@ public sealed class BambooIcdCell
         {
             // θ1 housing is journaled in the base tube (the θ1 joint itself).
             ("θ1", "base tube"),
+            // L-grip opened on one side (differs from the ICD URDF): its carriage sits in the joint-1 housing.
+            ("θ1", "L-grip body"),
         };
         if (gripping)
         {
@@ -520,7 +522,7 @@ public sealed class BambooIcdCell
         var objects = new List<CollisionObject>(environment.Count + 6);
         objects.AddRange(environment);
         objects.AddRange(MountObjects(gLmm));
-        var allow = new List<(string, string)>(allowed.Count + 1) { ("θ1", "base tube") };
+        var allow = new List<(string, string)>(allowed.Count + 2) { ("θ1", "base tube"), ("θ1", "L-grip body") };
         foreach (var a in allowed) allow.Add((a.A, a.B));
         var scene = new CollisionScene(objects, allow);
         var contacts = new List<CollisionContact>(Checker(gRmm, heldOffset).FindContacts(new JointState(RadFromDeg(qDeg)), scene, maxContacts));

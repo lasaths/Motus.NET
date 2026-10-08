@@ -57,7 +57,28 @@ Task planes → Motus TCP frames: `BambooIcdMotion.PlaneToMotusFrame` (rotation 
   half-extent and the 1 cm vertex-sphere mesh test.)
 - **Path:** `BambooMotionScan` samples the motion (≤ 0.5° per joint per check), stops at the
   first Motus contact; play and scrub park on the last clear sample and tint the parts Motus names.
-- Allowed contacts: θ1 housing ↔ base tube (the θ1 journal); R-grip jaw plates ↔ strut while gripping.
+- Allowed contacts: θ1 housing ↔ base tube (the θ1 journal); θ1 housing ↔ L-grip body (the carriage shares the
+  joint-1 housing, see below); R-grip jaw plates ↔ strut while gripping.
+
+### Deviation from the ICD URDF: L-grip opened on one side
+
+**L-grip opened on one side to allow side clamping; differs from the ICD URDF.** (Approved by Lassie, 2026-10-08.)
+In the ICD layout the L slot (cane axis = jaw z, jaws sliding along x) was walled on both sides: L-grip body
+(y 0.012…0.028) and rail (y 0.014) on +y, the arm's base tube (y −0.022…−0.008) on −y — a 20 mm gap for a 14 mm
+cane, so the L-grip could only get on/off a cane over a free end. Mirroring R's one-sided layout, the carriage and
+rail now sit on the arm side, so the slot is open toward +y:
+
+| part | ICD URDF | now |
+|---|---|---|
+| L-grip body | 0.020 × 0.016 × 0.026 at y +0.020 (y 0.012…0.028) | 0.020 × 0.012 × 0.026 at y −0.017 (y −0.023…−0.011) |
+| L-grip rail | 0.080 × 0.004 × 0.004 at y +0.014 | same box at y −0.0095 (y −0.0115…−0.0075, 0.5 mm off a clamped cane) |
+| base tube, jaw plates | unchanged | unchanged |
+| joint_1 origin / axes | (0, −0.03, 0), Y | unchanged — kinematics and FK are identical |
+
+The base tube and joint 1 did not have to move: they already lie at y ≤ −0.008 (the θ1 housing at y ≤ −0.0155 for
+every θ1, since joint 1 turns about Y), so they do not wall the +y side. The single source of truth is
+`tools/bamboo/gen_bamboo_urdf.py` (writes both URDF copies; FK, Motus collision and the viewer's boxes all read
+them). `LGrip_IsOpenOnPlusY_ForSideClamping` asserts the open side.
 
 Known colliding nudge: pick `grasp` = **−1.5 mm** (default neck↔strut clearance is 1.0 mm)
 → "Motus stop · Grasp · neck ↔ strut". Place `release` = −10 mm → held strut ↔ ground.

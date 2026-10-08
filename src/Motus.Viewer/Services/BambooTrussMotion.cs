@@ -131,7 +131,10 @@ public static class BambooTrussMotion
     // ---------------- build-time plan cache (WASM) ----------------
 
     /// <summary>Bump when planner behaviour changes (invalidates <see cref="DefaultPlanResource"/>).</summary>
-    public const string PlannerVersion = "grounded-ik-5-brachiate";
+    /// <summary>L side-grasp IK solutions (rolls about the clamped cane) tried per brachiation clamp point.</summary>
+    public const int BrachiateLSolutions = 4;
+
+    public const string PlannerVersion = "grounded-ik-6-open-l";
     public const string DefaultPlanResource = "Motus.Viewer.Services.BambooTrussDefaultPlan.json";
 
     /// <summary>Everything the planner's output depends on (layout, tolerances, version), invariant-formatted.</summary>
@@ -319,27 +322,50 @@ public static class BambooTrussMotion
         if (remaining.Count > 0 && BambooTrussLayout.FixedBothEnds(built).Count > 0)
         {
             await Yield("brachiate");
-            var brachiated = false;
-            foreach (var target in BambooTrussLayout.FixedBothEnds(built))
+            // Goal-driven: every (cane, R anchor, clamp point) is tried from the same checkpoint and judged by how many
+            // of the remaining members can then be placed; the best option is replayed (the planner is deterministic).
+            var cp = planner.Save();
+            var builtCp = built.ToList();
+            var doubleFixed = BambooTrussLayout.FixedBothEnds(built).ToList();
+            var options = (from target in doubleFixed
+                           from anchor in new[] { site.WalkRAnchor }.Concat(doubleFixed.Where(x => x != target).Select(x => "placed-" + x))
+                           from f in BambooTrussPlanner.BrachiateOffsets
+                           from lSol in Enumerable.Range(0, BrachiateLSolutions)
+                           select (target, anchor, f, lSol)).ToList();
+            (string target, string anchor, double f, int lSol)? best = null;
+            var bestCount = 0;
+            var lastErr = "";
+            var placedOptions = 0;
+            foreach (var o in options)
             {
-                foreach (var anchor in new[] { site.WalkRAnchor }.Concat(BambooTrussLayout.FixedBothEnds(built).Where(x => x != target).Select(x => "placed-" + x)))
-                {
-                    if (planner.Brachiate(anchor, target)) { brachiated = true; break; }
-                }
-                if (brachiated) break;
+                planner.Rollback(cp);
+                built.Clear(); built.AddRange(builtCp);
+                if (!planner.Brachiate(o.anchor, o.target, o.f, o.lSol)) { lastErr = planner.Error; continue; }
+                placedOptions++;
+                var n = remaining.Count(id => TryBuild(id, lastChance: false));
+                if (best is null || n > bestCount) { best = o; bestCount = n; }
+                if (n == remaining.Count) break;
             }
-            if (!brachiated)
-                notes.Add("brachiate onto the chord: not planned — no Motus-clear side approach of the L-grip onto a double-fixed cane " +
-                          "(in the ICD URDF the L slot is bounded by the L-grip body/rail on one side and the arm's base tube on the other, " +
-                          $"so a cane only enters along the slot axis over a free end); last: {planner.Error}");
+            planner.Rollback(cp);
+            built.Clear(); built.AddRange(builtCp);
+            if (best is not { } pick)
+                notes.Add("brachiate onto the chord: not planned — no Motus-clear side approach of the L-grip (open on +y) onto a " +
+                          $"double-fixed cane from any R anchor / clamp point; last: {lastErr}");
             else
+            {
+                planner.Brachiate(pick.anchor, pick.target, pick.f, pick.lSol);
                 foreach (var id in remaining)
                 {
                     await Yield(id);
                     // Notes for these members were already written on the walk pass; replace them on success.
                     if (TryBuild(id, lastChance: false)) notes.RemoveAll(n => n.StartsWith(id + ": not built", StringComparison.Ordinal));
-                    else if (!notes.Any(n => n.StartsWith(id + ": not built", StringComparison.Ordinal))) notes.Add($"{id}: not built — {planner.Error}");
+                    else
+                    {
+                        notes.RemoveAll(n => n.StartsWith(id + ": not built", StringComparison.Ordinal));
+                        notes.Add($"{id}: not built — not reachable Motus-clear after brachiating onto {pick.target} ({placedOptions} clamp options tried; best placed {bestCount}/{remaining.Count}): {planner.Error}");
+                    }
                 }
+            }
         }
         planner.StampTimes();
         cell.SetMountViewer(BambooTrussLayout.StartBase);
