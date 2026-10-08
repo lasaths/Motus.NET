@@ -6,12 +6,15 @@ namespace Motus.Viewer.Services;
 /// <summary>
 /// Store/truss member poses and fixed ground fixtures for /bamboo-truss (viewer coordinates, Y-up).
 /// <para>
-/// Bridge lower chord in the vertical XY plane at <see cref="StrutLength"/> = 0.5 m:
+/// Five-member bridge frame in the vertical XY plane, every edge one cane of <see cref="StrutLength"/>:
 /// <code>
-///    A--B--D     (baseL /  +  baseR _ ; baseR lashed 16 mm beside baseL at B)
+///        C
+///       /|\        baseL A–B, baseR B–D (lower chord), sep B–C, diagL A–C, diagR D–C
+///      / | \       canes meeting at a node are lashed side by side, 16 mm apart in z
+///     A--B--D
 /// </code>
-/// Ends A and D sit on anchor posts (pads under them, no earth between). The two canes meet at B side by side
-/// (<see cref="LashDz"/>): two 14 mm canes cannot occupy the same node, so baseR runs 16 mm nearer the robot.
+/// Ends A and D sit on anchor posts (pads under them, no earth between). The cane length is chosen by an offline
+/// reach + Motus sweep (see <see cref="Current"/>): the longest round length at which the arm builds the most.
 /// </para>
 /// <para>
 /// <b>Grounded start, no floating mount.</b> The arm starts with its L-grip clamped on anchor stake
@@ -19,18 +22,56 @@ namespace Motus.Viewer.Services;
 /// is clamped on a real fixed object, and that gripper is the IK base. The L-grip is a closed clamp (rail + body on
 /// one side, base tube on the other, jaws on both — the cane cannot leave it sideways at any opening), so it can only
 /// come off a support by sliding over a free end: the stakes' tops. The R-grip (open slot) clamps the canes.
-/// Walk: from S1, R clamps the double-fixed chord, L slides off S1 and onto stake <see cref="S2"/>, then R re-grips
-/// the chord further along.
+/// Inside the span only canes fixed at both ends may be clamped (by the open-slot R-grip).
 /// </para>
 /// </summary>
 public static class BambooTrussLayout
 {
+    // ---------------- site (cane length, supports, stock) ----------------
+
+    /// <summary>A vertical stake (slot axis = stake axis = viewer +Y). HeadingDeg is the arm heading for a start clamp.</summary>
+    public sealed record Stake(string Name, double X, double Z, double ClampY, double Top, double HeadingDeg)
+    {
+        /// <summary>Grip target on the stake at <see cref="ClampY"/>.</summary>
+        public K.GripTarget Grip => new(X, ClampY, Z, 0, 1, 0, Name);
+        public K.GripTarget At(double y) => new(X, y, Z, 0, 1, 0, Name);
+    }
+
+    /// <summary>
+    /// Everything that depends on the chosen cane length: the cane length itself, the outboard stakes, the stock and
+    /// the walk. <see cref="Unreachable"/> lists members no allowed support reaches (with the reason) — the planner
+    /// reports them instead of faking them.
+    /// </summary>
+    public sealed record Site(
+        double Length,
+        IReadOnlyList<Stake> Stakes,
+        string StartStake,
+        double FeedX, double FeedZ, double FeedYawDeg, double FeedTop,
+        string WalkRAnchor, string WalkLTarget,
+        IReadOnlyDictionary<string, string> Unreachable);
+
+    /// <summary>
+    /// Shipped site: 0.35 m canes (chosen by the length sweep in the README — the longest 0.05 m multiple at which
+    /// the true-IK planner completes the double-fixed lower chord and more). Positions from an offline reach + Motus
+    /// clearance search.
+    /// </summary>
+    public static Site Default { get; } = SiteDefaults.Chosen;
+
+    public static Site Current { get; private set; } = Default;
+
+    /// <summary>Switch the site (offline sweeps / tests). Clears every derived cache.</summary>
+    public static void Use(Site site)
+    {
+        Current = site;
+        _fixtures = null; _members = null;
+    }
+
     /// <summary>Truss cane length (metres). All edge canes are this length.</summary>
-    public const double StrutLength = 0.5;
-    /// <summary>Design side length for A–B and B–D (equals <see cref="StrutLength"/> — canes meet at node B).</summary>
-    public const double Side = 0.5;
-    /// <summary>Notional upright B–C length (apex C is drawn in the footprint only — not built).</summary>
-    public const double Height = 0.5;
+    public static double StrutLength => Current.Length;
+    /// <summary>Rhombus side (= cane length; canes meet at the nodes).</summary>
+    public static double Side => Current.Length;
+    /// <summary>Upright B–C (= cane length).</summary>
+    public static double Height => Current.Length;
 
     public const double JawClosedMm = 14;
     public const double JawOpenMm = 40;
@@ -39,90 +80,119 @@ public static class BambooTrussLayout
 
     /// <summary>Vertical plane of the truss (viewer Z).</summary>
     public const double PlaneZ = 0.11;
-    /// <summary>baseR runs this far off <see cref="PlaneZ"/> (lashed beside baseL at B: 14 mm cane + 2 mm gap).</summary>
+    /// <summary>Lash spacing: canes meeting at a node run side by side 16 mm apart in z (14 mm cane + 2 mm gap).</summary>
     public const double LashDz = -0.016;
     /// <summary>Ground-side node B height (metres).</summary>
     public const double FootY0 = 0.06;
     /// <summary>Half-width |x| of A and D.</summary>
-    public static readonly double HalfSpan = Math.Sqrt(Side * Side - (Height / 2) * (Height / 2));
+    public static double HalfSpan => Math.Sqrt(Side * Side - (Height / 2) * (Height / 2));
     /// <summary>Half-extent of Motus ground pads about anchors A and D (metres).</summary>
     public const double AnchorPadHalf = 0.06;
     /// <summary>Anchor posts under A and D (radius, and gap below the node so the cane end clears the post top).</summary>
     public const double AnchorPostRadius = 0.012;
     public const double AnchorPostGap = 0.02;
 
-    /// <summary>A vertical anchor stake the L-grip clamps (slot axis = stake axis = viewer +Y).</summary>
-    public sealed record Stake(string Name, double X, double Z, double ClampY, double Top, double HeadingDeg)
-    {
-        /// <summary>L-grip grip target on the stake at <see cref="ClampY"/>.</summary>
-        public K.GripTarget Grip => new(X, ClampY, Z, 0, 1, 0, Name);
-        public K.GripTarget At(double y) => new(X, y, Z, 0, 1, 0, Name);
-    }
     public const double StakeRadius = 0.007;
     public const double StakePadHalf = 0.03;
-
-    /// <summary>Stake top above its clamp height: the closed L clamp slides off / onto the free top (3.8 cm of travel).</summary>
+    /// <summary>Stake top above its clamp height: the L clamp slides off / onto the free top.</summary>
     public const double StakeTopAbove = 0.02;
     /// <summary>How far above the top the L clamp clears before it moves sideways.</summary>
     public const double StakeSlideClear = 0.018;
 
-    // Ground rule: no earth strictly between the A and D anchors in x. Every stake, pad and the stock rail stands
-    // outboard of A (x ≤ −HalfSpan − pad half), so inside the span the robot can only clamp canes fixed at both ends.
-    // Positions were chosen by an offline reach + Motus clearance search (pick/lift/place baseL from S1, then the
-    // S2/S3 walk) over random outboard stakes.
-
-    /// <summary>Start anchor stake, outboard of A: L-grip clamped at y = 0.2025, arm heading 158.5°.</summary>
-    public static Stake S1 { get; } = new("stake-S1", -0.5546, 0.0492, 0.2025, 0.2025 + StakeTopAbove, 158.5);
-    /// <summary>Walk stake the R-grip (open slot) clamps sideways while the L clamp leaves S1.</summary>
-    public static Stake S2 { get; } = new("stake-S2", -0.523, 0.150, 0.10, 0.10 + StakeTopAbove, 0);
-    /// <summary>Walk target stake for the L clamp (slides down over its free top).</summary>
-    public static Stake S3 { get; } = new("stake-S3", -0.623, 0.100, 0.10, 0.10 + StakeTopAbove, 0);
-    public static IReadOnlyList<Stake> Stakes { get; } = new[] { S1, S2, S3 };
+    /// <summary>
+    /// Every support an L clamp may use: outboard stakes ("stake-*") and, optionally, anchor post A ("post-A": its
+    /// free top lets the closed L clamp slide on/off until a cane end is lashed above it).
+    /// </summary>
+    public static IReadOnlyList<Stake> Stakes => Current.Stakes;
+    static bool IsStake(Stake s) => s.Name.StartsWith("stake-", StringComparison.Ordinal);
+    /// <summary>Post-A as an L-clamp support at a clamp height / heading.</summary>
+    public static Stake PostA(double clampY, double heading) =>
+        new("post-A", -HalfSpan, PlaneZ, clampY, FootY0 + Height / 2 - AnchorPostGap, heading);
+    public static Stake StakeNamed(string name) => Current.Stakes.Single(s => s.Name == name);
+    /// <summary>Start stake (L-grip clamped at t = 0).</summary>
+    public static Stake S1 => StakeNamed(Current.StartStake);
+    /// <summary>Walk target stake for the L clamp.</summary>
+    public static Stake WalkTarget => StakeNamed(Current.WalkLTarget);
 
     /// <summary>Exact L-grip clamp frame on <see cref="S1"/> (viewer 4×4): the IK base at t = 0.</summary>
     public static double[] StartBase => K.StakeClampFrame(S1.X, S1.ClampY, S1.Z, S1.HeadingDeg);
 
-    /// <summary>Stock feed rail: a narrow fixed rail the next cane rests on (top = cane bottom), so the open R jaws
-    /// straddle it without touching the ground (a cane flat on the ground leaves only ~3 mm under the jaw plates).</summary>
-    public const double RackTop = 0.0725;
-    public const double RackHalfZ = 0.015;
-    public const double RackHalfX = 0.004;
-    /// <summary>The cane rests on two narrow pegs near its ends (±<see cref="RackPegOffset"/> along it), leaving the
-    /// grasp zone (|s| ≤ 0.17 m) free of anything the jaw plates could hit while closing.</summary>
-    public const double RackPegOffset = 0.21;
-    /// <summary>Feed rail centre (viewer x / z): the stock area outboard of A, rail and cane along z.</summary>
-    public const double FeedX = -0.6335;
-    public const double FeedZ = -0.2717;
     /// <summary>
-    /// Feed cane centre height: on the rail with a 0.5 mm seat gap. Motus reports a resting contact (distance 0) as a
-    /// hit, so the feed cane is modelled 0.5 mm proud of the rail rather than whitelisting cane↔rail.
+    /// Stock: the cane lies flat next to anchor A on two narrow pegs near its ends, leaving the grasp zone free of
+    /// anything the closing jaws could hit. 0.5 mm seat gap: Motus counts resting contact as a hit.
     /// </summary>
+    public static double RackTop => Current.FeedTop;
+    public const double RackHalfAlong = 0.015;
+    public const double RackHalfAcross = 0.004;
+    /// <summary>Pegs sit well inside the cane ends so the jaw can also take the cane near either end (the far reach a
+    /// placement at the opposite end of the span needs); grasps run between the pegs or outboard of them.</summary>
+    public static double RackPegOffset => StrutLength / 2 - 0.085;
+    /// <summary>Grasp offsets along the stock cane (from its centre), clear of the pegs: near each end first.</summary>
+    public static double[] StockGraspOffsets
+    {
+        get
+        {
+            var e = StrutLength / 2;
+            var inner = RackPegOffset - 0.035;
+            return new[] { -(e - 0.025), e - 0.025, -(e - 0.045), e - 0.045, 0.0, -inner, inner }.Select(v => Math.Round(v, 3)).ToArray();
+        }
+    }
+    public static double FeedX => Current.FeedX;
+    public static double FeedZ => Current.FeedZ;
     public const double RackSeatGap = 0.0005;
-    public const double StrutY = RackTop + 0.007 + RackSeatGap;
+    public static double StrutY => RackTop + 0.007 + RackSeatGap;
+    static (double X, double Z) FeedAxis => (Math.Sin(Current.FeedYawDeg * Math.PI / 180), Math.Cos(Current.FeedYawDeg * Math.PI / 180));
+    static bool FeedAlongX => Math.Abs(FeedAxis.X) > 0.5;
 
-    /// <summary>Ground pads (viewer XZ centre + half extents): anchors, stakes and the stock feed — no earth elsewhere.</summary>
-    public static IReadOnlyList<(string Name, double X, double Z, double HalfX, double HalfZ)> Pads { get; } =
-    [
-        ("ground-A", -HalfSpan, PlaneZ, AnchorPadHalf, AnchorPadHalf),
-        ("ground-D", HalfSpan, PlaneZ + LashDz, AnchorPadHalf, AnchorPadHalf),
-        ("ground-S1", S1.X, S1.Z, StakePadHalf, StakePadHalf),
-        ("ground-S2", S2.X, S2.Z, StakePadHalf, StakePadHalf),
-        ("ground-S3", S3.X, S3.Z, StakePadHalf, StakePadHalf),
-        ("ground-store", FeedX, FeedZ, 0.02, 0.22)
-    ];
+    /// <summary>Ground pads (viewer XZ centre + half extents): anchors, stakes and the stock — no earth elsewhere.</summary>
+    public static IReadOnlyList<(string Name, double X, double Z, double HalfX, double HalfZ)> Pads
+    {
+        get
+        {
+            var list = new List<(string, double, double, double, double)>
+            {
+                ("ground-A", -HalfSpan, PlaneZ, AnchorPadHalf, AnchorPadHalf),
+                ("ground-D", HalfSpan, PlaneZ + LashDz, AnchorPadHalf, AnchorPadHalf)
+            };
+            foreach (var st in Stakes.Where(IsStake)) list.Add(("ground-" + st.Name["stake-".Length..], st.X, st.Z, StakePadHalf, StakePadHalf));
+            var along = StrutLength / 2 - 0.02; var across = 0.02;
+            list.Add(("ground-store", FeedX, FeedZ, FeedAlongX ? along : across, FeedAlongX ? across : along));
+            return list;
+        }
+    }
 
     /// <summary>Anchor posts (A, D) and stakes as vertical cylinders: (name, x, z, top, radius).</summary>
-    public static IReadOnlyList<(string Name, double X, double Z, double Top, double Radius)> Posts { get; } =
-    [
-        ("post-A", -HalfSpan, PlaneZ, FootY0 + Height / 2 - AnchorPostGap, AnchorPostRadius),
-        ("post-D", HalfSpan, PlaneZ + LashDz, FootY0 + Height / 2 - AnchorPostGap, AnchorPostRadius),
-        (S1.Name, S1.X, S1.Z, S1.Top, StakeRadius),
-        (S2.Name, S2.X, S2.Z, S2.Top, StakeRadius),
-        (S3.Name, S3.X, S3.Z, S3.Top, StakeRadius)
-    ];
+    public static IReadOnlyList<(string Name, double X, double Z, double Top, double Radius)> Posts
+    {
+        get
+        {
+            var list = new List<(string, double, double, double, double)>
+            {
+                ("post-A", -HalfSpan, PlaneZ, FootY0 + Height / 2 - AnchorPostGap, AnchorPostRadius),
+                ("post-D", HalfSpan, PlaneZ + LashDz, FootY0 + Height / 2 - AnchorPostGap, AnchorPostRadius)
+            };
+            foreach (var st in Stakes.Where(IsStake)) list.Add((st.Name, st.X, st.Z, st.Top, StakeRadius));
+            return list;
+        }
+    }
+
+    /// <summary>Stock pegs as boxes (viewer): name, centre x/z, half extents x/z, top y (bottom on the ground).</summary>
+    public static IReadOnlyList<(string Name, double X, double Z, double HalfX, double HalfZ, double Top)> Racks
+    {
+        get
+        {
+            var (ax, az) = FeedAxis; var o = RackPegOffset;
+            var hx = FeedAlongX ? RackHalfAlong : RackHalfAcross; var hz = FeedAlongX ? RackHalfAcross : RackHalfAlong;
+            return
+            [
+                ("store-peg-1", FeedX - ax * o, FeedZ - az * o, hx, hz, RackTop),
+                ("store-peg-2", FeedX + ax * o, FeedZ + az * o, hx, hz, RackTop)
+            ];
+        }
+    }
 
     /// <summary>
-    /// Every ground object (pads, posts, rails) as an x-extent. Only the A/D anchor pad + post may reach into the span;
+    /// Every ground object (pads, posts, pegs) as an x-extent. Only the A/D anchor pad + post may reach into the span;
     /// everything else must lie at x ≤ −HalfSpan or x ≥ +HalfSpan.
     /// </summary>
     public static IEnumerable<(string Name, double MinX, double MaxX, bool IsAnchor)> GroundXExtents() =>
@@ -130,15 +200,8 @@ public static class BambooTrussLayout
             .Concat(Posts.Select(p => (p.Name, p.X - p.Radius, p.X + p.Radius, p.Name is "post-A" or "post-D")))
             .Concat(Racks.Select(r => (r.Name, r.X - r.HalfX, r.X + r.HalfX, false)));
 
-    /// <summary>Feed rails as boxes (viewer): name, centre x/z, half extents x/z, top y (bottom on the ground).</summary>
-    public static IReadOnlyList<(string Name, double X, double Z, double HalfX, double HalfZ, double Top)> Racks { get; } =
-    [
-        ("store-peg-1", FeedX, FeedZ - RackPegOffset, RackHalfX, RackHalfZ, RackTop),
-        ("store-peg-2", FeedX, FeedZ + RackPegOffset, RackHalfX, RackHalfZ, RackTop)
-    ];
-
     static IReadOnlyList<CollisionObject>? _fixtures;
-    /// <summary>Motus objects for <see cref="Posts"/> and <see cref="Racks"/> (built once; pads come from the cell).</summary>
+    /// <summary>Motus objects for <see cref="Posts"/> and <see cref="Racks"/> (cached per site; pads come from the cell).</summary>
     public static IReadOnlyList<CollisionObject> FixtureObjects =>
         _fixtures ??= Posts.Select(p => BambooIcdCell.PostAt(p.Name, p.X, p.Z, 0, p.Top, p.Radius))
             .Concat(Racks.Select(r => BambooIcdCell.BoxAt(r.Name, r.X, r.Top / 2, r.Z, r.HalfX, r.Top / 2, r.HalfZ)))
@@ -151,16 +214,6 @@ public static class BambooTrussLayout
         cell.SetGroundPads(Pads);
     }
 
-    /// <summary>Notional sep / diag place poses (not built — see type summary).</summary>
-    public static BambooIcdCell.StrutPlacement NotionalSep
-    {
-        get
-        {
-            var b = FootNodes[1]; var c = FootNodes[3];
-            return AlongEdge((b.X, b.Y, b.Z), (c.X, c.Y, c.Z));
-        }
-    }
-
     public sealed record MemberDef(
         string Id,
         string Label,
@@ -170,11 +223,11 @@ public static class BambooTrussLayout
         (double X, double Y, double Z) EdgeA,
         (double X, double Y, double Z) EdgeB);
 
-    /// <summary>Stock feed: cane lying on the feed rail along +Z (yaw 0), outboard of A.</summary>
-    public static BambooIcdCell.StrutPlacement Store { get; } = new(FeedX, StrutY, FeedZ, 0, 0);
+    /// <summary>Stock feed: cane flat on its pegs next to anchor A.</summary>
+    public static BambooIcdCell.StrutPlacement Store => new(FeedX, StrutY, FeedZ, 0, Current.FeedYawDeg);
 
-    /// <summary>Truss nodes: A/D anchors (on posts), B lower mid (baseR lashed beside it), C notional apex.</summary>
-    public static readonly (string Name, double X, double Y, double Z)[] FootNodes =
+    /// <summary>Truss nodes: A/D anchors (on posts), B lower mid, C apex.</summary>
+    public static (string Name, double X, double Y, double Z)[] FootNodes =>
     [
         ("A", -HalfSpan, FootY0 + Height / 2, PlaneZ),
         ("B", 0, FootY0, PlaneZ),
@@ -182,23 +235,26 @@ public static class BambooTrussLayout
         ("C", 0, FootY0 + Height, PlaneZ)
     ];
 
-    public static IReadOnlyList<MemberDef> Members { get; } = BuildMembers();
+    static IReadOnlyList<MemberDef>? _members;
+    /// <summary>The five members in build order (each cane in its own lash layer so canes meeting at a node never touch).</summary>
+    public static IReadOnlyList<MemberDef> Members => _members ??= BuildMembers();
 
     static IReadOnlyList<MemberDef> BuildMembers()
     {
-        var A = (-HalfSpan, FootY0 + Height / 2, PlaneZ);
-        var B = (0.0, FootY0, PlaneZ);
-        var Bl = (0.0, FootY0, PlaneZ + LashDz);
-        var D = (HalfSpan, FootY0 + Height / 2, PlaneZ + LashDz);
+        (double, double, double) At(string node, double dz)
+        {
+            var n = FootNodes.First(f => f.Name == node);
+            return (n.X, n.Y, PlaneZ + dz);
+        }
         var edges = new (string Id, string Label, string Glyph, (double X, double Y, double Z) P, (double X, double Y, double Z) Q)[]
         {
-            ("baseL", "base left", "/", A, B),
-            ("baseR", "base right", "_", Bl, D)
+            ("baseL", "base left", "/", At("A", 0), At("B", 0)),
+            ("baseR", "base right", "_", At("B", LashDz), At("D", LashDz)),
+            ("diagL", "diag left", "/", At("A", LashDz), At("C", LashDz)),
+            ("sep", "separator", "|", At("B", -LashDz), At("C", -LashDz)),
+            ("diagR", "diag right", "\\", At("D", 0), At("C", 0))
         };
-        var list = new List<MemberDef>();
-        foreach (var e in edges)
-            list.Add(new MemberDef(e.Id, e.Label, e.Glyph, Store, AlongEdge(e.P, e.Q), e.P, e.Q));
-        return list;
+        return edges.Select(e => new MemberDef(e.Id, e.Label, e.Glyph, Store, AlongEdge(e.P, e.Q), e.P, e.Q)).ToList();
     }
 
     /// <summary>
@@ -235,30 +291,51 @@ public static class BambooTrussLayout
         return false;
     }
 
-    /// <summary>
-    /// Members no allowed support can reach, with the reason (the planner reports them instead of searching).
-    /// baseR (B–D) lies wholly at x ≥ 0: every outboard-A support is ≥ 0.46 m from it, beyond the arm's grip-to-grip
-    /// reach, and the D-side supports cannot be reached (nothing inside the span is fixed at both ends until baseR
-    /// itself is lashed) nor can they reach the stock outboard of A. Enforced by a reach test.
-    /// </summary>
-    public static IReadOnlyDictionary<string, string> UnreachableMembers { get; } = new Dictionary<string, string>
-    {
-        ["baseR"] = "out of reach under the no-earth-in-span rule: every allowed support near A is ≥ 0.46 m from B–D " +
-                    "(arm grip-to-grip reach ≈ 0.42 m), and the D-side supports are unreachable until a double-fixed cane spans to them"
-    };
+    /// <summary>Members no allowed support can reach, with the reason (reported, never faked).</summary>
+    public static IReadOnlyDictionary<string, string> UnreachableMembers => Current.Unreachable;
 
-    /// <summary>Members fixed at both ends after <paramref name="placedCount"/> placements (walk rails).</summary>
-    public static IReadOnlyList<string> WalkableMemberIdsAfter(int placedCount)
+    /// <summary>
+    /// Nodes that are fixed once <paramref name="placed"/> members are lashed: A and D (posts), and any node held by
+    /// two placed members whose other ends are already fixed (a triangulated, statically determinate joint).
+    /// </summary>
+    public static HashSet<string> FixedNodes(IEnumerable<string> placed)
     {
-        var placed = Members.Take(placedCount).Select(m => m.Id).ToHashSet(StringComparer.Ordinal);
-        var walkable = new List<string>();
-        if (placed.Contains("baseL") && placed.Contains("baseR"))
+        var set = placed.ToHashSet(StringComparer.Ordinal);
+        var ends = new Dictionary<string, (string P, string Q)>
         {
-            walkable.Add("baseL");
-            walkable.Add("baseR");
+            ["baseL"] = ("A", "B"), ["baseR"] = ("B", "D"), ["sep"] = ("B", "C"), ["diagL"] = ("A", "C"), ["diagR"] = ("D", "C")
+        };
+        var fixedNodes = new HashSet<string>(StringComparer.Ordinal) { "A", "D" };
+        for (var changed = true; changed;)
+        {
+            changed = false;
+            foreach (var node in new[] { "B", "C" })
+            {
+                if (fixedNodes.Contains(node)) continue;
+                var supports = ends.Where(e => set.Contains(e.Key) && (e.Value.P == node || e.Value.Q == node))
+                    .Count(e => fixedNodes.Contains(e.Value.P == node ? e.Value.Q : e.Value.P));
+                if (supports >= 2) { fixedNodes.Add(node); changed = true; }
+            }
         }
-        return walkable;
+        return fixedNodes;
     }
+
+    /// <summary>Placed members fixed at both ends (the only canes the robot may clamp inside the span).</summary>
+    public static IReadOnlyList<string> FixedBothEnds(IEnumerable<string> placed)
+    {
+        var list = placed.ToList();
+        var nodes = FixedNodes(list);
+        return Members.Where(m => list.Contains(m.Id))
+            .Where(m => nodes.Contains(NodeOf(m.EdgeA)) && nodes.Contains(NodeOf(m.EdgeB)))
+            .Select(m => m.Id).ToList();
+    }
+
+    static string NodeOf((double X, double Y, double Z) p) =>
+        FootNodes.OrderBy(n => Math.Abs(n.X - p.X) + Math.Abs(n.Y - p.Y)).First().Name;
+
+    /// <summary>Members fixed at both ends after the first <paramref name="placedCount"/> members are placed.</summary>
+    public static IReadOnlyList<string> WalkableMemberIdsAfter(int placedCount) =>
+        FixedBothEnds(Members.Take(placedCount).Select(m => m.Id));
 
     public static object FootprintDescription() => new
     {
@@ -273,7 +350,8 @@ public static class BambooTrussLayout
         anchors = Pads.Select(a => new { name = a.Name, x = a.X, z = a.Z, halfX = a.HalfX, halfZ = a.HalfZ }),
         posts = Posts.Select(p => new { name = p.Name, x = p.X, z = p.Z, top = p.Top, radius = p.Radius }),
         racks = Racks.Select(r => new { name = r.Name, x = r.X, z = r.Z, halfX = r.HalfX, halfZ = r.HalfZ, top = r.Top }),
-        motusLimit = "no earth inside the span: L-grip clamped on stake S1 outboard of A; R builds baseL (baseR is out of reach from every allowed support); walk: R clamps stake S2, L slides S1→S3, R parks"
+        motusLimit = $"{StrutLength:F2} m canes; no earth inside the span; L-grip on outboard stakes; R places; unreachable: " +
+                     (UnreachableMembers.Count == 0 ? "none" : string.Join(", ", UnreachableMembers.Keys))
     };
 
     public static object StoreDescription() => new

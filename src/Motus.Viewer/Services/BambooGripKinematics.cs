@@ -163,13 +163,16 @@ public static class BambooGripKinematics
     /// <paramref name="backoff"/> &gt; 0 places the grasp centre that far along the gripper's own +Y (pre-grasp /
     /// retreat pose: jaws just off the cane, slot still aligned with it).
     /// </summary>
+    /// <summary>Multiplier on the random IK seeds (probe experiments).</summary>
+    public static int SeedScale { get; set; } = 1;
+
     public static List<double[]> SolveGrip(Gripper baseGripper, double[] baseWorld, GripTarget target,
         IEnumerable<double[]>? seeds = null, int randomSeeds = 24, double backoff = 0, int rngSeed = 7, int axisSign = 0)
     {
         var all = new List<double[]>();
         if (seeds is not null) all.AddRange(seeds.Select(s => s.ToArray()));
         var rng = new Random(rngSeed);
-        for (var i = 0; i < randomSeeds; i++)
+        for (var i = 0; i < randomSeeds * SeedScale; i++)
         {
             var q = new double[5];
             for (var k = 0; k < 5; k++)

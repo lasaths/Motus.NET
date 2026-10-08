@@ -509,8 +509,27 @@
           scene.add(m.label);
           m.text = text;
         }
-        // Stagger the labels so two clamps side by side stay readable.
-        m.label.position.set(a.p[0], a.p[1] + 0.06 + idx * 0.045, a.p[2]);
+        // Labels sit above their ring. A later label whose on-screen box would overlap an earlier one (rings close
+        // together, e.g. the cane just lifted next to the base clamp) is pushed up until the boxes are apart.
+        var lpos = new THREE.Vector3(a.p[0], a.p[1] + 0.06, a.p[2]);
+        camera.updateMatrixWorld();
+        var hw = m.label.scale.x / 2, hh = m.label.scale.y / 2;
+        function toCam(v) { return v.clone().applyMatrix4(camera.matrixWorldInverse); }
+        function overlaps(pa, pb) {
+          var ca = toCam(pa), cb = toCam(pb);
+          var za = Math.max(1e-3, -ca.z), zb = Math.max(1e-3, -cb.z);
+          return Math.abs(ca.x / za - cb.x / zb) < hw / za + hw / zb && Math.abs(ca.y / za - cb.y / zb) < hh / za + hh / zb + 0.004;
+        }
+        for (var guard = 0; guard < 40; guard++) {
+          var hit = false;
+          for (var pi = 0; pi < idx; pi++) {
+            var o = anchorMarkers[pi];
+            if (o.label && o.label.visible && overlaps(o.label.position, lpos)) { hit = true; break; }
+          }
+          if (!hit) break;
+          lpos.y += 0.01;
+        }
+        m.label.position.copy(lpos);
         m.label.visible = true;
       });
     }

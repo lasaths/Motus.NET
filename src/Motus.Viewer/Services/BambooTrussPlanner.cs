@@ -40,6 +40,7 @@ public sealed class BambooTrussPlanner
     string? _activeId;
     readonly List<(string Name, double[] World)> _placed = new();
     string _cycle = "start";
+    string _lStake = BambooTrussLayout.S1.Name;
 
     public List<BambooIcdMotion.MotionKey> Keys { get; } = new();
     public List<(string Cycle, int First, int Last)> CycleKeys { get; } = new();
@@ -467,6 +468,9 @@ public sealed class BambooTrussPlanner
     }
 
     /// <summary>Pick the feed cane and place it exactly on <paramref name="member"/> (L-grip stays clamped on its stake).</summary>
+    /// <summary>Grasp IK solutions tried one by one per stock offset (0: the first Motus-clear one only).</summary>
+    public static int GraspSolutionsPerOffset { get; set; } = 0;
+
     public bool BuildMember(BambooTrussLayout.MemberDef member)
     {
         BeginCycle(member.Id);
@@ -479,14 +483,17 @@ public sealed class BambooTrussPlanner
         var design = member.Place;
         var designM = BambooIcdCell.PlacementWorld(design);
         var u = design.Axis;
-        var offsets = new[] { -0.15, 0.15, -0.08, 0.08, 0.0, -0.2, 0.2 };
+        // Grasp offsets along the stock cane, clear of its pegs (near either end first: far placements need them).
+        var offsets = BambooTrussLayout.StockGraspOffsets;
         var startKeys = Keys.Count;
         var snapshot = Snapshot();
-        foreach (var s in offsets)
+        // Each grasp IK solution holds the cane differently (which side the slot comes from), which decides whether
+        // the far placements are reachable at all — so every offset tries the nearest few grasp solutions in turn.
+        foreach (var (s, graspIdx) in offsets.SelectMany(o => (GraspSolutionsPerOffset <= 0 ? new[] { -1 } : Enumerable.Range(0, GraspSolutionsPerOffset)).Select(i => (o, i))))
         {
             Restore(snapshot, startKeys);
             var pick = K.OnStrut(store, s, BambooIcdCell.Strut);
-            if (!RGrasp(pick, BambooIcdCell.Strut, 0, pickActive: true)) continue;
+            if (!RGrasp(pick, BambooIcdCell.Strut, 0, pickActive: true, solutionIndex: graspIdx)) continue;
             // Held geometry: cane centre / axis in the tool frame → where the tool must be at the design pose.
             var H = Transforms.FromFrame(_held!.Value);
             var ct = (X: H[3], Y: H[7], Z: H[11]);
@@ -574,32 +581,74 @@ public sealed class BambooTrussPlanner
     }
 
     /// <summary>
-    /// Walk with base swaps, entirely on outboard ground (no earth inside the span): R clamps stake S2 sideways,
-    /// base → R, L slides up off S1's free top, transits over S3 and slides down onto it, L clamps, base → L,
-    /// R opens, backs off S2 and parks.
+    /// Walk with base swaps to another outboard stake. R clamps <paramref name="anchor"/> — a placed cane fixed at both
+    /// ends (brachiation onto the built structure) or a stake — the base swaps to R, L slides up off its stake's free
+    /// top, transits over <paramref name="target"/> and slides down onto it, L clamps, the base swaps back to L, and R
+    /// opens, backs off and parks.
     /// </summary>
-    public bool Walk()
+    public bool Walk(string anchor, BambooTrussLayout.Stake target)
     {
-        BeginCycle("walk");
+        BeginCycle(_cycle == "walk" ? "walk2" : "walk");
         var startKeys = Keys.Count;
         var snap = Snapshot();
-        var s2 = BambooTrussLayout.S2; var s1 = BambooTrussLayout.S1; var s3 = BambooTrussLayout.S3;
-        for (var idx = 0; idx < 8; idx++)
+        var from = BambooTrussLayout.StakeNamed(_lStake);
+        var grips = new List<K.GripTarget>();
+        if (anchor.StartsWith("placed-", StringComparison.Ordinal))
         {
-            Restore(snap, startKeys);
-            if (!RGrasp(s2.Grip, s2.Name, 0, pickActive: false, solutionIndex: idx)) continue;
-            if (!SwapTo(K.Gripper.R, s2.Name)) continue;
-            if (!LSlide(s1, up: true)) continue;
-            if (!LOnto(s3)) continue;
-            if (!SwapTo(K.Gripper.L, s3.Name)) continue;
-            if (!RRetreat(s2.Grip)) continue;
-            if (!RPark()) continue;
-            Notes.Add($"walk: R clamps {s2.Name} at y={s2.ClampY:F3}; L {s1.Name} → {s3.Name}; R parks");
-            return true;
+            var id = anchor["placed-".Length..];
+            if (!_placed.Any(p => p.Name == anchor)) return Fail($"walk: {anchor} is not placed");
+            if (!BambooTrussLayout.FixedBothEnds(_placed.Select(p => p.Name["placed-".Length..])).Contains(id))
+                return Fail($"walk: {anchor} is not fixed at both ends — the robot may not clamp it");
+            var m = BambooTrussLayout.Members.First(x => x.Id == id);
+            var half = BambooTrussLayout.StrutLength / 2 - 0.04;
+            foreach (var f in new[] { 0.0, -0.5, 0.5, -1.0, 1.0, -0.25, 0.25, -0.75, 0.75 })
+                grips.Add(K.OnStrut(PlacedPlacement(m), f * half, anchor));
         }
+        else if (anchor.Split('@') is [var stakeName, var yText])
+        {
+            // "stake-X@y": R clamps stake X at height y (may be the stake L stands on, below the L clamp) — on the
+            // stake itself: below its free top and above its ground pad.
+            var st = BambooTrussLayout.StakeNamed(stakeName);
+            var y = double.Parse(yText, System.Globalization.CultureInfo.InvariantCulture);
+            if (y > st.Top - 0.015 || y < 0.03) return Fail($"walk: {anchor} is not on the stake (top {st.Top:F3} m)");
+            grips.Add(st.At(y));
+        }
+        else grips.Add(BambooTrussLayout.StakeNamed(anchor).Grip);
+        foreach (var g in grips)
+            for (var idx = 0; idx < 4; idx++)
+            {
+                Restore(snap, startKeys);
+                if (!RGrasp(g, g.On, 0, pickActive: false, solutionIndex: idx)) continue;
+                if (!SwapTo(K.Gripper.R, g.On)) continue;
+                if (!LSlide(from, up: true)) continue;
+                if (!LOnto(target)) continue;
+                if (!SwapTo(K.Gripper.L, target.Name)) continue;
+                if (!RRetreat(g)) continue;
+                if (!RPark()) continue;
+                _lStake = target.Name;
+                Notes.Add($"{_cycle}: R clamps {g.On} at ({g.X:F3},{g.Y:F3},{g.Z:F3}); L {from.Name} → {target.Name}; R parks");
+                return true;
+            }
         Restore(snap, startKeys);
-        return Fail(string.IsNullOrEmpty(Error) ? "walk: no Motus-clear S1→S3 swap" : "walk: " + Error);
+        return Fail(string.IsNullOrEmpty(Error) ? $"walk: no Motus-clear {from.Name}→{target.Name} swap via {anchor}" : "walk: " + Error);
     }
+
+    /// <summary>Placed member as a StrutPlacement-equivalent grip line (uses the actual released pose).</summary>
+    BambooIcdCell.StrutPlacement PlacedPlacement(BambooTrussLayout.MemberDef m)
+    {
+        var w = _placed.First(p => p.Name == "placed-" + m.Id).World;
+        // Motus → viewer: (x, y, z)_m → viewer (x, z, −y); axis likewise.
+        var v = K.Mul(Transforms.FromAxisAngle(1, 0, 0, -Math.PI / 2), w);
+        var ax = (v[2], v[6], v[10]);
+        var pitch = Math.Asin(Math.Clamp(-ax.Item2, -1, 1)) * 180 / Math.PI;
+        var yaw = Math.Atan2(ax.Item1, ax.Item3) * 180 / Math.PI;
+        return new BambooIcdCell.StrutPlacement(v[3], v[7], v[11], pitch, yaw);
+    }
+
+    /// <summary>Members already placed (ids).</summary>
+    public IReadOnlyList<string> PlacedIds => _placed.Select(p => p.Name["placed-".Length..]).ToList();
+    /// <summary>Stake the L clamp is on (when L is the base).</summary>
+    public string LStake => _lStake;
 
     /// <summary>R-grip (open, L-base) transits to a Motus-clear park posture well away from where it is.</summary>
     bool RPark()
@@ -639,7 +688,8 @@ public sealed class BambooTrussPlanner
             var lOpen = BambooTrussLayout.LJawOpenMm;
             if (!SegOk(q, q, _gR, _gR, _gL, lOpen, _hold, _hold, _lOn, _rOn, VerifyStepDeg))
                 return Fail($"walk: L open collides: {BambooIcdCell.Describe(ContactsNow(q, _gR, lOpen, _hold, _lOn, _rOn))}");
-            Emit("L:Open (base→R)", q, gL: lOpen);
+            Emit("swap base L→R", q);
+            Emit("L:Open", q, gL: lOpen);
             _lOn = null;
         }
         else
@@ -647,7 +697,8 @@ public sealed class BambooTrussPlanner
             var rOpen = BambooTrussLayout.JawOpenMm;
             if (!SegOk(q, q, _gR, rOpen, _gL, _gL, _hold, _hold, _lOn, _rOn, VerifyStepDeg))
                 return Fail($"walk: R open collides: {BambooIcdCell.Describe(ContactsNow(q, rOpen, _gL, _hold, _lOn, _rOn))}");
-            Emit("R:Open (base→L)", q, gR: rOpen);
+            Emit("swap base R→L", q);
+            Emit("R:Open", q, gR: rOpen);
             _rOn = null;
         }
         return true;
@@ -708,16 +759,16 @@ public sealed class BambooTrussPlanner
     // ---------------- snapshot / restore ----------------
 
     sealed record State(K.Gripper Base, double[] BaseWorld, string BaseOn, double[] Q, double GR, double GL, int Hold,
-        string? LOn, string? ROn, Frame? Held, double[]? Rest, double[]? Released, string? ActiveId, int Placed, int Grips, int Notes);
+        string? LOn, string? ROn, Frame? Held, double[]? Rest, double[]? Released, string? ActiveId, int Placed, int Grips, int Notes, string LStake);
 
     State Snapshot() => new(_base, _baseWorld.ToArray(), _baseOn, _q.ToArray(), _gR, _gL, _hold, _lOn, _rOn, _held,
-        _activeRest, _activeReleased, _activeId, _placed.Count, Grips.Count, Notes.Count);
+        _activeRest, _activeReleased, _activeId, _placed.Count, Grips.Count, Notes.Count, _lStake);
 
     void Restore(State s, int keyCount)
     {
         _base = s.Base; _baseWorld = s.BaseWorld.ToArray(); _baseOn = s.BaseOn; _q = s.Q.ToArray(); _gR = s.GR; _gL = s.GL;
         _hold = s.Hold; _lOn = s.LOn; _rOn = s.ROn; _held = s.Held; _activeRest = s.Rest; _activeReleased = s.Released;
-        _activeId = s.ActiveId;
+        _activeId = s.ActiveId; _lStake = s.LStake;
         if (_placed.Count > s.Placed) _placed.RemoveRange(s.Placed, _placed.Count - s.Placed);
         if (Grips.Count > s.Grips) Grips.RemoveRange(s.Grips, Grips.Count - s.Grips);
         if (Notes.Count > s.Notes) Notes.RemoveRange(s.Notes, Notes.Count - s.Notes);

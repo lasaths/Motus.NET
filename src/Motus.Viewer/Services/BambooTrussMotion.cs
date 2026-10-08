@@ -131,7 +131,7 @@ public static class BambooTrussMotion
     // ---------------- build-time plan cache (WASM) ----------------
 
     /// <summary>Bump when planner behaviour changes (invalidates <see cref="DefaultPlanResource"/>).</summary>
-    public const string PlannerVersion = "grounded-ik-2-outboard";
+    public const string PlannerVersion = "grounded-ik-3-five-member";
     public const string DefaultPlanResource = "Motus.Viewer.Services.BambooTrussDefaultPlan.json";
 
     /// <summary>Everything the planner's output depends on (layout, tolerances, version), invariant-formatted.</summary>
@@ -145,7 +145,9 @@ public static class BambooTrussMotion
             string St(BambooTrussLayout.Stake t) => $"{t.Name},{F(t.X)},{F(t.Z)},{F(t.ClampY)},{F(t.Top)},{F(t.HeadingDeg)}";
             var parts = new List<string>
             {
-                PlannerVersion, F(BambooTrussLayout.StrutLength), St(BambooTrussLayout.S1), St(BambooTrussLayout.S2), St(BambooTrussLayout.S3),
+                PlannerVersion, F(BambooTrussLayout.StrutLength), string.Join("/", BambooTrussLayout.Stakes.Select(St)), BambooTrussLayout.Current.StartStake,
+                BambooTrussLayout.Current.WalkRAnchor, BambooTrussLayout.Current.WalkLTarget,
+                string.Join("/", BambooTrussLayout.UnreachableMembers.Keys),
                 P(BambooTrussLayout.Store), F(BambooTrussLayout.RackTop), F(K.GripPosTolM), F(K.GripAxisTolDeg),
                 F(BambooTrussLayout.JawOpenMm), F(BambooTrussLayout.LJawOpenMm), F(BambooTrussLayout.JawClosedMm)
             };
@@ -233,27 +235,51 @@ public static class BambooTrussMotion
         await Yield("start");
         if (!planner.Start())
             return new TrussBuild { Error = planner.Error, Tasks = tasks.ToList() };
-        foreach (var (_, _, memberId) in pairs)
+        // Build every requested member that is reachable, in order. A member is only placed when at least one of its
+        // ends is already fixed (A/D posts or a triangulated node), so no cane is ever left hanging free. When members
+        // remain and the site has a second stake, the arm brachiates (R on a cane fixed at both ends, or a stake) to
+        // it and tries the rest from there.
+        var pending = new List<string>();
+        var ids = pairs.Select(p => p.MemberId).Distinct().ToList();
+        bool TryBuild(string memberId, bool lastChance)
         {
             var member = BambooTrussLayout.Members.FirstOrDefault(m => m.Id == memberId);
-            if (member is null) { notes.Add($"{memberId}: not a truss member — skipped"); break; }
-            if (built.Contains(memberId)) { notes.Add($"{memberId}: already built — skipped"); continue; }
+            if (member is null) { notes.Add($"{memberId}: not a truss member — skipped"); return true; }
             if (BambooTrussLayout.UnreachableMembers.TryGetValue(memberId, out var why))
             {
                 notes.Add($"{memberId}: not built — {why}");
-                break;
+                return true;
             }
-            await Yield(memberId);
+            var fixedNodes = BambooTrussLayout.FixedNodes(built);
+            if (!fixedNodes.Contains(NodeName(member.EdgeA)) && !fixedNodes.Contains(NodeName(member.EdgeB)))
+            {
+                if (lastChance) notes.Add($"{memberId}: not built — neither end is fixed yet (it would hang free)");
+                return false;
+            }
             if (!planner.BuildMember(member))
             {
-                notes.Add($"{memberId}: not built — {planner.Error}");
-                break;
+                if (lastChance) notes.Add($"{memberId}: not built — {planner.Error}");
+                return false;
             }
             built.Add(memberId);
+            return true;
         }
-        // The walk only uses outboard stakes (S2 for R, S3 for L), so it does not depend on which members exist.
+        foreach (var id in ids)
+        {
+            await Yield(id);
+            if (!TryBuild(id, lastChance: false)) pending.Add(id);
+        }
+        var site = BambooTrussLayout.Current;
+        var walked = false;
         await Yield("walk");
-        if (!planner.Walk()) notes.Add($"walk: not planned — {planner.Error}");
+        if (planner.Walk(site.WalkRAnchor, BambooTrussLayout.WalkTarget)) walked = true;
+        else notes.Add($"walk: not planned — {planner.Error}");
+        foreach (var id in pending)
+        {
+            await Yield(id);
+            TryBuild(id, lastChance: true);
+        }
+        if (!walked && pending.Count > 0) notes.Add("remaining members were tried from the start stake only (walk failed)");
         planner.StampTimes();
         cell.SetMountViewer(BambooTrussLayout.StartBase);
 
@@ -282,6 +308,9 @@ public static class BambooTrussMotion
     /// Key k's hold and label describe the segment that ends at k (the motion *to* k), so a block's label covers
     /// exactly its own motion — e.g. "L:Slide up" ends where the slide ends, the next transit is "L:Transit".
     /// </summary>
+    public static string NodeName((double X, double Y, double Z) p) =>
+        BambooTrussLayout.FootNodes.OrderBy(n => Math.Abs(n.X - p.X) + Math.Abs(n.Y - p.Y)).First().Name;
+
     public readonly record struct State(double[] Q, double GR, double GL, int Hold, string Label, int SegEnd);
 
     public static State SampleState(IReadOnlyList<BambooIcdMotion.MotionKey> keys, double t)
