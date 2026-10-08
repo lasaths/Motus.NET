@@ -131,7 +131,7 @@ public static class BambooTrussMotion
     // ---------------- build-time plan cache (WASM) ----------------
 
     /// <summary>Bump when planner behaviour changes (invalidates <see cref="DefaultPlanResource"/>).</summary>
-    public const string PlannerVersion = "grounded-ik-4-stock-in-walk";
+    public const string PlannerVersion = "grounded-ik-5-brachiate";
     public const string DefaultPlanResource = "Motus.Viewer.Services.BambooTrussDefaultPlan.json";
 
     /// <summary>Everything the planner's output depends on (layout, tolerances, version), invariant-formatted.</summary>
@@ -313,6 +313,34 @@ public static class BambooTrussMotion
             TryBuild(id, lastChance: true);
         }
         if (!walked && pending.Count > 0) notes.Add("remaining members were tried from the start stake only (walk failed)");
+        // Brachiation onto the built structure: once canes are fixed at both ends, L (open linear jaw) may clamp one
+        // from the side and become the base, bringing the remaining members within reach.
+        var remaining = pending.Where(id => !built.Contains(id) && !BambooTrussLayout.UnreachableMembers.ContainsKey(id)).ToList();
+        if (remaining.Count > 0 && BambooTrussLayout.FixedBothEnds(built).Count > 0)
+        {
+            await Yield("brachiate");
+            var brachiated = false;
+            foreach (var target in BambooTrussLayout.FixedBothEnds(built))
+            {
+                foreach (var anchor in new[] { site.WalkRAnchor }.Concat(BambooTrussLayout.FixedBothEnds(built).Where(x => x != target).Select(x => "placed-" + x)))
+                {
+                    if (planner.Brachiate(anchor, target)) { brachiated = true; break; }
+                }
+                if (brachiated) break;
+            }
+            if (!brachiated)
+                notes.Add("brachiate onto the chord: not planned — no Motus-clear side approach of the L-grip onto a double-fixed cane " +
+                          "(in the ICD URDF the L slot is bounded by the L-grip body/rail on one side and the arm's base tube on the other, " +
+                          $"so a cane only enters along the slot axis over a free end); last: {planner.Error}");
+            else
+                foreach (var id in remaining)
+                {
+                    await Yield(id);
+                    // Notes for these members were already written on the walk pass; replace them on success.
+                    if (TryBuild(id, lastChance: false)) notes.RemoveAll(n => n.StartsWith(id + ": not built", StringComparison.Ordinal));
+                    else if (!notes.Any(n => n.StartsWith(id + ": not built", StringComparison.Ordinal))) notes.Add($"{id}: not built — {planner.Error}");
+                }
+        }
         planner.StampTimes();
         cell.SetMountViewer(BambooTrussLayout.StartBase);
 

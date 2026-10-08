@@ -706,6 +706,129 @@ public sealed class BambooTrussPlanner
         return true;
     }
 
+    /// <summary>
+    /// Brachiate onto the built structure: R clamps <paramref name="anchor"/> (a stake "stake-X@y" or a placed cane
+    /// fixed at both ends), the base swaps to R, L leaves its stake (slides up off the free top), then — the L jaw is a
+    /// linear jaw open in a straight line like R's — approaches placed cane <paramref name="memberId"/> from the side
+    /// (along its jaw axis, either way), clamps it, the base swaps back to L and R parks. Only canes fixed at both
+    /// ends may be clamped. Every step is Motus-checked with the full L-grip / mount geometry (incl. the base tube on
+    /// the jaw-opening side).
+    /// </summary>
+    public bool Brachiate(string anchor, string memberId)
+    {
+        BeginCycle("brachiate");
+        var startKeys = Keys.Count;
+        var snap = Snapshot();
+        var placedIds = _placed.Select(p => p.Name["placed-".Length..]).ToList();
+        if (!BambooTrussLayout.FixedBothEnds(placedIds).Contains(memberId))
+            return Fail($"brachiate: {memberId} is not fixed at both ends — the robot may not clamp it");
+        if (_lStake.StartsWith("placed-", StringComparison.Ordinal))
+            return Fail("brachiate: L is already on the structure");
+        var from = BambooTrussLayout.StakeNamed(_lStake);
+        var m = BambooTrussLayout.Members.First(x => x.Id == memberId);
+        var line = PlacedPlacement(m);
+        var name = "placed-" + memberId;
+        var half = BambooTrussLayout.StrutLength / 2;
+        // Clamp points along the cane: near either end first (where the stock and the remaining members are closest).
+        var offsets = BrachiateOffsets.Select(f => f * (half - 0.03)).ToList();
+        foreach (var anchorGrip in AnchorGrips(anchor))
+            for (var idx = 0; idx < 3; idx++)
+            {
+                Restore(snap, startKeys);
+                if (!RGrasp(anchorGrip, anchorGrip.On, 0, pickActive: false, solutionIndex: idx)) continue;
+                if (!SwapTo(K.Gripper.R, anchorGrip.On)) continue;
+                if (!LSlide(from, up: true)) continue;
+                var k1 = Keys.Count; var s1 = Snapshot();
+                foreach (var off in offsets)
+                {
+                    Restore(s1, k1);
+                    var target = K.OnStrut(line, off, name);
+                    if (!LSideGrasp(target, name)) continue;
+                    if (!SwapTo(K.Gripper.L, name)) continue;
+                    if (!RRetreat(anchorGrip)) continue;
+                    if (!RPark()) continue;
+                    _lStake = name;
+                    Notes.Add($"brachiate: R clamps {anchorGrip.On} at ({anchorGrip.X:F3},{anchorGrip.Y:F3},{anchorGrip.Z:F3}); L {from.Name} → {name} at {off:+0.000;-0.000} m from its centre (side approach); R parks");
+                    return true;
+                }
+            }
+        Restore(snap, startKeys);
+        return Fail(string.IsNullOrEmpty(Error) ? $"brachiate: no Motus-clear move onto {name} via {anchor}" : "brachiate: " + Error);
+    }
+
+    /// <summary>Clamp points along the target cane, as fractions of (half − 3 cm) from its centre.</summary>
+    public static double[] BrachiateOffsets { get; set; } = { -1.0, -0.75, -0.5, 1.0, 0.75, 0.5, -0.25, 0.25, 0.0 };
+
+    IEnumerable<K.GripTarget> AnchorGrips(string anchor)
+    {
+        if (anchor.StartsWith("placed-", StringComparison.Ordinal))
+        {
+            var id = anchor["placed-".Length..];
+            if (!_placed.Any(p => p.Name == anchor)) yield break;
+            if (!BambooTrussLayout.FixedBothEnds(_placed.Select(p => p.Name["placed-".Length..])).Contains(id)) yield break;
+            var m = BambooTrussLayout.Members.First(x => x.Id == id);
+            var half = BambooTrussLayout.StrutLength / 2 - 0.04;
+            foreach (var f in new[] { 0.0, -0.5, 0.5, -1.0, 1.0 })
+                yield return K.OnStrut(PlacedPlacement(m), f * half, anchor);
+        }
+        else if (anchor.Split('@') is [var stakeName, var yText])
+        {
+            var st = BambooTrussLayout.StakeNamed(stakeName);
+            var y = double.Parse(yText, System.Globalization.CultureInfo.InvariantCulture);
+            if (y <= st.Top - 0.015 && y >= 0.03) yield return st.At(y);
+        }
+        else yield return BambooTrussLayout.StakeNamed(anchor).Grip;
+    }
+
+    /// <summary>
+    /// L-grip (free, R-base, jaws open) clamps a cane from the side: transit → pre-grasp backed off along the jaw axis
+    /// (either side; the jaw opens in a straight line) → straight approach → close.
+    /// </summary>
+    bool LSideGrasp(K.GripTarget target, string onName)
+    {
+        if (_base != K.Gripper.R) return Fail("L side grasp needs the R-grip as base");
+        var open = BambooTrussLayout.LJawOpenMm;
+        var closed = BambooTrussLayout.JawClosedMm;
+        var sols = K.SolveGrip(_base, _baseWorld, target, new[] { _q }, 32)
+            .OrderBy(x => K.JointDist(x, _q)).Take(8).ToList();
+        Diag.Add($"{_cycle}: L side grasp {onName} ({target.X:F3},{target.Y:F3},{target.Z:F3}): {sols.Count} IK solutions");
+        foreach (var qg in sols)
+        {
+            if (!PoseOk(qg, _gR, open, _hold, _lOn, _rOn))
+            { Diag.Add($"  L grasp pose collides: {BambooIcdCell.Describe(ContactsNow(qg, _gR, open, _hold, _lOn, _rOn))}"); continue; }
+            var sign = FreeAxisSign(target, qg);
+            foreach (var side in new[] { 1.0, -1.0 })
+            {
+                var outward = new List<(K.GripTarget, double)>();
+                for (var d = CartStepM; d <= ApproachM + 1e-9; d += CartStepM) outward.Add((target, side * d));
+                var back = Cartesian(qg, outward, sign);
+                if (back is null) { Diag.Add($"  L approach (side {side}) unreachable"); continue; }
+                var approach = Enumerable.Reverse(back).Append(qg).ToList();
+                var ok = PoseOk(approach[0], _gR, open, _hold, _lOn, _rOn);
+                var bad = 0;
+                for (var i = 0; i + 1 < approach.Count && ok; i++)
+                {
+                    ok = SegOk(approach[i], approach[i + 1], _gR, _gR, open, open, _hold, _hold, _lOn, _rOn, VerifyStepDeg);
+                    if (!ok) bad = i + 1;
+                }
+                if (!ok) { Diag.Add($"  L approach (side {side}) collides at step {bad}/{approach.Count - 1}: {BambooIcdCell.Describe(ContactsNow(approach[bad], _gR, open, _hold, _lOn, _rOn))}"); continue; }
+                if (!SegOk(qg, qg, _gR, _gR, open, closed, _hold, _hold, onName, _rOn, VerifyStepDeg))
+                { Diag.Add($"  L close on {onName} collides: {BambooIcdCell.Describe(ContactsNow(qg, _gR, closed, _hold, onName, _rOn))}"); continue; }
+                var path = TransitPath(_q, approach[0]);
+                if (path is null) { Diag.Add("  no L transit to pre-grasp"); continue; }
+                foreach (var v in path) Emit("L:Transit", v);
+                Emit("L:Transit", approach[0]);
+                for (var i = 1; i + 1 < approach.Count; i++) Emit($"L:Approach {onName}", approach[i]);
+                Emit($"L:Approach {onName}", qg);
+                _lOn = onName;
+                RecordGrip("L:Close", "L", target, K.Free(_base, _baseWorld, qg));
+                Emit($"L:Close {onName}", qg, gL: closed);
+                return true;
+            }
+        }
+        return Fail($"{_cycle}: no Motus-clear L side grasp of {onName} from {_baseOn}");
+    }
+
     /// <summary>L-grip slides along a stake (R-base): up and off its free top, or (up = false) down onto it.</summary>
     bool LSlide(BambooTrussLayout.Stake stake, bool up)
     {

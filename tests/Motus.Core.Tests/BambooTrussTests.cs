@@ -692,6 +692,39 @@ public class BambooTrussTests
         Assert.Contains(scan.ClampsAt(close.T, s.Q, s.GR, s.GL), c => c.Gripper == "L" && c.On == "stake-S3");
     }
 
+    /// <summary>
+    /// Brachiation onto the chord is attempted with an open-jaw side approach of the L-grip and every candidate is
+    /// Motus-checked with the full L-grip / mount geometry. In the ICD URDF the L slot is bounded on both sides (L-grip
+    /// body/rail at +y, base tube at −y) with only a 20 mm gap for the 14 mm cane, so no side approach exists and the
+    /// planner says so. Any side-approach L clamp that does appear must be on a cane fixed at both ends at that time.
+    /// </summary>
+    [Fact]
+    public void Brachiation_IsHonest_SideClampsOnlyOnDoubleFixedCanes()
+    {
+        var built = Build();
+        var scan = Scan(built);
+        foreach (var k in built.Keys.Where(k => k.Label.Contains(":L:Close placed-", StringComparison.Ordinal)))
+        {
+            var id = k.Label[(k.Label.IndexOf("placed-", StringComparison.Ordinal) + "placed-".Length)..];
+            var placed = scan.World[BambooTrussMotion.CycleIndexAt(built.Keys, built.Cycles, k.T)].Placed.Select(p => p.Name["placed-".Length..]);
+            Assert.Contains(id, BambooTrussLayout.FixedBothEnds(placed));
+        }
+        if (!built.Built.Contains("sep") || !built.Built.Contains("diagR"))
+            Assert.Contains(built.Notes, n => n.StartsWith("brachiate onto the chord: not planned", StringComparison.Ordinal));
+        // The URDF geometry behind it: the L slot (cane axis = jaw z) is closed at +y by the body and at −y by the base tube.
+        var xml = System.Xml.Linq.XDocument.Load(UrdfPath);
+        (double Lo, double Hi) Y(string name)
+        {
+            var c = xml.Descendants("collision").First(e => (string?)e.Attribute("name") == name);
+            var y = double.Parse(c.Element("origin")!.Attribute("xyz")!.Value.Split(' ')[1], System.Globalization.CultureInfo.InvariantCulture);
+            var h = double.Parse(c.Element("geometry")!.Element("box")!.Attribute("size")!.Value.Split(' ')[1], System.Globalization.CultureInfo.InvariantCulture) / 2;
+            return (y - h, y + h);
+        }
+        var body = Y("L-grip body"); var tube = Y("base tube");
+        Assert.True(body.Lo > 0 && tube.Hi < 0, "L slot bounded on both sides in y");
+        Assert.True(body.Lo - tube.Hi < 2 * BambooIcdCell.StrutRadius + 0.01, $"slot gap {(body.Lo - tube.Hi) * 1000:F0} mm");
+    }
+
     // ---------------- playback ----------------
 
     private static List<string> PlannedPhases(BambooTrussMotion.TrussBuild built) => built.Keys.Select(k => k.Label).ToList();
