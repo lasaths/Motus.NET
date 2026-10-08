@@ -17,7 +17,7 @@
 
     <aside class="controls">
         <h1>Bamboo truss (store → bridge span)</h1>
-        <p class="sub">Bridge lower chord (baseL + baseR, 0.5 m canes) built by a grounded two-gripper arm. One gripper is always clamped on a real fixed object (stake or double-fixed cane) and is the IK base; the other moves by joint IK only. Motus.NET owns FK/IK/collision; Three.js only draws.</p>
+        <p class="sub">Bridge lower chord (baseL A–B built; baseR out of reach under the no-earth-in-span rule; 0.5 m canes) built by a grounded two-gripper arm working from stakes outboard of A. One gripper is always clamped on a real fixed object (stake, or a cane fixed at both ends) and is the IK base; the other moves by joint IK only. Motus.NET owns FK/IK/collision; Three.js only draws.</p>
         <div class="phase @(!string.IsNullOrEmpty(_motionError) || _collision ? "err" : "")" data-motus="@_motusState">@_phase</div>
 
         <div class="row">
@@ -130,7 +130,7 @@
             Drag the view to orbit. Moving a joint or gripper slider pauses playback and drives the arm from C#.
             Play runs every pick/place pair (object = member id). Vertical footprint: A–B–C + B–D–C in the XY plane, B near ground, C apex, shared upright B–C.
             Bend axes local X, wrists local Y, jaws local X. Viewer is Three.js Y-up; Motus.NET URDF is Z-up (shared θ).
-            Start: L-grip clamped on anchor stake S1 (amber ring = clamped base and what it is on). The R-grip picks each cane off the feed rail and places it exactly on its member; then it clamps the double-fixed chord, the base swaps to R, the L-grip slides up off S1 and down onto stake S2, the base swaps back to L and the R-grip re-grips the chord.
+            No earth between the anchors: apart from the A/D pads and posts, every stake and the feed rail stand outboard of A. Start: L-grip clamped on stake S1 (amber ring + label on every clamped gripper; blue = cane in hand). The R-grip picks the cane off the feed rail and places it exactly on baseL (A–B); baseR (B–D) is out of reach from every allowed support, so it is reported, not faked. Walk: R clamps stake S2, the base swaps to R, the L clamp slides up off S1 and down onto stake S3, the base swaps back to L and R parks.
             Collision: Motus.NET for every link, both grippers, the mount, the held cane, pads, posts, stakes, rail, placed canes and self; the only allowed touch is a gripper's jaw plates on what it clamps. Play/scrub never pass the Motus-verified frontier.
         </p>
     </aside>
@@ -379,7 +379,7 @@
         object? strut = null;
         object? struts = null;
         object? mount = null;
-        object? anchor = null;
+        object? anchors = null;
         if (_trussScan is not null)
         {
             var poses = _trussScan.StrutPoses(_t, _hold, _qDeg);
@@ -388,14 +388,18 @@
             var (lw, _) = _trussScan.GrippersAt(_t, _qDeg);
             var f = Transforms.ToFrame(lw);
             mount = new { p = new[] { f.X, f.Y, f.Z }, q = new[] { f.Qx, f.Qy, f.Qz, f.Qw } };
-            var (g, bw, on) = _trussScan.BaseAt(_t);
-            anchor = new { gripper = g, on, p = new[] { bw[3], bw[7], bw[11] }, axis = new[] { bw[2], bw[6], bw[10] } };
+            // A ring + label for every clamped gripper (the base, and the other one too whenever it is clamped).
+            anchors = _trussScan.ClampsAt(_t, _qDeg, _gR, _gL).Select(c => new
+            {
+                gripper = c.Gripper, on = c.On, isBase = c.IsBase, held = c.Held,
+                p = new[] { c.Frame[3], c.Frame[7], c.Frame[11] }, axis = new[] { c.Frame[2], c.Frame[6], c.Frame[10] }
+            }).ToList();
         }
         var payload = new
         {
             q = _qDeg,
             mount,
-            anchor,
+            anchors,
             gL = _gL,
             gR = _gR,
             strut,

@@ -161,13 +161,40 @@ public sealed class BambooTrussScan
         return (BambooTrussPlanner.LWorld(g, w, q), BambooTrussPlanner.RWorld(g, w, q));
     }
 
+    /// <summary>One clamped gripper for the viewer marker: which gripper, what it is on, its grip frame (viewer), whether it is the IK base.</summary>
+    public readonly record struct Clamp(string Gripper, string On, double[] Frame, bool IsBase, bool Held);
+
+    /// <summary>
+    /// Every gripper clamped at t (jaws at the clamp width on an object): the base always, plus the free gripper when
+    /// it is closed on something — a stake or placed cane (fixed) or the cane in hand (held). Both show when both clamp.
+    /// </summary>
+    public List<Clamp> ClampsAt(double t, IReadOnlyList<double> qDeg, double gR, double gL)
+    {
+        var list = new List<Clamp>();
+        var (g, _, on) = BaseAt(t);
+        var (lw, rw) = GrippersAt(t, qDeg);
+        list.Add(new Clamp(g, on, g == "R" ? rw : lw, true, false));
+        if (_keys.Count == 0) return list;
+        var k = _keys[BambooTrussMotion.SampleState(_keys, t).SegEnd];
+        var closed = BambooTrussLayout.JawClosedMm + 0.5;
+        void Add(string grip, string? obj, double jaw, double[] frame)
+        {
+            if (grip == g || obj is null || jaw > closed) return;
+            var name = obj.Split('|')[^1];
+            list.Add(new Clamp(grip, name, frame, false, name == BambooIcdCell.Strut));
+        }
+        Add("L", k.LOn, gL, lw);
+        Add("R", k.ROn, gR, rw);
+        return list;
+    }
+
     /// <summary>Environment (everything that is not the robot) at t for a hold state.</summary>
     public List<CollisionObject> EnvironmentAt(double t, int hold)
     {
         var env = new List<CollisionObject>(_cell.GroundObjects);
         env.AddRange(BambooTrussLayout.FixtureObjects);
         if (_cycles.Count == 0) return env;
-        var w = _world[BambooTrussMotion.MemberIndexAt(_cycles, t)];
+        var w = _world[BambooTrussMotion.CycleIndexAt(_keys, _cycles, t)];
         foreach (var (name, m) in w.Placed) env.Add(_cell.StrutAt(m, name));
         if (w.ActiveId is not null)
         {
@@ -183,7 +210,7 @@ public sealed class BambooTrussScan
     {
         var list = new List<(string, double[])>();
         if (_cycles.Count == 0) return list;
-        var w = _world[BambooTrussMotion.MemberIndexAt(_cycles, t)];
+        var w = _world[BambooTrussMotion.CycleIndexAt(_keys, _cycles, t)];
         foreach (var (name, m) in w.Placed) list.Add((name, BambooIcdCell.ToViewerPose(m)));
         if (w.ActiveId is null) return list;
         if (hold == 1 && w.HeldOffset is { } off)
@@ -203,7 +230,7 @@ public sealed class BambooTrussScan
         var k = _keys.Count > 0 ? _keys[s.SegEnd] : null;
         var (g, w, _) = BaseAt(t);
         _cell.SetMountViewer(BambooTrussPlanner.LWorld(g, w, q));
-        var world = _cycles.Count > 0 ? _world[BambooTrussMotion.MemberIndexAt(_cycles, t)] : null;
+        var world = _cycles.Count > 0 ? _world[BambooTrussMotion.CycleIndexAt(_keys, _cycles, t)] : null;
         var held = hold == 1 ? world?.HeldOffset : null;
         return _cell.PoseContacts(q, gR, gL, held, EnvironmentAt(t, hold), BambooTrussPlanner.Allowed(k?.LOn, k?.ROn), max);
     }

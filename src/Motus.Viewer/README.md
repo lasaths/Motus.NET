@@ -77,10 +77,16 @@ Open `http://127.0.0.1:5268/bamboo` (single strut pick/place) or
 - **Truss:** vertical-plane bridge **lower chord** A–B–D, edge canes `BambooTrussLayout.StrutLength` = **0.5 m**:
   baseL `/` (A→B) + baseR `_` (B→D). Two 14 mm canes cannot share node B, so baseR is lashed 16 mm beside
   baseL (`LashDz`); A and D sit over anchor posts on pads. No hang rod (`IncludePole = false`), no floating mount.
-- **Grounded start:** the L-grip starts clamped on anchor **stake S1** (14 mm post on its own pad beside the
-  feed rail; clamp frame `StartBase`, heading −66.2°, chosen by an offline reach + Motus clearance search).
-  The feed cane lies on a narrow **feed rail** (`store-rack`) so the open R jaws straddle it (a cane flat on
-  the ground leaves ~3 mm under the plates; 0.5 mm seat gap because Motus counts resting contact as a hit).
+- **No earth between the anchors:** apart from the A/D anchor pads and posts, nothing on the ground lies
+  strictly between A and D in x (`GroundXExtents`, enforced by a test). All stakes, their pads and the stock
+  stand **outboard of A**; inside the span the robot may only clamp canes fixed at both ends.
+- **Grounded start:** the L-grip starts clamped on **stake S1** at (−0.555, y 0.2025, z 0.049), heading 158.5°
+  (clamp frame `StartBase`; S1/S2/S3 and the feed chosen by an offline reach + Motus clearance search). The
+  feed cane lies along z at x −0.634 on two narrow **pegs** near its ends (`store-peg-1/2`, 0.5 mm seat gap
+  because Motus counts resting contact as a hit), so the closing R jaws have nothing under them.
+- **Members reached:** only **baseL**. baseR (B–D, x ≥ 0) is ≥ 0.46 m from every outboard support, beyond the
+  arm's ≈ 0.42 m grip-to-grip reach, and the D-side supports cannot be reached before a double-fixed cane spans
+  to them (test `BaseR_IsOutOfReach_FromEveryAllowedSupport`). The planner reports this instead of faking it.
 - **Invariant:** at every instant ≥ 1 gripper is clamped on a real fixed object (a stake, or a cane fixed at
   both ends) and is the IK base (`MotionKey.Base / BaseWorld / BaseOn`). The other gripper moves only by
   joint IK (`BambooGripKinematics.SolveGrip`, damped least squares on full FK, 5 constraints: grasp centre on
@@ -88,25 +94,26 @@ Open `http://127.0.0.1:5268/bamboo` (single strut pick/place) or
   A base swap happens at rest: the newly clamped gripper's FK frame becomes the base, then the old one opens.
 - **Phases:** `start:Park` → per member `Transit/Approach/Grasp/Close` (R on the feed cane) → `Lift` (along the
   jaw's own +Y) → `Carry` (RRT-Connect, Motus-checked) → `Align/Lower` → `Open` (cane released exactly where
-  the jaw put it) → `Retreat`; then `walk`: R clamps double-fixed baseL → **base L→R** → L opens and slides
-  up off S1's free top → over and down onto stake S2 → L closes → **base R→L** → R opens, retreats and
-  re-grips baseL further along. The L-grip is a closed clamp (a cane cannot leave it sideways), so it only
-  moves between supports with free ends (stakes); the open-slot R-grip clamps canes.
+  the jaw put it) → `Retreat`; then `walk`: R clamps **stake S2** sideways → **base L→R** → L opens and slides
+  up off S1's free top (top = clamp + 2 cm, slide to top + 1.8 cm: 3.8 cm) → over and down onto **stake S3** →
+  L closes → **base R→L** → R opens, retreats and parks. The L-grip is a closed clamp (a cane cannot leave it
+  sideways), so it only moves between supports with free ends (stakes); the open-slot R-grip clamps sideways.
 - **Collision:** Motus.NET for every link, both grippers, every mount part (now checked against the
   environment, not only self), the held cane, pads, posts, stakes, rail, placed canes (at their real
   released poses) and self. The only allowed touches are a gripper's jaw plates on what it clamps.
   Cylinder meshes are subdivided along their length (~25 mm rings) so the BVH works for long canes.
 - **Scan:** `BambooTrussScan` re-derives everything from the keys (base frame, FK of both grippers, held
   offset from the Close key, released pose from the Open key) and checks every ≤ 0.5° step.
-- **Viewer:** the mount is drawn at its full FK pose; an amber ring + label marks the clamped base
-  ("L clamped on stake-S1", "R clamped on placed-baseL").
+- **Viewer:** the mount is drawn at its full FK pose; an amber ring + label marks **every** clamped gripper
+  ("L clamped on stake-S1 (base)", "L clamped on stake-S3"), both at once when both clamp; a blue ring marks
+  the cane in hand. Hold and world for each segment come from the key that ends it (`CycleIndexAt`).
 - **Play:** `BambooTrussPlayback` dwells 0.35 s at the end of every block (last key of a same-label run),
   keeps time as a double, and never runs past the Motus-verified frontier (time-boxed `StepFor` scan).
 - **WASM:** live planning takes ≈ 7 s desktop but minutes in interpreted WASM and cannot yield inside a
   phase, so the page loads the default plan from `Services/BambooTrussDefaultPlan.json` (embedded; keyed by
   `LayoutFingerprint`, falls back to live planning if stale). A test requires it to be byte-identical to
   live planning; regenerate with `BAMBOO_TRUSS_WRITE_PLAN=1 dotnet test --filter ShippedDefaultPlan`.
-- **Not built:** sep / diags (the arm works from stakes beside the chord; only the lower chord is placed).
+- **Not built:** baseR, sep / diags (out of reach from outboard supports under the no-earth-in-span rule).
 
 ## What still differs from the HTML preview
 

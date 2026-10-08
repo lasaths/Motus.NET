@@ -174,7 +174,7 @@ public sealed class BambooTrussPlanner
         CycleKeys[^1] = (last.Cycle, last.First, Keys.Count - 1);
     }
 
-    bool Fail(string why) { Error = why; return false; }
+    bool Fail(string why) { Error = why; Diag.Add("  fail: " + why); return false; }
 
     // ---------------- motion primitives ----------------
 
@@ -353,12 +353,13 @@ public sealed class BambooTrussPlanner
     /// R-grip (free, L-base) moves to a cane grip: transit → pre-grasp (backed off <see cref="ApproachM"/> along its +Y,
     /// jaws open) → straight-line approach → grasp → close. <paramref name="onName"/> is the clamped object's scene name.
     /// </summary>
-    bool RGrasp(K.GripTarget target, string onName, int axisSign, bool pickActive)
+    bool RGrasp(K.GripTarget target, string onName, int axisSign, bool pickActive, int solutionIndex = -1)
     {
         if (_base != K.Gripper.L) return Fail("R-grasp needs the L-grip as base");
         var open = BambooTrussLayout.JawOpenMm;
         var sols = K.SolveGrip(_base, _baseWorld, target, new[] { _q }, 32, axisSign: axisSign)
             .OrderBy(x => K.JointDist(x, _q)).Take(8).ToList();
+        if (solutionIndex >= 0) sols = sols.Skip(solutionIndex).Take(1).ToList();
         Diag.Add($"{_cycle}: R grasp {onName} ({target.X:F3},{target.Y:F3},{target.Z:F3}): {sols.Count} IK solutions");
         foreach (var qg in sols)
         {
@@ -379,30 +380,43 @@ public sealed class BambooTrussPlanner
             }
             if (!ok) { Diag.Add($"  approach collides near step {bad}: {BambooIcdCell.Describe(ContactsNow(approach[bad], open, _gL, _hold, _lOn, _rOn))} / {BambooIcdCell.Describe(ContactsNow(approach[bad + 1], open, _gL, _hold, _lOn, _rOn))}"); continue; }
             if (!PoseOk(approach[0], open, _gL, _hold, _lOn, _rOn)) continue;
+            // Close: jaws clamp the object (plates may touch it from here on). Checked before anything is emitted so
+            // a colliding close just moves on to the next IK solution. The held offset is captured first, so the
+            // closed pose is checked with the cane in hand.
+            var newROn = onName;
+            var holdAfter = pickActive ? 1 : _hold;
+            var rFrame = K.Free(_base, _baseWorld, qg);
+            var heldBefore = _held;
+            if (pickActive)
+                _held = Transforms.ToFrame(Transforms.Multiply(Transforms.Inverse(ToMotus(rFrame)), _activeRest!));
+            if (!SegOk(qg, qg, open, BambooTrussLayout.JawClosedMm, _gL, _gL, _hold, holdAfter, _lOn, newROn, VerifyStepDeg))
+            {
+                Diag.Add($"  close on {onName} collides: {BambooIcdCell.Describe(ContactsNow(qg, BambooTrussLayout.JawClosedMm, _gL, holdAfter, _lOn, newROn))}");
+                _held = heldBefore;
+                continue;
+            }
+            var heldAfter = _held;
+            _held = heldBefore;
             // Open the jaws where we are (if closed) then transit to the pre-grasp.
+            var k0 = Keys.Count; var q0 = _q; var gR0 = _gR;
             if (Math.Abs(_gR - open) > 1e-9)
             {
                 if (!SegOk(_q, _q, _gR, open, _gL, _gL, _hold, _hold, _lOn, _rOn, VerifyStepDeg)) continue;
                 Emit("Open", _q, gR: open);
             }
             var path = TransitPath(_q, approach[0]);
-            if (path is null) { Diag.Add("  no transit to pre-grasp"); continue; }
+            if (path is null)
+            {
+                Diag.Add("  no transit to pre-grasp");
+                Keys.RemoveRange(k0, Keys.Count - k0); _q = q0; _gR = gR0;
+                continue;
+            }
             foreach (var v in path) Emit("Transit", v);
-            Emit("Approach", approach[0]);
+            // A key labels the motion that ends at it: reaching the pre-grasp is still the transit.
+            Emit("Transit", approach[0]);
             for (var i = 1; i + 1 < approach.Count; i++) Emit("Approach", approach[i]);
             Emit("Grasp", qg);
-            // Close: jaws clamp the cane (plates may touch it from here on).
-            var newROn = onName;
-            var holdAfter = pickActive ? 1 : _hold;
-            var rFrame = K.Free(_base, _baseWorld, qg);
-            // The held offset is captured before the close is checked, so the closed pose checks the cane in hand.
-            if (pickActive)
-                _held = Transforms.ToFrame(Transforms.Multiply(Transforms.Inverse(ToMotus(rFrame)), _activeRest!));
-            if (!SegOk(qg, qg, open, BambooTrussLayout.JawClosedMm, _gL, _gL, _hold, holdAfter, _lOn, newROn, VerifyStepDeg))
-            {
-                if (pickActive) _held = null;
-                return Fail($"{_cycle}: R close on {onName} collides: {BambooIcdCell.Describe(ContactsNow(qg, BambooTrussLayout.JawClosedMm, _gL, holdAfter, _lOn, newROn))}");
-            }
+            _held = heldAfter;
             RecordGrip("Close", "R", target, rFrame);
             _rOn = newROn;
             Emit("Close", qg, gR: BambooTrussLayout.JawClosedMm, hold: holdAfter);
@@ -519,7 +533,8 @@ public sealed class BambooTrussPlanner
                     var path = TransitPath(_q, down[0]);
                     if (path is null) { Diag.Add("    no carry path"); continue; }
                     foreach (var v in path) Emit("Carry", v);
-                    Emit("Align", down[0]);
+                    // The carry ends aligned above the design line (pre-place).
+                    Emit("Carry", down[0]);
                     for (var i = 1; i + 1 < down.Count; i++) Emit("Lower", down[i]);
                     Emit("Lower", qp);
                     // Release: jaws open, cane stays exactly where the jaw put it.
@@ -559,59 +574,52 @@ public sealed class BambooTrussPlanner
     }
 
     /// <summary>
-    /// Walk with base swaps: R clamps the double-fixed chord, base → R, L slides up off S1, over to S2 and down onto it,
-    /// L clamps, base → L, R re-grips the chord further along.
+    /// Walk with base swaps, entirely on outboard ground (no earth inside the span): R clamps stake S2 sideways,
+    /// base → R, L slides up off S1's free top, transits over S3 and slides down onto it, L clamps, base → L,
+    /// R opens, backs off S2 and parks.
     /// </summary>
     public bool Walk()
     {
         BeginCycle("walk");
         var startKeys = Keys.Count;
         var snap = Snapshot();
-        var chordGrips = new List<K.GripTarget>();
-        var order = new[] { 0.0, -0.1, 0.1, -0.2, 0.2, -0.05, 0.05, -0.15, 0.15 };
-        foreach (var (id, s) in order.Select(x => ("baseL", x)).Concat(order.Select(x => ("baseR", x))))
-        {
-            var m = BambooTrussLayout.Members.First(x => x.Id == id);
-            chordGrips.Add(K.OnStrut(PlacedPlacement(m), s, "placed-" + id));
-        }
-        foreach (var g1 in chordGrips)
+        var s2 = BambooTrussLayout.S2; var s1 = BambooTrussLayout.S1; var s3 = BambooTrussLayout.S3;
+        for (var idx = 0; idx < 8; idx++)
         {
             Restore(snap, startKeys);
-            if (!RGrasp(g1, g1.On, 0, pickActive: false)) continue;
-            if (!SwapTo(K.Gripper.R, g1.On)) continue;
-            if (!LSlide(BambooTrussLayout.S1, up: true)) continue;
-            if (!LOnto(BambooTrussLayout.S2)) continue;
-            if (!SwapTo(K.Gripper.L, BambooTrussLayout.S2.Name)) continue;
-            if (!RRetreat(g1)) continue;
-            // Re-grip the chord further along (toward A / D, away from g1).
-            var regripped = false;
-            var snap2 = Snapshot(); var keys2 = Keys.Count;
-            foreach (var g2 in chordGrips.Where(g => Dist(g, g1) > 0.05).OrderByDescending(g => Dist(g, g1)))
-            {
-                Restore(snap2, keys2);
-                if (RGrasp(g2, g2.On, 0, pickActive: false)) { regripped = true; break; }
-            }
-            if (!regripped) { Restore(snap2, keys2); Notes.Add("walk: R re-grip unreachable after the swap — R parks on the chord grip"); }
-            Notes.Add($"walk: R chord grip {g1.On} at ({g1.X:F3},{g1.Y:F3},{g1.Z:F3})");
+            if (!RGrasp(s2.Grip, s2.Name, 0, pickActive: false, solutionIndex: idx)) continue;
+            if (!SwapTo(K.Gripper.R, s2.Name)) continue;
+            if (!LSlide(s1, up: true)) continue;
+            if (!LOnto(s3)) continue;
+            if (!SwapTo(K.Gripper.L, s3.Name)) continue;
+            if (!RRetreat(s2.Grip)) continue;
+            if (!RPark()) continue;
+            Notes.Add($"walk: R clamps {s2.Name} at y={s2.ClampY:F3}; L {s1.Name} → {s3.Name}; R parks");
             return true;
         }
         Restore(snap, startKeys);
-        return Fail(string.IsNullOrEmpty(Error) ? "walk: no chord grip allows the S1→S2 swap" : "walk: " + Error);
+        return Fail(string.IsNullOrEmpty(Error) ? "walk: no Motus-clear S1→S3 swap" : "walk: " + Error);
     }
 
-    static double Dist(K.GripTarget a, K.GripTarget b) =>
-        Math.Sqrt((a.X - b.X) * (a.X - b.X) + (a.Y - b.Y) * (a.Y - b.Y) + (a.Z - b.Z) * (a.Z - b.Z));
-
-    /// <summary>Placed member as a StrutPlacement-equivalent grip line (uses the actual released pose).</summary>
-    BambooIcdCell.StrutPlacement PlacedPlacement(BambooTrussLayout.MemberDef m)
+    /// <summary>R-grip (open, L-base) transits to a Motus-clear park posture well away from where it is.</summary>
+    bool RPark()
     {
-        var w = _placed.First(p => p.Name == "placed-" + m.Id).World;
-        // Motus → viewer: (x, y, z)_m → viewer (x, z, −y); axis likewise.
-        var v = K.Mul(Transforms.FromAxisAngle(1, 0, 0, -Math.PI / 2), w);
-        var ax = (v[2], v[6], v[10]);
-        var pitch = Math.Asin(Math.Clamp(-ax.Item2, -1, 1)) * 180 / Math.PI;
-        var yaw = Math.Atan2(ax.Item1, ax.Item3) * 180 / Math.PI;
-        return new BambooIcdCell.StrutPlacement(v[3], v[7], v[11], pitch, yaw);
+        var parks = new List<double[]>
+        {
+            new double[] { 0, -30, 60, -30, 0 }, new double[] { 0, 30, -60, 30, 0 }, new double[] { 0, 0, 0, 0, 0 },
+            new double[] { 90, -30, 60, -30, 0 }, new double[] { -90, -30, 60, -30, 0 }, new double[] { 0, -60, 120, -60, 0 }
+        };
+        for (var i = 0; i < 40; i++) parks.Add(Perturb(new double[5], 120));
+        foreach (var p in parks.Where(p => K.JointDist(p, _q) > 15).OrderBy(p => K.JointDist(p, _q)))
+        {
+            if (!PoseOk(p, _gR, _gL, _hold, _lOn, _rOn)) continue;
+            var path = TransitPath(_q, p);
+            if (path is null) continue;
+            foreach (var v in path) Emit("R:Park", v);
+            Emit("R:Park", p);
+            return true;
+        }
+        return Fail("walk: no Motus-clear R park after the swap");
     }
 
     /// <summary>
@@ -648,7 +656,7 @@ public sealed class BambooTrussPlanner
     /// <summary>L-grip slides along a stake (R-base): up and off its free top, or (up = false) down onto it.</summary>
     bool LSlide(BambooTrussLayout.Stake stake, bool up)
     {
-        var y0 = stake.ClampY; var y1 = stake.Top + 0.02;
+        var y0 = stake.ClampY; var y1 = stake.Top + BambooTrussLayout.StakeSlideClear;
         var lFrame = K.Free(_base, _baseWorld, _q);
         var sign = lFrame[6] >= 0 ? 1 : -1;
         var n = (int)Math.Ceiling((y1 - y0) / CartStepM);
@@ -673,7 +681,7 @@ public sealed class BambooTrussPlanner
     /// <summary>L-grip (R-base) transits above a stake's free top, slides down to its clamp height and closes.</summary>
     bool LOnto(BambooTrussLayout.Stake stake)
     {
-        var above = stake.At(stake.Top + 0.02);
+        var above = stake.At(stake.Top + BambooTrussLayout.StakeSlideClear);
         var sols = K.SolveGrip(_base, _baseWorld, above, new[] { _q }, 32)
             .OrderBy(x => K.JointDist(x, _q)).Take(8).ToList();
         var snap = Snapshot(); var keys = Keys.Count;

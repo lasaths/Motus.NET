@@ -21,7 +21,7 @@
   var scene, camera, renderer, view;
   var look, theta, phi, dist;
   var j1, j2, j3, j4, j5, jaw, mount;
-  var anchorGroup = null, anchorLabel = null, anchorText = '';
+  var anchorGroup = null, anchorMarkers = [];
   var lNeg, lPos, rNeg, rPos, strut;
   var strutPool = [];
   var footprintRoot = null;
@@ -335,7 +335,15 @@
       });
     }
 
-    // /bamboo-truss fixtures: anchor posts, stakes (L-grip anchors) and the feed rail — exactly the Motus objects.
+    // /bamboo-truss fixtures: anchor posts, stakes (L-grip anchors) and the feed pegs — exactly the Motus objects.
+    if ((cell.posts || []).length) {
+      // Frame the whole site: the outboard stakes / stock beyond A as well as the A–D span.
+      var minX = Math.min.apply(null, cell.posts.map(function (p) { return p.x; }));
+      var maxX = Math.max.apply(null, cell.posts.map(function (p) { return p.x; }));
+      look.set((minX + maxX) / 2 - 0.12, 0.12, 0.0);
+      dist = Math.max(1.12, (maxX - minX) * 1.5);
+      updateCamera();
+    }
     (cell.posts || []).forEach(function (post) {
       var m = new THREE.Mesh(new THREE.CylinderGeometry(post.radius, post.radius, post.top, 20), mats.node);
       m.position.set(post.x, post.top / 2, post.z);
@@ -348,14 +356,19 @@
       scene.add(m);
       registerCollider(r.name, [m]);
     });
-    // Anchored-base marker: ring around the clamped gripper's slot axis + label naming what it is clamped on.
+    // Clamp markers: one ring around each clamped gripper's slot axis + a label naming what it is clamped on
+    // (pool of two: the base and, when it is also clamped, the other gripper).
     anchorGroup = new THREE.Group();
-    var anchorRing = new THREE.Mesh(new THREE.TorusGeometry(0.034, 0.0035, 10, 48),
-      new THREE.MeshBasicMaterial({ color: 0xffb020, depthTest: false, transparent: true, opacity: 0.9 }));
-    anchorRing.renderOrder = 4;
-    anchorGroup.add(anchorRing);
-    anchorGroup.visible = false;
     scene.add(anchorGroup);
+    anchorMarkers = [];
+    for (var ai = 0; ai < 2; ai++) {
+      var ring = new THREE.Mesh(new THREE.TorusGeometry(0.034, 0.0035, 10, 48),
+        new THREE.MeshBasicMaterial({ color: 0xffb020, depthTest: false, transparent: true, opacity: 0.9 }));
+      ring.renderOrder = 4;
+      ring.visible = false;
+      anchorGroup.add(ring);
+      anchorMarkers.push({ ring: ring, label: null, text: '' });
+    }
 
     mount = new THREE.Group();
     mount.position.set(0, POLE_Y, 0);
@@ -462,7 +475,7 @@
 
   /**
    * Apply pose from Motus.NET / Blazor.
-   * payload: { q:[5], mount?:{p:[3],q:[4]}, anchor?:{gripper,on,p:[3],axis:[3]}, hang?:{x,y,z}, gL, gR, strut:[...], struts?:[{name,pose:[7]}], axesVisible, hitParts?:[string] }
+   * payload: { q:[5], mount?:{p:[3],q:[4]}, anchors?:[{gripper,on,isBase,held,p:[3],axis:[3]}], hang?:{x,y,z}, gL, gR, strut:[...], struts?:[{name,pose:[7]}], axesVisible, hitParts?:[string] }
    * hitParts are Motus contact body names (URDF collision names, 'pole', 'strut', 'ground', mount parts).
    */
   window.setBambooPose = function (payloadJson) {
@@ -474,26 +487,32 @@
       mount.quaternion.set(p.mount.q[0], p.mount.q[1], p.mount.q[2], p.mount.q[3]);
     } else if (p.hang && mount && typeof p.hang.x === 'number') mount.position.set(p.hang.x, p.hang.y, p.hang.z);
     if (anchorGroup) {
-      if (p.anchor && p.anchor.p) {
-        anchorGroup.visible = true;
-        anchorGroup.position.set(p.anchor.p[0], p.anchor.p[1], p.anchor.p[2]);
-        // Torus lies in its XY plane: turn its normal (+Z) onto the clamped slot axis.
-        var ax = new THREE.Vector3(p.anchor.axis[0], p.anchor.axis[1], p.anchor.axis[2]).normalize();
-        anchorGroup.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), ax);
-        var text = p.anchor.gripper + ' clamped on ' + p.anchor.on;
-        if (text !== anchorText) {
-          if (anchorLabel) scene.remove(anchorLabel);
-          anchorLabel = makePlaneLabel(text);
-          anchorLabel.scale.set(0.16, 0.04, 1);
-          scene.add(anchorLabel);
-          anchorText = text;
+      var list = p.anchors || (p.anchor ? [p.anchor] : []);
+      anchorMarkers.forEach(function (m, idx) {
+        var a = list[idx];
+        if (!a || !a.p) {
+          m.ring.visible = false;
+          if (m.label) m.label.visible = false;
+          return;
         }
-        anchorLabel.position.set(p.anchor.p[0], p.anchor.p[1] + 0.06, p.anchor.p[2]);
-        anchorLabel.visible = true;
-      } else {
-        anchorGroup.visible = false;
-        if (anchorLabel) anchorLabel.visible = false;
-      }
+        m.ring.visible = true;
+        m.ring.position.set(a.p[0], a.p[1], a.p[2]);
+        // Torus lies in its XY plane: turn its normal (+Z) onto the clamped slot axis.
+        var ax = new THREE.Vector3(a.axis[0], a.axis[1], a.axis[2]).normalize();
+        m.ring.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), ax);
+        m.ring.material.color.setHex(a.held ? 0x40c0ff : 0xffb020);
+        var text = a.held ? a.gripper + ' holds cane' : a.gripper + ' clamped on ' + a.on + (a.isBase ? ' (base)' : '');
+        if (text !== m.text) {
+          if (m.label) scene.remove(m.label);
+          m.label = makePlaneLabel(text);
+          m.label.scale.set(0.2, 0.04, 1);
+          scene.add(m.label);
+          m.text = text;
+        }
+        // Stagger the labels so two clamps side by side stay readable.
+        m.label.position.set(a.p[0], a.p[1] + 0.06 + idx * 0.045, a.p[2]);
+        m.label.visible = true;
+      });
     }
     if (p.q && p.q.length >= 5) applyJoints(p.q);
     if (typeof p.gL === 'number') setOpening(lNeg, lPos, p.gL);

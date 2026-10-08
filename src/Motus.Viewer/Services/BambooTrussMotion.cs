@@ -131,7 +131,7 @@ public static class BambooTrussMotion
     // ---------------- build-time plan cache (WASM) ----------------
 
     /// <summary>Bump when planner behaviour changes (invalidates <see cref="DefaultPlanResource"/>).</summary>
-    public const string PlannerVersion = "grounded-ik-1";
+    public const string PlannerVersion = "grounded-ik-2-outboard";
     public const string DefaultPlanResource = "Motus.Viewer.Services.BambooTrussDefaultPlan.json";
 
     /// <summary>Everything the planner's output depends on (layout, tolerances, version), invariant-formatted.</summary>
@@ -145,13 +145,14 @@ public static class BambooTrussMotion
             string St(BambooTrussLayout.Stake t) => $"{t.Name},{F(t.X)},{F(t.Z)},{F(t.ClampY)},{F(t.Top)},{F(t.HeadingDeg)}";
             var parts = new List<string>
             {
-                PlannerVersion, F(BambooTrussLayout.StrutLength), St(BambooTrussLayout.S1), St(BambooTrussLayout.S2),
+                PlannerVersion, F(BambooTrussLayout.StrutLength), St(BambooTrussLayout.S1), St(BambooTrussLayout.S2), St(BambooTrussLayout.S3),
                 P(BambooTrussLayout.Store), F(BambooTrussLayout.RackTop), F(K.GripPosTolM), F(K.GripAxisTolDeg),
                 F(BambooTrussLayout.JawOpenMm), F(BambooTrussLayout.LJawOpenMm), F(BambooTrussLayout.JawClosedMm)
             };
             parts.AddRange(BambooTrussLayout.Members.Select(m => $"{m.Id}:{P(m.Place)}"));
             parts.AddRange(BambooTrussLayout.Pads.Select(p => $"{p.Name}:{F(p.X)},{F(p.Z)},{F(p.HalfX)},{F(p.HalfZ)}"));
             parts.AddRange(BambooTrussLayout.Posts.Select(p => $"{p.Name}:{F(p.X)},{F(p.Z)},{F(p.Top)},{F(p.Radius)}"));
+            parts.AddRange(BambooTrussLayout.Racks.Select(r => $"{r.Name}:{F(r.X)},{F(r.Z)},{F(r.HalfX)},{F(r.HalfZ)},{F(r.Top)}"));
             return string.Join(";", parts);
         }
     }
@@ -237,6 +238,11 @@ public static class BambooTrussMotion
             var member = BambooTrussLayout.Members.FirstOrDefault(m => m.Id == memberId);
             if (member is null) { notes.Add($"{memberId}: not a truss member — skipped"); break; }
             if (built.Contains(memberId)) { notes.Add($"{memberId}: already built — skipped"); continue; }
+            if (BambooTrussLayout.UnreachableMembers.TryGetValue(memberId, out var why))
+            {
+                notes.Add($"{memberId}: not built — {why}");
+                break;
+            }
             await Yield(memberId);
             if (!planner.BuildMember(member))
             {
@@ -245,12 +251,9 @@ public static class BambooTrussMotion
             }
             built.Add(memberId);
         }
-        if (built.Contains("baseL") && built.Contains("baseR"))
-        {
-            await Yield("walk");
-            if (!planner.Walk()) notes.Add($"walk: not planned — {planner.Error}");
-        }
-        else notes.Add("walk: skipped (chord not double-fixed)");
+        // The walk only uses outboard stakes (S2 for R, S3 for L), so it does not depend on which members exist.
+        await Yield("walk");
+        if (!planner.Walk()) notes.Add($"walk: not planned — {planner.Error}");
         planner.StampTimes();
         cell.SetMountViewer(BambooTrussLayout.StartBase);
 
@@ -274,7 +277,11 @@ public static class BambooTrussMotion
         };
     }
 
-    /// <summary>Full interpolated state at t (joints, both jaw openings, hold) plus the index of the key ending the segment.</summary>
+    /// <summary>
+    /// Full interpolated state at t (joints, both jaw openings, hold) plus the index of the key ending the segment.
+    /// Key k's hold and label describe the segment that ends at k (the motion *to* k), so a block's label covers
+    /// exactly its own motion — e.g. "L:Slide up" ends where the slide ends, the next transit is "L:Transit".
+    /// </summary>
     public readonly record struct State(double[] Q, double GR, double GL, int Hold, string Label, int SegEnd);
 
     public static State SampleState(IReadOnlyList<BambooIcdMotion.MotionKey> keys, double t)
@@ -295,7 +302,21 @@ public static class BambooTrussMotion
         var q = new double[5];
         for (var k = 0; k < 5; k++) q[k] = a.Q[k] + (b.Q[k] - a.Q[k]) * e;
         return new State(q, a.GR + (b.GR - a.GR) * e, a.GL + (b.GL - a.GL) * e,
-            u >= 1 ? b.Hold : a.Hold, e < 0.5 ? a.Label : b.Label, i + 1);
+            b.Hold, b.Label, i + 1);
+    }
+
+    /// <summary>
+    /// Cycle owning the segment that is playing at t: the cycle of the key that ends it (<see cref="State.SegEnd"/>).
+    /// Key k's state (hold, base, clamps) applies to the segment ending at k, so world and hold always come from the
+    /// same cycle — including the hand-over segment from one member's last key into the next member's first key.
+    /// </summary>
+    public static int CycleIndexAt(IReadOnlyList<BambooIcdMotion.MotionKey> keys, IReadOnlyList<CycleBound> cycles, double t)
+    {
+        if (cycles.Count == 0) return 0;
+        var k = SampleState(keys, t).SegEnd;
+        for (var i = 0; i < cycles.Count; i++)
+            if (k >= cycles[i].FirstKey && k <= cycles[i].LastKey) return i;
+        return k < cycles[0].FirstKey ? 0 : cycles.Count - 1;
     }
 
     public static string? MemberIdAt(IReadOnlyList<CycleBound> cycles, double t)
