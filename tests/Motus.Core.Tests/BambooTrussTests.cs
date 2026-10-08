@@ -170,7 +170,9 @@ public class BambooTrussTests
         Assert.Equal(new[] { "baseL", "baseR", "diagL" }, built.Built.ToArray());
         Assert.Contains(built.Notes, n => n.StartsWith("sep: not built", StringComparison.Ordinal));
         Assert.Contains(built.Notes, n => n.StartsWith("diagR: not built", StringComparison.Ordinal));
-        Assert.Equal(new[] { "start", "walk", "baseL", "baseR", "diagL" }, built.Cycles.Select(c => c.MemberId).ToArray());
+        // With the L-grip opened on one side the arm brachiates onto the double-fixed chord (baseL); the stock is out
+        // of R's reach from there, so sep/diagR stay reported.
+        Assert.Equal(new[] { "start", "walk", "baseL", "baseR", "diagL", "brachiate" }, built.Cycles.Select(c => c.MemberId).ToArray());
         Assert.Equal(0, built.Cycles[0].T0, 9);
         Assert.Equal(1, built.Cycles[^1].T1, 9);
         var first = built.Keys[0];
@@ -181,9 +183,11 @@ public class BambooTrussTests
         for (var i = 1; i < built.Keys.Count; i++)
             if (built.Keys[i].Base != built.Keys[i - 1].Base)
                 swaps.Add((built.Keys[i - 1].Base!, built.Keys[i].Base!, built.Keys[i].BaseOn!));
-        Assert.Equal(2, swaps.Count);
+        Assert.Equal(4, swaps.Count);
         Assert.Equal(("L", "R", "stake-S3"), swaps[0]);
         Assert.Equal(("R", "L", "stake-S3"), swaps[1]);
+        Assert.Equal(("L", "R", "stake-S3"), swaps[2]);
+        Assert.Equal(("R", "L", "placed-baseL"), swaps[3]);
         // The L clamp leaves S1 only as far as it must: up to its free top + the slide clearance.
         var slide = built.Keys.Where(k => k.Label == "walk:L:Slide up " + BambooTrussLayout.S1.Name).ToList();
         Assert.NotEmpty(slide);
@@ -210,7 +214,7 @@ public class BambooTrussTests
             Assert.Contains("Open", built.Keys[i + 1].Label); // the old base opens on the next key
             n++;
         }
-        Assert.Equal(2, n);
+        Assert.Equal(4, n); // walk L→R, R→L; brachiate L→R, R→L
     }
 
     /// <summary>Each cane is placed only when at least one of its ends is already fixed (posts or a triangulated node).</summary>

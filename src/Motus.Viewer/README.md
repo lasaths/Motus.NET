@@ -119,10 +119,11 @@ Open `http://127.0.0.1:5268/bamboo` (single strut pick/place) or
 - **Grounded start:** the L-grip starts clamped on **stake S1** (−0.295, clamp y 0.18, z 0.06, heading 90°);
   stake **S3** stands at (−0.295, y 0.21, z −0.04, heading 70°). The stock cane lies flat along z at
   (−0.386, 0.0165) on two narrow **pegs** (`store-peg-1/2`, 0.5 mm seat gap), just outboard of A.
-- **Members built:** **baseL, baseR, diagL** — the lower chord is complete and double-fixed (B fixed). sep and
-  diagR are reported by the planner (no Motus-clear grasp/place from S3). Brachiating onto the chord cannot
-  help: the L-grip is a closed clamp that only gets on/off free stake or post tops, and none may stand inside
-  the span, so no better L base exists for the remaining members.
+- **Members built:** **baseL, baseR, diagL** — the lower chord is complete and double-fixed (B fixed). With the
+  L-grip opened on one side (see *Deviation from the ICD URDF*) the arm then **brachiates onto the chord**: L side-clamps
+  baseL from its open side. sep and diagR are still reported: from every Motus-clear L clamp on the chord (24 of
+  144 options — cane × R anchor × clamp point × L roll) R has no IK solution onto the stock, which lies outboard of A;
+  baseR is out of R's reach from S3, and hand-over-hand further along the chord only moves away from the stock.
 - **Invariant:** at every instant ≥ 1 gripper is clamped on a real fixed object (a stake, or a cane fixed at
   both ends) and is the IK base (`MotionKey.Base / BaseWorld / BaseOn`). The other gripper moves only by
   joint IK (`BambooGripKinematics.SolveGrip`, damped least squares on full FK, 5 constraints: grasp centre on
@@ -132,8 +133,12 @@ Open `http://127.0.0.1:5268/bamboo` (single strut pick/place) or
   **`swap base L→R`** (own key, at rest) → `L:Open` → `L:Slide up stake-S1` (top + 1.8 cm only) →
   `L:Above stake-S3` → `L:Slide down stake-S3` → `L:Close stake-S3` → **`swap base R→L`** → `R:Open` →
   `Retreat` → `R:Park`; then per member `Transit/Approach/Grasp/Close` (R on the stock) → `Lift` → `Carry`
-  (RRT-Connect, Motus-checked) → `Lower` → `Open` (cane released exactly on its member) → `Retreat`.
-  The L-grip is a closed clamp (moves only between free stake tops); the open-slot R-grip clamps sideways.
+  (RRT-Connect, Motus-checked, up to 3 attempts) → `Lower` → `Open` (cane released exactly on its member) → `Retreat`;
+  then `brachiate`: R clamps stake S3 (y 0.13) → **`swap base L→R`** → `L:Open` → `L:Slide up stake-S3` →
+  `L:Transit` → `L:Approach placed-baseL` (side approach into the open +y slot) → `L:Close placed-baseL` (0.12 m
+  from baseL's centre, A end) → **`swap base R→L`** → `R:Open` → `Retreat` → `R:Park`. Only canes fixed at both ends
+  are side-clamped. The brachiation option is chosen goal-driven (planner checkpoint per option, judged by the
+  members R can then place; the best one is replayed).
 - **Collision:** Motus.NET for every link, both grippers, every mount part (now checked against the
   environment, not only self), the held cane, pads, posts, stakes, rail, placed canes (at their real
   released poses) and self. The only allowed touches are a gripper's jaw plates on what it clamps.
