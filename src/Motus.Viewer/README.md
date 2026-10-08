@@ -126,7 +126,7 @@ Open `http://127.0.0.1:5268/bamboo` (single strut pick/place) or
   keeps time as a double, and never runs past the Motus-verified frontier (time-boxed `StepFor` scan).
 - **WASM:** live planning takes ≈ 7 s desktop but minutes in interpreted WASM and cannot yield inside a
   phase, so the page loads the default plan from `Services/BambooTrussDefaultPlan.json` (embedded; keyed by
-  `LayoutFingerprint`, falls back to live planning if stale). A test requires it to be byte-identical to
+  `LayoutFingerprint` with numbers rounded to 1e-6 — WASM and desktop `Math` differ in the last ulp — falls back to live planning if stale; the reason is logged to the browser console as `[bamboo-truss] shipped plan not used — …`). A test requires it to be byte-identical to
   live planning; regenerate with `BAMBOO_TRUSS_WRITE_PLAN=1 dotnet test --filter ShippedDefaultPlan`.
 - **Not built:** sep and diagR (no Motus-clear grasp/place from any allowed support); reported, never faked.
 

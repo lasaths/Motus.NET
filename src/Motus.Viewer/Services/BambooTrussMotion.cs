@@ -139,8 +139,7 @@ public static class BambooTrussMotion
     {
         get
         {
-            var ci = System.Globalization.CultureInfo.InvariantCulture;
-            string F(double v) => v.ToString("R", ci);
+            static string F(double v) => FingerprintNumber(v);
             string P(BambooIcdCell.StrutPlacement p) => $"{F(p.X)},{F(p.Y)},{F(p.Z)},{F(p.PitchDeg)},{F(p.YawDeg)}";
             string St(BambooTrussLayout.Stake t) => $"{t.Name},{F(t.X)},{F(t.Z)},{F(t.ClampY)},{F(t.Top)},{F(t.HeadingDeg)}";
             var parts = new List<string>
@@ -177,21 +176,54 @@ public static class BambooTrussMotion
         Built = b.Built, MotusChecks = b.MotusChecks
     });
 
+    /// <summary>
+    /// A number as it enters <see cref="LayoutFingerprint"/>: rounded to 1e-6 (µm / µdeg), invariant culture, no
+    /// negative zero. Derived values (member pitch/yaw from Atan2/Asin, stake tops from sums) differ in the last
+    /// ulp between desktop .NET and Blazor WASM (−29.999999999999996 vs −29.999999999999993), so a round-trip
+    /// ("R") fingerprint never matched in the browser and the page always planned live.
+    /// </summary>
+    public static string FingerprintNumber(double v)
+    {
+        var r = Math.Round(v, 6, MidpointRounding.AwayFromZero);
+        if (r == 0) r = 0; // −0 → 0
+        return r.ToString("0.######", System.Globalization.CultureInfo.InvariantCulture);
+    }
+
+    /// <summary>Why the last <see cref="LoadCachedDefaultPlan"/> returned null (or "hit").</summary>
+    public static string CacheStatus { get; private set; } = "not tried";
+
     /// <summary>The default plan shipped with the app, if it matches the current layout/planner (else null → plan live).</summary>
     public static TrussBuild? LoadCachedDefaultPlan()
     {
         try
         {
             using var stream = typeof(BambooTrussMotion).Assembly.GetManifestResourceStream(DefaultPlanResource);
-            if (stream is null) return null;
+            if (stream is null) return Miss("resource missing");
             var c = System.Text.Json.JsonSerializer.Deserialize<PlanCache>(stream);
-            if (c is null || c.Fingerprint != LayoutFingerprint || c.Keys.Count == 0) return null;
+            if (c is null) return Miss("deserialised null");
+            if (c.Keys.Count == 0) return Miss("no keys");
+            var fp = LayoutFingerprint;
+            if (c.Fingerprint != fp)
+            {
+                var i = 0;
+                while (i < Math.Min(fp.Length, c.Fingerprint.Length) && fp[i] == c.Fingerprint[i]) i++;
+                return Miss($"fingerprint differs at {i}: shipped '…{Snip(c.Fingerprint, i)}' vs live '…{Snip(fp, i)}'");
+            }
             var notes = c.Notes.ToList();
             notes.Add("plan: shipped build-time plan for the default tasks (byte-identical to live planning — enforced by a test); Play still Motus-scans it live");
+            CacheStatus = "hit";
             return new TrussBuild { Keys = c.Keys, Cycles = c.Cycles, Grips = c.Grips, Notes = notes, Built = c.Built, MotusChecks = c.MotusChecks };
         }
-        catch
+        catch (Exception ex)
         {
+            return Miss($"{ex.GetType().Name}: {ex.Message}");
+        }
+
+        static string Snip(string s, int i) => s.Substring(Math.Max(0, i - 20), Math.Min(60, s.Length - Math.Max(0, i - 20)));
+        static TrussBuild? Miss(string why)
+        {
+            CacheStatus = "miss: " + why;
+            Console.WriteLine("[bamboo-truss] shipped plan not used — " + why);
             return null;
         }
     }
@@ -213,6 +245,7 @@ public static class BambooTrussMotion
         var pairs = Pairs(tasks);
         if (pairs.Count == 0)
             return new TrussBuild { Error = "No pick/place pairs (object-matched).", Tasks = tasks.ToList() };
+        if (useCache && !IsDefaultMemberOrder(tasks)) Console.WriteLine("[bamboo-truss] shipped plan not used — tasks are not the default member order");
         if (useCache && IsDefaultMemberOrder(tasks) && LoadCachedDefaultPlan() is { } cached)
         {
             cached.Tasks = tasks.ToList();

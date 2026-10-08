@@ -596,6 +596,36 @@ public class BambooTrussTests
         Assert.Contains(page.Notes, n => n.StartsWith("plan: shipped", StringComparison.Ordinal));
     }
 
+    /// <summary>
+    /// The shipped-plan key must not depend on last-ulp floating-point differences between desktop .NET and Blazor
+    /// WASM (at e241fad the browser computed a member pitch of −29.999999999999993 vs −29.999999999999996 here, the
+    /// fingerprint missed and the page planned live for minutes).
+    /// </summary>
+    [Fact]
+    public void LayoutFingerprint_IsRobustToUlpDifferences()
+    {
+        Assert.Equal(BambooTrussMotion.FingerprintNumber(-29.999999999999996), BambooTrussMotion.FingerprintNumber(-29.999999999999993));
+        Assert.Equal("-30", BambooTrussMotion.FingerprintNumber(-29.999999999999993));
+        Assert.Equal(BambooTrussMotion.FingerprintNumber(0.19999999999999998), BambooTrussMotion.FingerprintNumber(0.2));
+        Assert.Equal("0", BambooTrussMotion.FingerprintNumber(-1e-12));
+        Assert.Equal("-0.3857", BambooTrussMotion.FingerprintNumber(-0.3857));
+        // Every number the current layout puts into the key is unchanged by a few-ulp perturbation.
+        foreach (var v in new[] { BambooTrussLayout.StrutLength, BambooTrussLayout.HalfSpan, BambooTrussLayout.Store.PitchDeg,
+                     BambooTrussLayout.Store.YawDeg }.Concat(BambooTrussLayout.Members.SelectMany(m => new[] { m.Place.X, m.Place.Y, m.Place.Z, m.Place.PitchDeg, m.Place.YawDeg }))
+                     .Concat(BambooTrussLayout.Stakes.SelectMany(t => new[] { t.X, t.Z, t.ClampY, t.Top, t.HeadingDeg })))
+        {
+            var up = v; var down = v;
+            for (var k = 0; k < 4; k++) { up = Math.BitIncrement(up); down = Math.BitDecrement(down); }
+            Assert.Equal(BambooTrussMotion.FingerprintNumber(v), BambooTrussMotion.FingerprintNumber(up));
+            Assert.Equal(BambooTrussMotion.FingerprintNumber(v), BambooTrussMotion.FingerprintNumber(down));
+        }
+        // A real layout change (≥ 1 µm) still changes it.
+        Assert.NotEqual(BambooTrussMotion.FingerprintNumber(-0.3857), BambooTrussMotion.FingerprintNumber(-0.385701));
+        // No round-trip-formatted doubles left in the key.
+        Assert.DoesNotContain("99999999", BambooTrussMotion.LayoutFingerprint);
+        Assert.DoesNotContain("00000001", BambooTrussMotion.LayoutFingerprint);
+    }
+
     // ---------------- playback ----------------
 
     private static List<string> PlannedPhases(BambooTrussMotion.TrussBuild built) => built.Keys.Select(k => k.Label).ToList();
