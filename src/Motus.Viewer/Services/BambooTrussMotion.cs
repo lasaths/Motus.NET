@@ -125,18 +125,96 @@ public static class BambooTrussMotion
         return pairs;
     }
 
-    public static TrussBuild Build(IReadOnlyList<BambooIcdMotion.TaskEdit>? tasks = null) =>
-        BuildAsync(tasks).GetAwaiter().GetResult();
+    public static TrussBuild Build(IReadOnlyList<BambooIcdMotion.TaskEdit>? tasks = null, bool useCache = false) =>
+        BuildAsync(tasks, null, useCache).GetAwaiter().GetResult();
 
-    /// <summary>Plan phase by phase, awaiting <paramref name="onMember"/> between phases so Blazor WASM can paint.</summary>
+    // ---------------- build-time plan cache (WASM) ----------------
+
+    /// <summary>Bump when planner behaviour changes (invalidates <see cref="DefaultPlanResource"/>).</summary>
+    public const string PlannerVersion = "grounded-ik-1";
+    public const string DefaultPlanResource = "Motus.Viewer.Services.BambooTrussDefaultPlan.json";
+
+    /// <summary>Everything the planner's output depends on (layout, tolerances, version), invariant-formatted.</summary>
+    public static string LayoutFingerprint
+    {
+        get
+        {
+            var ci = System.Globalization.CultureInfo.InvariantCulture;
+            string F(double v) => v.ToString("R", ci);
+            string P(BambooIcdCell.StrutPlacement p) => $"{F(p.X)},{F(p.Y)},{F(p.Z)},{F(p.PitchDeg)},{F(p.YawDeg)}";
+            string St(BambooTrussLayout.Stake t) => $"{t.Name},{F(t.X)},{F(t.Z)},{F(t.ClampY)},{F(t.Top)},{F(t.HeadingDeg)}";
+            var parts = new List<string>
+            {
+                PlannerVersion, F(BambooTrussLayout.StrutLength), St(BambooTrussLayout.S1), St(BambooTrussLayout.S2),
+                P(BambooTrussLayout.Store), F(BambooTrussLayout.RackTop), F(K.GripPosTolM), F(K.GripAxisTolDeg),
+                F(BambooTrussLayout.JawOpenMm), F(BambooTrussLayout.LJawOpenMm), F(BambooTrussLayout.JawClosedMm)
+            };
+            parts.AddRange(BambooTrussLayout.Members.Select(m => $"{m.Id}:{P(m.Place)}"));
+            parts.AddRange(BambooTrussLayout.Pads.Select(p => $"{p.Name}:{F(p.X)},{F(p.Z)},{F(p.HalfX)},{F(p.HalfZ)}"));
+            parts.AddRange(BambooTrussLayout.Posts.Select(p => $"{p.Name}:{F(p.X)},{F(p.Z)},{F(p.Top)},{F(p.Radius)}"));
+            return string.Join(";", parts);
+        }
+    }
+
+    public sealed class PlanCache
+    {
+        public string Fingerprint { get; set; } = "";
+        public List<BambooIcdMotion.MotionKey> Keys { get; set; } = new();
+        public List<CycleBound> Cycles { get; set; } = new();
+        public List<BambooTrussPlanner.GripRecord> Grips { get; set; } = new();
+        public List<string> Notes { get; set; } = new();
+        public List<string> Built { get; set; } = new();
+        public int MotusChecks { get; set; }
+    }
+
+    public static string SerializePlan(TrussBuild b) => System.Text.Json.JsonSerializer.Serialize(new PlanCache
+    {
+        Fingerprint = LayoutFingerprint, Keys = b.Keys, Cycles = b.Cycles, Grips = b.Grips,
+        Notes = b.Notes.Where(n => !n.StartsWith("planned in", StringComparison.Ordinal)).ToList(),
+        Built = b.Built, MotusChecks = b.MotusChecks
+    });
+
+    /// <summary>The default plan shipped with the app, if it matches the current layout/planner (else null → plan live).</summary>
+    public static TrussBuild? LoadCachedDefaultPlan()
+    {
+        try
+        {
+            using var stream = typeof(BambooTrussMotion).Assembly.GetManifestResourceStream(DefaultPlanResource);
+            if (stream is null) return null;
+            var c = System.Text.Json.JsonSerializer.Deserialize<PlanCache>(stream);
+            if (c is null || c.Fingerprint != LayoutFingerprint || c.Keys.Count == 0) return null;
+            var notes = c.Notes.ToList();
+            notes.Add("plan: shipped build-time plan for the default tasks (byte-identical to live planning — enforced by a test); Play still Motus-scans it live");
+            return new TrussBuild { Keys = c.Keys, Cycles = c.Cycles, Grips = c.Grips, Notes = notes, Built = c.Built, MotusChecks = c.MotusChecks };
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    static bool IsDefaultMemberOrder(IReadOnlyList<BambooIcdMotion.TaskEdit> tasks) =>
+        Pairs(tasks).Select(p => p.MemberId).SequenceEqual(BambooTrussLayout.Members.Select(m => m.Id));
+
+    /// <summary>
+    /// Plan phase by phase, awaiting <paramref name="onMember"/> between phases so Blazor WASM can paint. With
+    /// <paramref name="useCache"/> the default member order uses the shipped plan (live planning takes minutes in
+    /// interpreted WASM and cannot yield inside a phase).
+    /// </summary>
     public static async Task<TrussBuild> BuildAsync(
         IReadOnlyList<BambooIcdMotion.TaskEdit>? tasks = null,
-        Func<string, Task>? onMember = null)
+        Func<string, Task>? onMember = null,
+        bool useCache = false)
     {
         tasks ??= DefaultTasks();
         var pairs = Pairs(tasks);
         if (pairs.Count == 0)
             return new TrussBuild { Error = "No pick/place pairs (object-matched).", Tasks = tasks.ToList() };
+        if (useCache && IsDefaultMemberOrder(tasks) && LoadCachedDefaultPlan() is { } cached)
+        {
+            cached.Tasks = tasks.ToList();
+            return cached;
+        }
         var cell = TryCell();
         if (cell is null)
             return new TrussBuild { Error = "Motus cell required (call UseCell with the viewer BambooIcdCell).", Tasks = tasks.ToList() };
@@ -147,6 +225,7 @@ public static class BambooTrussMotion
             else await Task.Yield();
         }
 
+        var clock = System.Diagnostics.Stopwatch.StartNew();
         var planner = new BambooTrussPlanner(cell);
         var built = new List<string>();
         var notes = new List<string>();
@@ -187,6 +266,7 @@ public static class BambooTrussMotion
             });
         }
         notes.InsertRange(0, planner.Notes);
+        notes.Add($"planned in {clock.Elapsed.TotalSeconds:F1} s ({planner.Checks} Motus pose checks)");
         return new TrussBuild
         {
             Error = "", Keys = keys, Cycles = cycles, Tasks = tasks.ToList(), Grips = planner.Grips,

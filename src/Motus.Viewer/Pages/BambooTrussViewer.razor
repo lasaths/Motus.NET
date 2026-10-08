@@ -197,6 +197,7 @@
                         pads = BambooTrussLayout.Pads.Select(p => new { name = p.Name, x = p.X, z = p.Z, half = Math.Max(p.HalfX, p.HalfZ), halfX = p.HalfX, halfZ = p.HalfZ }).ToArray()
                     },
                     ["posts"] = BambooTrussLayout.Posts.Select(p => new { name = p.Name, x = p.X, z = p.Z, top = p.Top, radius = p.Radius }).ToArray(),
+                    ["racks"] = BambooTrussLayout.Racks.Select(r => new { name = r.Name, x = r.X, z = r.Z, halfX = r.HalfX, halfZ = r.HalfZ, top = r.Top }).ToArray(),
                     ["parts"] = _cell.Parts.Select(p => new { name = p.Name, link = p.Link, size = p.Size, pos = p.Pos }),
                     ["footprint"] = BambooTrussLayout.FootprintDescription(),
                     ["store"] = BambooTrussLayout.StoreDescription()
@@ -255,7 +256,7 @@
             _phase = $"Planning {memberId}…";
             await InvokeAsync(StateHasChanged);
             await Task.Delay(1);
-        });
+        }, useCache: true);
         _motionError = built.Error;
         _planNotes = built.Notes.ToList();
         if (built.Grips.Count > 0)

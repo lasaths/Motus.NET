@@ -317,7 +317,8 @@
     );
     ring.rotation.x = -Math.PI / 2;
     ring.position.set(PLACE.x, 0.0016, PLACE.z);
-    scene.add(ring);
+    // /bamboo place marker only; /bamboo-truss (fixtures present) marks the clamped base instead.
+    if (!(cell.posts && cell.posts.length)) scene.add(ring);
 
     // /bamboo-truss sets includePole=false: no horizontal hang rod; arm starts at the L-grip dock only.
     if (cell.includePole !== false && cell.pole) {
@@ -349,8 +350,9 @@
     });
     // Anchored-base marker: ring around the clamped gripper's slot axis + label naming what it is clamped on.
     anchorGroup = new THREE.Group();
-    var anchorRing = new THREE.Mesh(new THREE.TorusGeometry(0.03, 0.0022, 8, 40),
-      new THREE.MeshBasicMaterial({ color: 0xffb020 }));
+    var anchorRing = new THREE.Mesh(new THREE.TorusGeometry(0.034, 0.0035, 10, 48),
+      new THREE.MeshBasicMaterial({ color: 0xffb020, depthTest: false, transparent: true, opacity: 0.9 }));
+    anchorRing.renderOrder = 4;
     anchorGroup.add(anchorRing);
     anchorGroup.visible = false;
     scene.add(anchorGroup);

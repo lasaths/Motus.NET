@@ -72,25 +72,41 @@ dotnet run --urls http://127.0.0.1:5268
 Open `http://127.0.0.1:5268/bamboo` (single strut pick/place) or
 `http://127.0.0.1:5268/bamboo-truss` (material store → two-triangle truss).
 
-### `/bamboo-truss` layout
+### `/bamboo-truss`: grounded, base-swapping true IK
 
-- **Store:** stock laying flat next to the span (hang-side of the truss plane; single feed).
-- **Truss:** vertical-plane bridge **lower chord** A–B–D with true edge canes of length
-  `BambooTrussLayout.StrutLength` (**0.5 m**): baseL `/` + baseR `_`. Anchor pads at A and D.
-- **No horizontal hang rod:** `IncludePole = false`. Start dock at legacy hang coordinates for IK;
-  Motus-filtered re-approach after baseL (hang-side vias) so the second pick clears planted baseL.
-- **Motus limit at 0.5 m:** sep / diags / five-triangle Warren are jaw-axis unreachable from every
-  Motus-clear on-chord hang (arm hangs down; apex mids above / too far). Motus-clear members:
-  **baseL + baseR**. `/bamboo` stays 0.30 m.
-- **Build order:** baseL → baseR → brachiate onto outboard WalkHang at A (Motus-clear hang transfer;
-  no hang rod). Sep/diags not placed.
-- **Collision:** Motus.NET against ground pads, mount, already-placed members, held strut, and self (no pole).
-- **Brachiate phases:** `brachiate:Home → Rise → Traverse → Grip → Walk → Return`. The hang (L-grip mount)
-  moves with the arm parked at Home; `BambooTrussScan` samples the hang path every ≤ 4 mm and the viewer
-  draws the mount at `BambooTrussScan.HangAt(t)`.
-- **Play:** `BambooTrussPlayback` stops on every motion key (≥ 0.35 s dwell) so each block is on screen,
-  keeps time as a double, and never runs past the Motus-verified frontier. Motus scanning on the WASM UI
-  thread is time-boxed (`StepFor`), so Play waits for the scan instead of freezing and skipping blocks.
+- **Truss:** vertical-plane bridge **lower chord** A–B–D, edge canes `BambooTrussLayout.StrutLength` = **0.5 m**:
+  baseL `/` (A→B) + baseR `_` (B→D). Two 14 mm canes cannot share node B, so baseR is lashed 16 mm beside
+  baseL (`LashDz`); A and D sit over anchor posts on pads. No hang rod (`IncludePole = false`), no floating mount.
+- **Grounded start:** the L-grip starts clamped on anchor **stake S1** (14 mm post on its own pad beside the
+  feed rail; clamp frame `StartBase`, heading −66.2°, chosen by an offline reach + Motus clearance search).
+  The feed cane lies on a narrow **feed rail** (`store-rack`) so the open R jaws straddle it (a cane flat on
+  the ground leaves ~3 mm under the plates; 0.5 mm seat gap because Motus counts resting contact as a hit).
+- **Invariant:** at every instant ≥ 1 gripper is clamped on a real fixed object (a stake, or a cane fixed at
+  both ends) and is the IK base (`MotionKey.Base / BaseWorld / BaseOn`). The other gripper moves only by
+  joint IK (`BambooGripKinematics.SolveGrip`, damped least squares on full FK, 5 constraints: grasp centre on
+  the object axis + slot axis along it). Grips are accepted within **0.5 mm / 0.5°** (achieved ≈ 1e-7 mm).
+  A base swap happens at rest: the newly clamped gripper's FK frame becomes the base, then the old one opens.
+- **Phases:** `start:Park` → per member `Transit/Approach/Grasp/Close` (R on the feed cane) → `Lift` (along the
+  jaw's own +Y) → `Carry` (RRT-Connect, Motus-checked) → `Align/Lower` → `Open` (cane released exactly where
+  the jaw put it) → `Retreat`; then `walk`: R clamps double-fixed baseL → **base L→R** → L opens and slides
+  up off S1's free top → over and down onto stake S2 → L closes → **base R→L** → R opens, retreats and
+  re-grips baseL further along. The L-grip is a closed clamp (a cane cannot leave it sideways), so it only
+  moves between supports with free ends (stakes); the open-slot R-grip clamps canes.
+- **Collision:** Motus.NET for every link, both grippers, every mount part (now checked against the
+  environment, not only self), the held cane, pads, posts, stakes, rail, placed canes (at their real
+  released poses) and self. The only allowed touches are a gripper's jaw plates on what it clamps.
+  Cylinder meshes are subdivided along their length (~25 mm rings) so the BVH works for long canes.
+- **Scan:** `BambooTrussScan` re-derives everything from the keys (base frame, FK of both grippers, held
+  offset from the Close key, released pose from the Open key) and checks every ≤ 0.5° step.
+- **Viewer:** the mount is drawn at its full FK pose; an amber ring + label marks the clamped base
+  ("L clamped on stake-S1", "R clamped on placed-baseL").
+- **Play:** `BambooTrussPlayback` dwells 0.35 s at the end of every block (last key of a same-label run),
+  keeps time as a double, and never runs past the Motus-verified frontier (time-boxed `StepFor` scan).
+- **WASM:** live planning takes ≈ 7 s desktop but minutes in interpreted WASM and cannot yield inside a
+  phase, so the page loads the default plan from `Services/BambooTrussDefaultPlan.json` (embedded; keyed by
+  `LayoutFingerprint`, falls back to live planning if stale). A test requires it to be byte-identical to
+  live planning; regenerate with `BAMBOO_TRUSS_WRITE_PLAN=1 dotnet test --filter ShippedDefaultPlan`.
+- **Not built:** sep / diags (the arm works from stakes beside the chord; only the lower chord is placed).
 
 ## What still differs from the HTML preview
 
@@ -105,18 +121,3 @@ Open `http://127.0.0.1:5268/bamboo` (single strut pick/place) or
 
 - Retired visual reference: `/workspace/bamboo-viewer/next.html`
 - Motus.NET, Three.js r128, Blazor WebAssembly
-
-## `/bamboo-truss` WASM startup
-
-Bridge-edge Motus path-build used to block the first paint for minutes under Blazor WASM: the Motus-aware
-stage linker ran `IsClear` on every Swing/Hold candidate pair (desktop CLR Release `Build` ≈ 28 s;
-×60-ish under WASM), blocking `OnAfterRender` before Play. The planner caps Motus-stage candidates,
-beam-prunes `LinkStages`, samples Motus at ≈5° while linking (fine 0.5° `BambooTrussScan` still
-validates Play), Motus-checks carry Swing/Hold/Release/Depart, and `BuildAsync` yields between
-members so the page can paint. The page calls `BambooTrussMotion.UseCell` with the viewer cell before
-`BuildAsync` — under WASM there is no disk URDF, so without `UseCell` Motus checks were silently
-skipped and Play stopped ~92% (`diagR:Swing · θ5 ↔ placed-diagL`). Multi-member Build refuses to run without a Motus cell (no silent Motus-skip). Geometric capsule
-clearance backs up Swing samples only if Motus throws mid-check. Desktop Release Build ≈ 1.3 s with
-caps; prefer Motus-clear Play over scaling the edge span. Bridge story (edge canes, pads A&D, walk
-rules) unchanged.
-

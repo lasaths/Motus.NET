@@ -324,6 +324,40 @@ public class BambooTrussTests
         Assert.Contains(contacts, c => c.BodyA == "placed-baseL" || c.BodyB == "placed-baseL");
     }
 
+    // ---------------- shipped plan (WASM) ----------------
+
+    private static string PlanCachePath => Path.GetFullPath(Path.Combine(
+        AppContext.BaseDirectory, "..", "..", "..", "..", "..", "src", "Motus.Viewer", "Services", "BambooTrussDefaultPlan.json"));
+
+    /// <summary>
+    /// The page loads the default plan from an embedded build-time copy (live planning takes minutes in WASM).
+    /// It must be exactly what the planner produces now. Regenerate with BAMBOO_TRUSS_WRITE_PLAN=1.
+    /// </summary>
+    [Fact]
+    public void ShippedDefaultPlan_IsIdenticalToLivePlanning()
+    {
+        var built = Build();
+        var json = BambooTrussMotion.SerializePlan(built);
+        if (Environment.GetEnvironmentVariable("BAMBOO_TRUSS_WRITE_PLAN") == "1")
+            File.WriteAllText(PlanCachePath, json);
+        Assert.True(File.Exists(PlanCachePath), "shipped plan missing — run with BAMBOO_TRUSS_WRITE_PLAN=1");
+        Assert.Equal(json, File.ReadAllText(PlanCachePath));
+        var cached = BambooTrussMotion.LoadCachedDefaultPlan();
+        Assert.NotNull(cached);
+        Assert.Equal(built.Keys.Count, cached!.Keys.Count);
+        for (var i = 0; i < built.Keys.Count; i++)
+        {
+            Assert.Equal(built.Keys[i].Label, cached.Keys[i].Label);
+            Assert.Equal(built.Keys[i].Q, cached.Keys[i].Q);
+            Assert.Equal(built.Keys[i].BaseWorld, cached.Keys[i].BaseWorld);
+            Assert.Equal(built.Keys[i].T, cached.Keys[i].T);
+        }
+        // The page path (useCache) returns the shipped plan for the default tasks.
+        BambooTrussMotion.UseCell(Cell);
+        var page = BambooTrussMotion.Build(useCache: true);
+        Assert.Contains(page.Notes, n => n.StartsWith("plan: shipped", StringComparison.Ordinal));
+    }
+
     // ---------------- playback ----------------
 
     private static List<string> PlannedPhases(BambooTrussMotion.TrussBuild built) => built.Keys.Select(k => k.Label).ToList();
