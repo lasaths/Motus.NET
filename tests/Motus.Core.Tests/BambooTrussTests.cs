@@ -626,6 +626,72 @@ public class BambooTrussTests
         Assert.DoesNotContain("00000001", BambooTrussMotion.LayoutFingerprint);
     }
 
+    /// <summary>
+    /// The placed set only grows over the whole plan and is empty before baseL:Open: at 502034e the start/walk
+    /// segments drew no stock and the viewer left a cane on A–B until baseL:Transit. Start/walk now carry the
+    /// world "nothing placed, stock full", and Motus checks the walk against the stock.
+    /// </summary>
+    [Fact]
+    public void PlacedSet_IsMonotonic_AndEmptyBeforeBaseLOpen()
+    {
+        var built = Build();
+        var scan = Scan(built);
+        // The baseL:Open segment (jaws opening, cane already at its member) is the first with a placed cane.
+        var openIdx = built.Keys.FindIndex(k => k.Label == "baseL:Open");
+        var openT = built.Keys[openIdx - 1].T;
+        var prev = new List<string>();
+        foreach (var t in scan.SampleTimes)
+        {
+            var s = BambooTrussMotion.SampleState(built.Keys, t);
+            var poses = scan.StrutPoses(t, s.Hold, s.Q).Select(p => p.Name).ToList();
+            var placed = poses.Where(n => n.StartsWith("placed-", StringComparison.Ordinal)).ToList();
+            foreach (var p in prev) Assert.Contains(p, placed);
+            if (t <= openT + 1e-12) Assert.Empty(placed);
+            // Until the last member is in hand, exactly one cane is on the stock or in hand.
+            if (t <= openT + 1e-12) Assert.Single(poses, n => n == BambooIcdCell.Strut);
+            prev = placed;
+        }
+        // Start / walk: the stock cane is a Motus obstacle.
+        var walk = built.Cycles.Single(c => c.MemberId == "walk");
+        var tw = built.Keys[walk.FirstKey + 1].T;
+        Assert.Contains(scan.EnvironmentAt(tw, 0), o => o.Name == BambooIcdCell.Strut);
+        Assert.DoesNotContain(scan.EnvironmentAt(tw, 0), o => o.Name.StartsWith("placed-", StringComparison.Ordinal));
+    }
+
+    /// <summary>Each base swap is a visible rest pause in playback (both labels are shown for several frames).</summary>
+    [Fact]
+    public void BaseSwaps_AreVisiblePausesInPlayback()
+    {
+        var built = Build();
+        foreach (var label in new[] { "walk:swap base L→R", "walk:swap base R→L" })
+        {
+            var i = built.Keys.FindIndex(k => k.Label == label);
+            Assert.True(i > 0, label);
+            Assert.True(built.Keys[i].T - built.Keys[i - 1].T >= 0.01, $"{label} lasts only {built.Keys[i].T - built.Keys[i - 1].T:F4}");
+        }
+        var play = new BambooTrussPlayback(built.Keys);
+        var frames = new Dictionary<string, int>();
+        while (!play.Done)
+        {
+            var l = BambooTrussMotion.SampleState(built.Keys, play.Advance(0.016)).Label;
+            frames[l] = frames.GetValueOrDefault(l) + 1;
+        }
+        Assert.True(frames.GetValueOrDefault("walk:swap base L→R") >= 10, $"L→R shown {frames.GetValueOrDefault("walk:swap base L→R")} frames");
+        Assert.True(frames.GetValueOrDefault("walk:swap base R→L") >= 10, $"R→L shown {frames.GetValueOrDefault("walk:swap base R→L")} frames");
+    }
+
+    /// <summary>The clamp marker for L on S3 is there as soon as its close completes (before the swap).</summary>
+    [Fact]
+    public void LClampMarker_ShowsWhenTheCloseCompletes()
+    {
+        var built = Build();
+        var scan = Scan(built);
+        var close = built.Keys.Single(k => k.Label == "walk:L:Close stake-S3");
+        var s = BambooTrussMotion.SampleState(built.Keys, close.T);
+        Assert.Equal("walk:L:Close stake-S3", s.Label);
+        Assert.Contains(scan.ClampsAt(close.T, s.Q, s.GR, s.GL), c => c.Gripper == "L" && c.On == "stake-S3");
+    }
+
     // ---------------- playback ----------------
 
     private static List<string> PlannedPhases(BambooTrussMotion.TrussBuild built) => built.Keys.Select(k => k.Label).ToList();

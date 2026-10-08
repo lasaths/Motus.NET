@@ -68,6 +68,8 @@ public sealed class BambooTrussPlanner
             if (hold == 0 && _activeRest is not null) env.Add(_cell.StrutAt(_activeRest, BambooIcdCell.Strut));
             else if (hold == 2 && _activeReleased is not null) env.Add(_cell.StrutAt(_activeReleased, "placed-" + _activeId));
         }
+        // Between members (start, walk) the stock is full: the next cane lies on the pegs.
+        else env.Add(_cell.StrutAt(BambooIcdCell.PlacementWorld(BambooTrussLayout.Store), BambooIcdCell.Strut));
         _envKey = key;
         return _env = env;
     }
@@ -777,6 +779,9 @@ public sealed class BambooTrussPlanner
     }
 
     /// <summary>Stamp key times by joint travel (+ gripper strokes) so playback speed tracks real motion.</summary>
+    /// <summary>Timeline share of each base-swap pause (≈ 0.6 s at the default Play speed).</summary>
+    public const double SwapPauseShare = 0.012;
+
     public void StampTimes()
     {
         EndCycles();
@@ -790,6 +795,10 @@ public sealed class BambooTrussPlanner
             if (dg > 1e-9) s += 10 + dg * 0.6;
             w.Add(Math.Max(s, 3));
         }
+        // A base swap is a rest pause (nothing moves): give it a visible share of the timeline so its label shows.
+        var moving = w.Sum();
+        for (var i = 1; i < Keys.Count; i++)
+            if (Keys[i].Label.Contains("swap base", StringComparison.Ordinal)) w[i] = Math.Max(w[i], SwapPauseShare * moving);
         var total = w.Sum();
         var acc = 0.0;
         for (var i = 0; i < Keys.Count; i++)

@@ -131,7 +131,7 @@ public static class BambooTrussMotion
     // ---------------- build-time plan cache (WASM) ----------------
 
     /// <summary>Bump when planner behaviour changes (invalidates <see cref="DefaultPlanResource"/>).</summary>
-    public const string PlannerVersion = "grounded-ik-3-five-member";
+    public const string PlannerVersion = "grounded-ik-4-stock-in-walk";
     public const string DefaultPlanResource = "Motus.Viewer.Services.BambooTrussDefaultPlan.json";
 
     /// <summary>Everything the planner's output depends on (layout, tolerances, version), invariant-formatted.</summary>

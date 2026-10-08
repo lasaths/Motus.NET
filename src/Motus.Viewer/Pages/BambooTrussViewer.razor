@@ -408,7 +408,19 @@
             hitParts = HitParts()
         };
         await JS.InvokeVoidAsync("setBambooPose", JsonSerializer.Serialize(payload));
+        // Frame labels only for the member being built (none during start / walk).
+        var active = _cycles is { Count: > 0 } c ? c[BambooTrussMotion.MemberIndexAt(c, _t)].MemberId : null;
+        if (active is "start" or "walk" or "walk2") active = null;
+        if (active != _activeFrameMember || !_activeFramePushed)
+        {
+            _activeFrameMember = active;
+            _activeFramePushed = true;
+            await JS.InvokeVoidAsync("setBambooActiveMember", active);
+        }
     }
+
+    private string? _activeFrameMember;
+    private bool _activeFramePushed;
 
     private async Task PushFramesAsync()
     {
@@ -416,6 +428,7 @@
         var frames = _tasks.Select(t => new
         {
             id = t.Identity,
+            obj = t.Object,
             planes = t.Planes.Select(p => new
             {
                 name = p.Name,

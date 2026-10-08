@@ -575,6 +575,17 @@
   }
 
   /** tasksJson: [{ id, planes:[{name,x,y0,z,pitch,yaw?,yMm}] }] */
+  // Pick/place frame labels are shown only for the member being built (null: none, e.g. during the walk).
+  var activeFrameMember = null;
+  window.setBambooActiveMember = function (id) {
+    activeFrameMember = id == null || id === '' ? null : String(id);
+    if (!frameRoot) return;
+    frameRoot.traverse(function (o) {
+      if (o.isSprite && o.userData && 'member' in o.userData)
+        o.visible = activeFrameMember != null && o.userData.member === activeFrameMember;
+    });
+  };
+
   window.setBambooFrames = function (tasksJson) {
     if (!ready || !frameRoot) return;
     var tasks = typeof tasksJson === 'string' ? JSON.parse(tasksJson) : tasksJson;
@@ -601,7 +612,10 @@
         axis(0, 0, L, 0x4aa3ff);
         holder.add(axes);
         var lab = makePlaneLabel(String(task.id) + ':' + pl.name);
-        lab.position.set(0.01, 0.026, 0);
+        lab.position.set(0.01, 0.02, 0);
+        lab.scale.set(0.066, 0.017, 1); // small: clamp / hold labels must stay readable over them
+        lab.userData.member = task.obj == null ? null : String(task.obj);
+        lab.visible = activeFrameMember != null && lab.userData.member === activeFrameMember;
         holder.add(lab);
         frameRoot.add(holder);
       });

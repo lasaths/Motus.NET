@@ -64,7 +64,8 @@ public sealed class BambooTrussScan
             var member = _members.FirstOrDefault(m => m.Id == c.MemberId);
             if (member is null)
             {
-                _world.Add(new CycleWorld { Placed = placed.ToList() });
+                // start / walk: nothing new in hand, the stock is full (next cane on the pegs).
+                _world.Add(new CycleWorld { Placed = placed.ToList(), Rest = BambooIcdCell.PlacementWorld(BambooTrussLayout.Store) });
                 continue;
             }
             var rest = BambooIcdCell.PlacementWorld(member.Store);
@@ -196,6 +197,7 @@ public sealed class BambooTrussScan
         if (_cycles.Count == 0) return env;
         var w = _world[BambooTrussMotion.CycleIndexAt(_keys, _cycles, t)];
         foreach (var (name, m) in w.Placed) env.Add(_cell.StrutAt(m, name));
+        if (w.ActiveId is null && w.Rest is not null) env.Add(_cell.StrutAt(w.Rest, BambooIcdCell.Strut));
         if (w.ActiveId is not null)
         {
             if (hold == 0 && w.Rest is not null) env.Add(_cell.StrutAt(w.Rest, BambooIcdCell.Strut));
@@ -212,7 +214,11 @@ public sealed class BambooTrussScan
         if (_cycles.Count == 0) return list;
         var w = _world[BambooTrussMotion.CycleIndexAt(_keys, _cycles, t)];
         foreach (var (name, m) in w.Placed) list.Add((name, BambooIcdCell.ToViewerPose(m)));
-        if (w.ActiveId is null) return list;
+        if (w.ActiveId is null)
+        {
+            if (w.Rest is not null) list.Add((BambooIcdCell.Strut, BambooIcdCell.ToViewerPose(w.Rest)));
+            return list;
+        }
         if (hold == 1 && w.HeldOffset is { } off)
         {
             var (_, r) = GrippersAt(t, qDeg);
