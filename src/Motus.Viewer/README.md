@@ -122,6 +122,10 @@ Open `http://127.0.0.1:5268/bamboo` (single strut pick/place) or
 - **Viewer:** the mount is drawn at its full FK pose; an amber ring + label marks **every** clamped gripper
   ("L clamped on stake-S1 (base)", "R clamped on stake-S3 (base)"), both at once when both clamp; a blue ring
   marks the cane in hand. Labels are pushed apart in screen space so "R holds cane" never overlaps the base label. Hold and world for each segment come from the key that ends it (`CycleIndexAt`).
+- **World per segment:** start / walk = nothing placed, stock full (the next cane is drawn on the pegs and is a
+  Motus obstacle for the planner and the scan); each member cycle then picks it. Base swaps are rest pauses with
+  1.2 % of the timeline each so "swap base L→R / R→L" are visible. Pick/place frame labels are drawn small and only
+  for the member being built.
 - **Play:** `BambooTrussPlayback` dwells 0.35 s at the end of every block (last key of a same-label run),
   keeps time as a double, and never runs past the Motus-verified frontier (time-boxed `StepFor` scan).
 - **WASM:** live planning takes ≈ 7 s desktop but minutes in interpreted WASM and cannot yield inside a
