@@ -48,10 +48,10 @@ public class BambooTrussTests
     // ---------------- layout ----------------
 
     [Fact]
-    public void Layout_IsFiveMemberFrame_ThirtyCentimetreCanes_NoHangRod_GroundedFixtures()
+    public void Layout_IsFiveMemberFrame_TwentyFiveCentimetreCanes_NoHangRod_GroundedFixtures()
     {
-        Assert.Equal(0.30, BambooTrussLayout.StrutLength, 9);
-        Assert.Equal(0.30, BambooTrussLayout.Current.Length, 9);
+        Assert.Equal(0.25, BambooTrussLayout.StrutLength, 9);
+        Assert.Equal(0.25, BambooTrussLayout.Current.Length, 9);
         Assert.Equal(new[] { "baseL", "baseR", "diagL", "sep", "diagR" }, BambooTrussLayout.Members.Select(m => m.Id).ToArray());
         foreach (var m in BambooTrussLayout.Members)
         {
@@ -118,8 +118,8 @@ public class BambooTrussTests
     }
 
     /// <summary>
-    /// The lower chord at 0.30 m: B is within the arm's grip-to-grip reach of the stake that places baseR (S3), and
-    /// no member the planner skips is pre-declared unreachable — sep / diagR are reported by the planner itself.
+    /// The lower chord at 0.25 m: B is within the arm's grip-to-grip reach of the stake that places baseR (S3), and
+    /// no member is pre-declared unreachable.
     /// </summary>
     [Fact]
     public void Chord_IsWithinReach_OfTheStakeThatPlacesIt()
@@ -164,16 +164,20 @@ public class BambooTrussTests
     // ---------------- plan structure ----------------
 
     [Fact]
-    public void Plan_WalksToS3_BuildsTheChordAndDiagL_WalksOnTheBamboo_ReportsTheRest()
+    public void Plan_WalksToS3_BuildsTheWholeBridge_ThenWalksOnIt()
     {
         var built = Build();
-        Assert.Equal(new[] { "baseL", "baseR", "diagL" }, built.Built.ToArray());
-        Assert.Contains(built.Notes, n => n.StartsWith("sep: not built", StringComparison.Ordinal));
-        Assert.Contains(built.Notes, n => n.StartsWith("diagR: not built", StringComparison.Ordinal));
-        // Node-transfer walk blocks: S3 → baseL B end → across B onto baseR → back to S3. sep/diagR stay reported.
-        Assert.Equal(new[] { "start", "walk", "baseL", "baseR", "diagL", "walk (node) → baseL@-1.00", "walk (node) → baseR@-1.00", "walk (node) → stake-S3" },
+        // All five members, diagR before sep (with sep standing first R ends wedged at C).
+        Assert.Equal(new[] { "baseL", "baseR", "diagL", "diagR", "sep" }, built.Built.ToArray());
+        Assert.DoesNotContain(built.Notes, n => n.Contains("not built", StringComparison.Ordinal));
+        Assert.Equal(new[] { "baseL", "baseR", "diagL", "sep", "diagR" }.OrderBy(x => x),
+            BambooTrussLayout.FixedBothEnds(built.Built).OrderBy(x => x));
+        // Node-transfer walk blocks on the finished bridge: S3 → baseR B end → (R on sep) baseL B end → across B onto
+        // baseR → back to S3.
+        Assert.Equal(new[] { "start", "walk", "baseL", "baseR", "diagL", "diagR", "sep",
+                "walk (node) → baseL@-1.00", "walk (node) → baseL@-1.00", "walk (node) → baseR@-1.00", "walk (node) → stake-S3" },
             built.Cycles.Select(c => c.MemberId).ToArray());
-        Assert.Contains(built.Notes, n => n.StartsWith("walk (node) → placed-baseR@-1.00", StringComparison.Ordinal) && n.Contains("node transfer"));
+        Assert.Contains(built.Notes, n => n.StartsWith("walk (node) → placed-baseR@-1.00", StringComparison.Ordinal) && n.Contains("node transfer (R on placed-sep)"));
         Assert.Equal(0, built.Cycles[0].T0, 9);
         Assert.Equal(1, built.Cycles[^1].T1, 9);
         var first = built.Keys[0];
@@ -187,8 +191,9 @@ public class BambooTrussTests
         Assert.Equal(new[]
         {
             ("L", "R", "stake-S3"), ("R", "L", "stake-S3"),                    // stake walk S1 → S3
-            ("L", "R", "stake-S3"), ("R", "L", "placed-baseL"),                // S3 → baseL B end
-            ("L", "R", "placed-baseL"), ("R", "L", "placed-baseR"),            // across B onto baseR
+            ("L", "R", "stake-S3"), ("R", "L", "placed-baseR"),                // S3 → baseR B end (brachiate)
+            ("L", "R", "placed-sep"), ("R", "L", "placed-baseL"),              // R on sep: onto baseL's B end
+            ("L", "R", "placed-sep"), ("R", "L", "placed-baseR"),              // R on sep: across B onto baseR
             ("L", "R", "placed-baseL"), ("R", "L", "stake-S3")                 // back onto S3
         }, swaps.ToArray());
         // PTP: the L clamp leaves S1 with one joint move to just above its free top + the slide clearance.
@@ -217,7 +222,16 @@ public class BambooTrussTests
             Assert.Contains("Open", built.Keys[i + 1].Label); // the old base opens on the next key
             n++;
         }
-        Assert.Equal(8, n); // stake walk + three node-transfer walk steps, two swaps each
+        Assert.Equal(10, n); // stake walk + four walk steps on the bridge, two swaps each
+    }
+
+    /// <summary>PTP: every placement leaves R a way out — the member cycle ends with R parked (Motus-clear).</summary>
+    [Fact]
+    public void EveryPlacement_EndsWithRParked()
+    {
+        var built = Build();
+        foreach (var c in built.Cycles.Where(c => built.Built.Contains(c.MemberId)))
+            Assert.EndsWith($"{c.MemberId}:R:Park", built.Keys[c.LastKey].Label);
     }
 
     /// <summary>Each cane is placed only when at least one of its ends is already fixed (posts or a triangulated node).</summary>
@@ -768,7 +782,7 @@ public class BambooTrussTests
     }
 
     /// <summary>
-    /// Each gait walks its benchmark leg (the one it completes at 0.30 m, see the README table) as a <c>walk</c> task
+    /// Each gait walks its benchmark leg (benchmarked at 0.30 m, see the README table; still walks at 0.25 m) as a <c>walk</c> task
     /// block: every step keeps one gripper clamped as the base on a stake or a cane fixed at both ends, swaps happen at
     /// rest with their own label, every clamp is FK-exact (0.5 mm / 0.5°) and the whole PTP path is Motus-clear.
     /// </summary>

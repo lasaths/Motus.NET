@@ -95,8 +95,8 @@ Open `http://127.0.0.1:5268/bamboo` (single strut pick/place) or
 
 ### `/bamboo-truss`: grounded, base-swapping true IK
 
-- **Truss:** five-member bridge frame (rhombus) A–B–D–C, canes `BambooTrussLayout.StrutLength` = **0.30 m**
-  (side = height = L, half-span L·√3/2 = 0.260 m): baseL `/` A–B, baseR `_` B–D, diagL A–C, sep `|` B–C,
+- **Truss:** five-member bridge frame (rhombus) A–B–D–C, canes `BambooTrussLayout.StrutLength` = **0.25 m**
+  (side = height = L, half-span L·√3/2 = 0.217 m): baseL `/` A–B, baseR `_` B–D, diagL A–C, sep `|` B–C,
   diagR D–C. Canes meeting at a node sit in 16 mm lash layers (`LashDz`); A and D sit over anchor posts on pads.
   No hang rod (`IncludePole = false`), no floating mount. Length, stakes, stock and walk live in one `Site`
   (`BambooTrussSites.cs` → `SiteDefaults.Chosen`, switchable with `BambooTrussLayout.Use`).
@@ -104,26 +104,29 @@ Open `http://127.0.0.1:5268/bamboo` (single strut pick/place) or
   strictly between A and D in x (`GroundXExtents`, enforced by a test). Both stakes, their pads and the stock
   stand **outboard of A**; inside the span the robot may only clamp canes fixed at both ends. A member is
   placed only when one of its ends is already fixed (A/D, or B/C once triangulated).
-- **Why 0.30 m (offline length sweep, reach + Motus search):**
+- **Why 0.25 m (offline length sweep, reach + Motus search; whole bridge since the PTP planner):**
 
   | L | baseR from any outboard stake (pure reach) | real planner (Motus) |
   |---|---|---|
   | 0.50 / 0.45 / 0.40 | 0 of 400 random stakes; 0 from post-A | baseL only (previous 0.5 m site) |
   | 0.35 | 0 of 400 random + 3000 near-A stakes; only from post-A (h≈90°, never with baseL) | post-A cannot reach the stock (0 pickable poses) → no chord |
-  | **0.30** | reachable (stakes 5 mm outboard of the A pad, h 70–110°) | **baseL + baseR + diagL** (stake walk S1→S3) |
-  | 0.25 | reachable | single-stake runs no better than 0.30 (stock/collision-limited) |
+  | 0.30 | reachable (stakes 5 mm outboard of the A pad, h 70–110°) | baseL + baseR + diagL (sep / diagR: no Motus-clear stock grasp / carry from any support) |
+  | **0.25** | reachable (same stakes / stock moved in with A by 43.3 mm) | **all five** with PTP, order baseL, baseR, diagL, diagR, sep |
+  | 0.22 / 0.20 | — | stock grasp blocked by the pegs / stakes / post A (Cartesian planner) |
 
   baseR's nearest point is B (x = 0); the closest legal stake is at x = −(L·√3/2 + 0.035). The arm's
   ≈ 0.42 m grip-to-grip reach has to span that plus the clamp-height/z offsets while the same stake also
-  reaches the stock behind it — feasible at 0.30 m, not at 0.35 m and longer.
-- **Grounded start:** the L-grip starts clamped on **stake S1** (−0.295, clamp y 0.18, z 0.06, heading 90°);
-  stake **S3** stands at (−0.295, y 0.21, z −0.04, heading 70°). The stock cane lies flat along z at
-  (−0.386, 0.0165) on two narrow **pegs** (`store-peg-1/2`, 0.5 mm seat gap), just outboard of A.
-- **Members built:** **baseL, baseR, diagL** — the lower chord is complete and double-fixed (B fixed). With the
-  L-grip opened on one side (see *Deviation from the ICD URDF*) the arm then **brachiates onto the chord**: L side-clamps
-  baseL from its open side. sep and diagR are still reported: from every Motus-clear L clamp on the chord (24 of
-  144 options — cane × R anchor × clamp point × L roll) R has no IK solution onto the stock, which lies outboard of A;
-  baseR is out of R's reach from S3, and hand-over-hand further along the chord only moves away from the stock.
+  reaches the stock behind it — feasible at ≤ 0.30 m. At 0.30 m sep / diagR stay out of reach of a Motus-clear
+  carry; at 0.25 m everything is placed from S3 without relays or cradles.
+- **Grounded start:** the L-grip starts clamped on **stake S1** (−0.252, clamp y 0.18, z 0.06, heading 90°);
+  stake **S3** stands at (−0.252, y 0.21, z −0.04, heading 70°). The stock cane lies flat along z at
+  (−0.342, 0.0165) on two narrow **pegs** (`store-peg-1/2`, 0.5 mm seat gap), just outboard of A.
+- **Members built: all five** — baseL, baseR, diagL, diagR, sep, every one from stake S3 (stock pick → PTP carry →
+  place). diagR goes before sep: with sep standing first, R ends wedged between sep / diagL at C after the place and
+  has no Motus-clear way back to the stock (RRT 3 × 1500 fails from q = [81, 90, −5, −88, −81]). Every PTP placement
+  must now leave R a Motus-clear park (`R:Park` ends each member cycle); a pose that wedges R is skipped. No cradle /
+  relay, no new stakes: cane length + build order were enough. Each member is placed with one end fixed (baseL, diagL:
+  A; baseR, diagR: D; sep: B).
 - **Invariant:** at every instant ≥ 1 gripper is clamped on a real fixed object (a stake, or a cane fixed at
   both ends) and is the IK base (`MotionKey.Base / BaseWorld / BaseOn`). The other gripper moves only by
   joint IK (`BambooGripKinematics.SolveGrip`, damped least squares on full FK, 5 constraints: grasp centre on
@@ -133,8 +136,9 @@ Open `http://127.0.0.1:5268/bamboo` (single strut pick/place) or
   **`swap base L→R`** (own key, at rest) → `L:Open` → `L:PTP off stake-S1` (PTP to top + clear) → `L:PTP via` →
   `L:PTP to stake-S3` → `L:Close stake-S3` → **`swap base R→L`** → `R:Open` → `PTP Retreat` → `R:Park`; then per member
   `PTP via` / `PTP Grasp` / `Close` (R on the stock) → `PTP Lift` → `PTP carry via` (joint via-points / RRT-Connect,
-  Motus-checked) → `PTP Place` → `Open` (cane released exactly on its member) → `PTP Retreat`; then three node
-  `walk` blocks (S3 → baseL B end, across B onto baseR, back to S3), each R grasp → `swap base L→R` → `L:Open` →
+  Motus-checked) → `PTP Place` → `Open` (cane released exactly on its member) → `PTP Retreat` → `R:Park`; then three node
+  `walk` blocks on the finished bridge (S3 → baseL B end in two steps: brachiate onto baseR's B end, node transfer with R on
+  sep; across B onto baseR with R on sep; back to S3), each R grasp → `swap base L→R` → `L:Open` →
   `L:PTP off X` / `L:PTP via` → `L:PTP to Y` → `L:Close Y` → `swap base R→L` → `R:Open` → `PTP Retreat` → `R:Park`.
   Only canes fixed at both ends are side-clamped (open +y slot). With `Ptp = false` the older Cartesian
   Approach / Lower / Slide phases and the goal-driven brachiation search are still available.
@@ -157,7 +161,7 @@ Open `http://127.0.0.1:5268/bamboo` (single strut pick/place) or
   phase, so the page loads the default plan from `Services/BambooTrussDefaultPlan.json` (embedded; keyed by
   `LayoutFingerprint` with numbers rounded to 1e-6 — WASM and desktop `Math` differ in the last ulp — falls back to live planning if stale; the reason is logged to the browser console as `[bamboo-truss] shipped plan not used — …`). A test requires it to be byte-identical to
   live planning; regenerate with `BAMBOO_TRUSS_WRITE_PLAN=1 dotnet test --filter ShippedDefaultPlan`.
-- **Not built:** sep and diagR (no Motus-clear grasp/place from any allowed support); reported, never faked.
+- **Not built:** nothing — all five members. Anything a planner run cannot reach is reported, never faked.
 
 ### Walking on the bamboo: the `walk` task block (shipped, PTP)
 
@@ -165,7 +169,7 @@ Open `http://127.0.0.1:5268/bamboo` (single strut pick/place) or
   clamp ("placed-baseR", "stake-S3"), one plane `target` at the clamp point on that cane (its parameter is read back
   from the plane), and `Gait`. `BambooTrussMotion.WalkTask(target, f, gait)` builds one; `RunSequence(tasks)` runs
   walk / pick / place blocks in order (BuildAsync hands over to it when a sequence contains walk blocks). The task list
-  shows walk blocks as "Walk → target" with a gait selector. The default task list is `BambooTrussMotion.ShippedTasks()`: walk to S3, baseL, baseR, diagL, then three node walk blocks (S3 → baseL B end, across B onto baseR, back to S3), then sep / diagR attempts.
+  shows walk blocks as "Walk → target" with a gait selector. The default task list is `BambooTrussMotion.ShippedTasks()`: walk to S3, baseL, baseR, diagL, diagR, sep, then three node walk blocks on the bridge (S3 → baseL B end, across B onto baseR, back to S3).
 - **Step (every gait):** R clamps something fixed → `swap base L→R` at rest → L opens and leaves its cane (open side)
   or stake → L clamps the next site → `swap base R→L` at rest → R retreats and parks. One gripper always clamped,
   joints only, FK-exact clamps, only stakes outboard of A and canes fixed at both ends, nothing carried.
@@ -187,10 +191,12 @@ Open `http://127.0.0.1:5268/bamboo` (single strut pick/place) or
   | inchworm / shuffle / swing / roll | ✔ (shared brachiate entry) | ✘ | ✘ | ✔ |
 
   Winner and default: node transfer. The D end is not reached by any gait and is not in the shipped sequence.
-- **Shipped plan (0.30 m, `grounded-ik-7-ptp-walk`, 88 keys, built baseL / baseR / diagL)** — progress ranges:
-  walk to S3 0–17 %, baseL 17–29 %, baseR 29–42 %, diagL 42–56 %, walk (node) → baseL@-1 56–80 %,
-  walk (node) → baseR@-1 80–88 %, walk (node) → stake-S3 88–100 %. sep / diagR are reported unreachable
-  ("no Motus-clear R grasp of strut … from stake-S3"); stock IK only exists from S3, the C place IK only from the B-end sites.
+- **0.25 m, whole bridge:** node transfer also uses the new double-fixed sep (R clamps sep beside B). Walks onto sep's
+  or diagR's ends (f = ±1) are not reached (23 steps tried, 2 sites); the D end is not in the sequence.
+- **Shipped plan (0.25 m, `grounded-ik-8-full-bridge`, 136 keys, all five built, planned live in ≈ 190 s)** — progress:
+  walk to S3 0–10.1 %, baseL 10.1–16.4 %, baseR 16.4–27.7 %, diagL 27.7–37.9 %, diagR 37.9–44.9 %, sep 44.9–59.2 %,
+  walk (node) → baseL@-1 59.2–71.5 % (brachiate S3 → baseR B end) and 71.5–81.3 % (node transfer, R on sep),
+  walk (node) → baseR@-1 81.3–89.6 % (R on sep), walk (node) → stake-S3 89.6–100 %.
 
 ## What still differs from the HTML preview
 

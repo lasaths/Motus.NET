@@ -17,7 +17,7 @@
 
     <aside class="controls">
         <h1>Bamboo truss (store → bridge span)</h1>
-        <p class="sub">Five-member bridge frame with 0.30 m canes (lower chord baseL + baseR and diagL built; sep and diagR reported unreachable) built by a grounded two-gripper arm working from stakes outboard of A. One gripper is always clamped on a real fixed object (stake, or a cane fixed at both ends) and is the IK base; the other moves by joint IK only. Motus.NET owns FK/IK/collision; Three.js only draws.</p>
+        <p class="sub">Whole five-member bridge A–D with 0.25 m canes (baseL, baseR, diagL, diagR, sep — all built), then node-transfer walking on it, by a grounded two-gripper arm working from stakes outboard of A. One gripper is always clamped on a real fixed object (stake, or a cane fixed at both ends) and is the IK base; the other moves by joint IK only. Motus.NET owns FK/IK/collision; Three.js only draws.</p>
         <div class="phase @(!string.IsNullOrEmpty(_motionError) || _collision ? "err" : "")" data-motus="@_motusState">@_phase</div>
 
         <div class="row">
@@ -142,7 +142,7 @@
             Drag the view to orbit. Moving a joint or gripper slider pauses playback and drives the arm from C#.
             Play runs every pick/place pair (object = member id). Vertical footprint: A–B–C + B–D–C in the XY plane, B near ground, C apex, shared upright B–C.
             Bend axes local X, wrists local Y, jaws local X. Viewer is Three.js Y-up; Motus.NET URDF is Z-up (shared θ).
-            No earth between the anchors: apart from the A/D pads and posts, both stakes and the stock pegs stand outboard of A. Start: L-grip clamped on stake S1 (amber ring + label on every clamped gripper; blue = cane in hand). Walk: R clamps stake S3 low, "swap base L→R", the L clamp slides up off S1 and down onto S3, "swap base R→L", R parks. Then from S3 the R-grip picks each cane off the stock and places it exactly on baseL (A–B), baseR (B–D) — the chord is now fixed at both ends — and diagL (A–C). sep and diagR have no Motus-clear place from any allowed support, so they are reported, not faked. Canes are 0.30 m: at 0.35 m and longer no allowed support reaches baseR.
+            No earth between the anchors: apart from the A/D pads and posts, both stakes and the stock pegs stand outboard of A. Start: L-grip clamped on stake S1 (amber ring + label on every clamped gripper; blue = cane in hand). Walk: R clamps stake S3 low, "swap base L→R", the L clamp slides up off S1 and down onto S3, "swap base R→L", R parks. Then from S3 the R-grip picks each cane off the stock and places it exactly on baseL (A–B), baseR (B–D) — the chord is now fixed at both ends — diagL (A–C), diagR (D–C) and sep (B–C); every placement ends with R parked. Then the robot walks on the finished bridge with node transfer: S3 → baseR's B end → (R on sep) baseL's B end → across B onto baseR → back to S3. Canes are 0.25 m: at 0.30 m sep and diagR have no Motus-clear grasp/carry from any allowed support.
             Collision: Motus.NET for every link, both grippers, the mount, the held cane, pads, posts, stakes, rail, placed canes and self; the only allowed touch is a gripper's jaw plates on what it clamps. Play/scrub never pass the Motus-verified frontier.
         </p>
     </aside>

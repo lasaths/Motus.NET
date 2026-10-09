@@ -188,11 +188,11 @@ public static class BambooTrussMotion
         var byId = BambooTrussLayout.Members.ToDictionary(m => m.Id);
         List<BambooIcdMotion.TaskEdit> Member(string id) => DefaultTasks(new[] { byId[id] });
         var tasks = new List<BambooIcdMotion.TaskEdit> { WalkTask(site.WalkLTarget) };
-        foreach (var id in new[] { "baseL", "baseR", "diagL" }) tasks.AddRange(Member(id));
+        // The whole bridge from S3 (diagR before sep: see SiteDefaults.Chosen), then node-transfer walk blocks on it.
+        foreach (var id in new[] { "baseL", "baseR", "diagL", "diagR", "sep" }) tasks.AddRange(Member(id));
         tasks.Add(WalkTask("placed-baseL", -1, BambooWalk.NodeTransfer.Id));
         tasks.Add(WalkTask("placed-baseR", -1, BambooWalk.NodeTransfer.Id));
         tasks.Add(WalkTask(site.WalkLTarget, 0, BambooWalk.NodeTransfer.Id));
-        foreach (var id in new[] { "sep", "diagR" }) tasks.AddRange(Member(id));
         return tasks;
     }
 
@@ -283,7 +283,7 @@ public static class BambooTrussMotion
     /// <summary>L side-grasp IK solutions (rolls about the clamped cane) tried per brachiation clamp point.</summary>
     public const int BrachiateLSolutions = 4;
 
-    public const string PlannerVersion = "grounded-ik-7-ptp-walk";
+    public const string PlannerVersion = "grounded-ik-8-full-bridge";
     public const string DefaultPlanResource = "Motus.Viewer.Services.BambooTrussDefaultPlan.json";
 
     /// <summary>Everything the planner's output depends on (layout, tolerances, version), invariant-formatted.</summary>
