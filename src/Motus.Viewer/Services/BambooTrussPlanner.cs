@@ -716,9 +716,9 @@ public sealed class BambooTrussPlanner
     /// <paramref name="offsetFraction"/> / <paramref name="lSolution"/> pin the clamp point and L IK solution (roll
     /// about the cane) so callers can search them against what R must reach next.
     /// </summary>
-    public bool Brachiate(string anchor, string memberId, double? offsetFraction = null, int lSolution = -1)
+    public bool Brachiate(string anchor, string memberId, double? offsetFraction = null, int lSolution = -1, string cycle = "brachiate")
     {
-        BeginCycle("brachiate");
+        BeginCycle(cycle);
         var startKeys = Keys.Count;
         var snap = Snapshot();
         var placedIds = _placed.Select(p => p.Name["placed-".Length..]).ToList();
@@ -764,9 +764,9 @@ public sealed class BambooTrussPlanner
     /// (out of its open side), side-clamps <paramref name="lCane"/> at <paramref name="lOffsetFraction"/>·(half − 3 cm)
     /// from its centre (IK solution <paramref name="lSolution"/>), the base swaps back to L and R parks.
     /// </summary>
-    public bool HandOverHand(string rCane, string lCane, double lOffsetFraction, int lSolution = -1)
+    public bool HandOverHand(string rCane, string lCane, double lOffsetFraction, int lSolution = -1, string cycle = "hand-over-hand")
     {
-        BeginCycle("hand-over-hand");
+        BeginCycle(cycle);
         var startKeys = Keys.Count;
         var snap = Snapshot();
         var placedIds = _placed.Select(p => p.Name["placed-".Length..]).ToList();
@@ -796,12 +796,59 @@ public sealed class BambooTrussPlanner
                 if (!RRetreat(anchorGrip)) continue;
                 if (!RPark()) continue;
                 _lStake = name;
-                Notes.Add($"hand-over-hand: R clamps {anchorGrip.On} at ({anchorGrip.X:F3},{anchorGrip.Y:F3},{anchorGrip.Z:F3}); L {oldL} → {name} at {lOffsetFraction * (BambooTrussLayout.StrutLength / 2 - 0.03):+0.000;-0.000} m from its centre; R parks");
+                Notes.Add($"{_cycle}: R clamps {anchorGrip.On} at ({anchorGrip.X:F3},{anchorGrip.Y:F3},{anchorGrip.Z:F3}); L {oldL} → {name} at {lOffsetFraction * (BambooTrussLayout.StrutLength / 2 - 0.03):+0.000;-0.000} m from its centre; R parks");
                 return true;
             }
         Restore(snap, startKeys);
         return Fail(string.IsNullOrEmpty(Error) ? $"hand-over-hand: no Motus-clear step onto {name}" : "hand-over-hand: " + Error);
     }
+
+    /// <summary>
+    /// Step off the structure back onto a stake: with L clamped on a placed cane, R clamps <paramref name="rCane"/>
+    /// ("placed-X", fixed at both ends) from the side, the base swaps to R at rest, L opens and backs off its cane out of
+    /// its open side, transits above <paramref name="stakeName"/>, slides down onto it and closes; the base swaps back to
+    /// L and R parks.
+    /// </summary>
+    public bool StepToStake(string rCane, string stakeName, string cycle = "walk-step")
+    {
+        BeginCycle(cycle);
+        var startKeys = Keys.Count;
+        var snap = Snapshot();
+        var fixedBoth = BambooTrussLayout.FixedBothEnds(_placed.Select(p => p.Name["placed-".Length..]));
+        if (!_lStake.StartsWith("placed-", StringComparison.Ordinal) || _base != K.Gripper.L)
+            return Fail("step to stake: L must be the base, clamped on a placed cane");
+        if (!fixedBoth.Contains(rCane["placed-".Length..]))
+            return Fail("step to stake: R may only clamp a cane fixed at both ends");
+        var oldL = _lStake;
+        var oldLine = PlacedPlacement(BambooTrussLayout.Members.First(x => x.Id == oldL["placed-".Length..]));
+        var stake = BambooTrussLayout.StakeNamed(stakeName);
+        foreach (var anchorGrip in AnchorGrips(rCane))
+            for (var idx = 0; idx < 3; idx++)
+            {
+                Restore(snap, startKeys);
+                if (!RGrasp(anchorGrip, anchorGrip.On, 0, pickActive: false, solutionIndex: idx)) continue;
+                if (!SwapTo(K.Gripper.R, anchorGrip.On)) continue;
+                var lf = K.Free(_base, _baseWorld, _q);
+                var a = oldLine.Axis;
+                if (!LBackOff(new K.GripTarget(lf[3], lf[7], lf[11], a.X, a.Y, a.Z, oldL))) continue;
+                if (!LOnto(stake)) continue;
+                if (!SwapTo(K.Gripper.L, stake.Name)) continue;
+                if (!RRetreat(anchorGrip)) continue;
+                if (!RPark()) continue;
+                _lStake = stake.Name;
+                Notes.Add($"{_cycle}: R clamps {anchorGrip.On} at ({anchorGrip.X:F3},{anchorGrip.Y:F3},{anchorGrip.Z:F3}); L {oldL} → {stake.Name}; R parks");
+                return true;
+            }
+        Restore(snap, startKeys);
+        return Fail(string.IsNullOrEmpty(Error) ? $"step to stake: no Motus-clear step onto {stakeName}" : "step to stake: " + Error);
+    }
+
+    /// <summary>World frame of the current base gripper (row-major 4×4, viewer frame).</summary>
+    public double[] BaseWorldNow => _baseWorld.ToArray();
+    /// <summary>Current base gripper ("L" / "R").</summary>
+    public string BaseNow => BaseName;
+    /// <summary>Current joint vector (deg).</summary>
+    public double[] QNow => _q.ToArray();
 
     /// <summary>Open L-grip (R-base) backs straight off the cane it released, out of its open side (+y), Motus-checked.</summary>
     bool LBackOff(K.GripTarget from)
@@ -972,6 +1019,40 @@ public sealed class BambooTrussPlanner
     }
 
     public Checkpoint Save() => new(Snapshot(), Keys.Count, CycleKeys.Count);
+
+    /// <summary>
+    /// Checkpoint that also copies the keys / cycles / grips / notes / placed canes, so a search can branch from it after
+    /// other branches have overwritten the shared lists (BFS over walk states). Restore with <see cref="RollbackDeep"/>.
+    /// </summary>
+    public sealed class DeepCheckpoint
+    {
+        internal DeepCheckpoint(object state, List<BambooIcdMotion.MotionKey> keys, List<(string, int, int)> cycles,
+            List<GripRecord> grips, List<string> notes, List<(string, double[])> placed, string cycle)
+        { State = state; Keys = keys; Cycles = cycles; Grips = grips; Notes = notes; Placed = placed; Cycle = cycle; }
+        internal object State { get; }
+        internal List<BambooIcdMotion.MotionKey> Keys { get; }
+        internal List<(string, int, int)> Cycles { get; }
+        internal List<GripRecord> Grips { get; }
+        internal List<string> Notes { get; }
+        internal List<(string, double[])> Placed { get; }
+        internal string Cycle { get; }
+        public int KeyCount => Keys.Count;
+    }
+
+    public DeepCheckpoint SaveDeep() => new(Snapshot(), Keys.ToList(), CycleKeys.ToList(), Grips.ToList(), Notes.ToList(),
+        _placed.Select(p => (p.Name, p.World)).ToList(), _cycle);
+
+    public void RollbackDeep(DeepCheckpoint c)
+    {
+        Keys.Clear(); Keys.AddRange(c.Keys);
+        CycleKeys.Clear(); CycleKeys.AddRange(c.Cycles);
+        Grips.Clear(); Grips.AddRange(c.Grips);
+        Notes.Clear(); Notes.AddRange(c.Notes);
+        _placed.Clear(); _placed.AddRange(c.Placed);
+        _cycle = c.Cycle;
+        Restore((State)c.State, c.Keys.Count);
+        Error = "";
+    }
 
     public void Rollback(Checkpoint c)
     {
