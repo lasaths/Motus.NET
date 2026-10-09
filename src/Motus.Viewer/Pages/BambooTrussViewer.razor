@@ -42,8 +42,8 @@
                 var canDelete = CanDelete(task);
                 <div class="task">
                     <div class="taskhead">
-                        <span>Task</span>
-                        <span class="used">@(used ? "motion" : "")</span>
+                        <span>@(task.Identity == "walk" ? $"Walk → {task.Object}" : "Task")</span>
+                        <span class="used">@(task.Identity == "walk" ? $"walk · {BambooWalk.GaitNamed(task.Gait).Name}" : used ? "motion" : "")</span>
                     </div>
                     <div class="field">
                         <span>identity</span>
@@ -58,6 +58,18 @@
                         <input type="number" step="1" value="@task.JawMm" @oninput="e => OnJawMm(index, e)" />
                         <em>mm</em>
                     </div>
+                    @if (task.Identity == "walk")
+                    {
+                        <div class="field">
+                            <span>gait</span>
+                            <select value="@(task.Gait ?? BambooWalk.Default.Id)" @onchange="e => OnGait(index, e)">
+                                @foreach (var g in BambooWalk.Gaits)
+                                {
+                                    <option value="@g.Id">@g.Name</option>
+                                }
+                            </select>
+                        </div>
+                    }
                     @foreach (var plane in task.Planes)
                     {
                         var pname = plane.Name;
@@ -141,7 +153,7 @@
     private BambooIcdCell? _cell;
     private CancellationTokenSource? _scanCts;
 
-    private List<BambooIcdMotion.TaskEdit> _tasks = BambooTrussMotion.DefaultTasks();
+    private List<BambooIcdMotion.TaskEdit> _tasks = BambooTrussMotion.ShippedTasks();
     private List<BambooIcdMotion.MotionKey> _keys = new();
     private List<BambooTrussMotion.CycleBound> _cycles = new();
     private BambooTrussScan? _trussScan;
@@ -563,7 +575,7 @@
     {
         StopPlay();
         _manual = false;
-        _tasks = BambooTrussMotion.DefaultTasks();
+        _tasks = BambooTrussMotion.ShippedTasks();
         _scrub = 0;
         _t = 0;
         _gL = BambooTrussLayout.JawClosedMm;
@@ -576,6 +588,7 @@
     {
         // Every object-matched pick/place pair participates in the truss motion.
         var t = _tasks[index];
+        if (t.Identity == "walk") return true;
         if (t.Identity is not ("pick" or "place")) return false;
         return _tasks.Any(o => o.Identity == (t.Identity == "pick" ? "place" : "pick") && o.Object == t.Object);
     }
@@ -595,6 +608,7 @@
         var copy = new BambooIcdMotion.TaskEdit
         {
             Identity = src.Identity,
+            Gait = src.Gait,
             Object = src.Object,
             JawMm = src.JawMm,
             Planes = src.Planes.Select(p => new BambooIcdMotion.PlaneEdit
@@ -619,6 +633,8 @@
         if (frames) await PushFramesAsync();
         await PushPoseAsync();
     }
+
+    private void OnGait(int index, ChangeEventArgs e) => _tasks[index].Gait = e.Value?.ToString();
 
     private async Task OnIdentity(int index, ChangeEventArgs e)
     {

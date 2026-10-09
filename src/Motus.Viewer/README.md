@@ -129,16 +129,15 @@ Open `http://127.0.0.1:5268/bamboo` (single strut pick/place) or
   joint IK (`BambooGripKinematics.SolveGrip`, damped least squares on full FK, 5 constraints: grasp centre on
   the object axis + slot axis along it). Grips are accepted within **0.5 mm / 0.5°** (achieved ≈ 1e-7 mm).
   A base swap happens at rest: the newly clamped gripper's FK frame becomes the base, then the old one opens.
-- **Phases:** `start:Park` → `walk`: R `Transit/Approach/Grasp/Close` on **stake S3** low (y 0.13) →
-  **`swap base L→R`** (own key, at rest) → `L:Open` → `L:Slide up stake-S1` (top + 1.8 cm only) →
-  `L:Above stake-S3` → `L:Slide down stake-S3` → `L:Close stake-S3` → **`swap base R→L`** → `R:Open` →
-  `Retreat` → `R:Park`; then per member `Transit/Approach/Grasp/Close` (R on the stock) → `Lift` → `Carry`
-  (RRT-Connect, Motus-checked, up to 3 attempts) → `Lower` → `Open` (cane released exactly on its member) → `Retreat`;
-  then `brachiate`: R clamps stake S3 (y 0.13) → **`swap base L→R`** → `L:Open` → `L:Slide up stake-S3` →
-  `L:Transit` → `L:Approach placed-baseL` (side approach into the open +y slot) → `L:Close placed-baseL` (0.12 m
-  from baseL's centre, A end) → **`swap base R→L`** → `R:Open` → `Retreat` → `R:Park`. Only canes fixed at both ends
-  are side-clamped. The brachiation option is chosen goal-driven (planner checkpoint per option, judged by the
-  members R can then place; the best one is replayed).
+- **Phases (PTP, shipped):** `start:Park` → `walk`: `PTP via` / `PTP Grasp` / `Close` R on **stake S3** low (y 0.13) →
+  **`swap base L→R`** (own key, at rest) → `L:Open` → `L:PTP off stake-S1` (PTP to top + clear) → `L:PTP via` →
+  `L:PTP to stake-S3` → `L:Close stake-S3` → **`swap base R→L`** → `R:Open` → `PTP Retreat` → `R:Park`; then per member
+  `PTP via` / `PTP Grasp` / `Close` (R on the stock) → `PTP Lift` → `PTP carry via` (joint via-points / RRT-Connect,
+  Motus-checked) → `PTP Place` → `Open` (cane released exactly on its member) → `PTP Retreat`; then three node
+  `walk` blocks (S3 → baseL B end, across B onto baseR, back to S3), each R grasp → `swap base L→R` → `L:Open` →
+  `L:PTP off X` / `L:PTP via` → `L:PTP to Y` → `L:Close Y` → `swap base R→L` → `R:Open` → `PTP Retreat` → `R:Park`.
+  Only canes fixed at both ends are side-clamped (open +y slot). With `Ptp = false` the older Cartesian
+  Approach / Lower / Slide phases and the goal-driven brachiation search are still available.
 - **Collision:** Motus.NET for every link, both grippers, every mount part (now checked against the
   environment, not only self), the held cane, pads, posts, stakes, rail, placed canes (at their real
   released poses) and self. The only allowed touches are a gripper's jaw plates on what it clamps.
@@ -159,6 +158,39 @@ Open `http://127.0.0.1:5268/bamboo` (single strut pick/place) or
   `LayoutFingerprint` with numbers rounded to 1e-6 — WASM and desktop `Math` differ in the last ulp — falls back to live planning if stale; the reason is logged to the browser console as `[bamboo-truss] shipped plan not used — …`). A test requires it to be byte-identical to
   live planning; regenerate with `BAMBOO_TRUSS_WRITE_PLAN=1 dotnet test --filter ShippedDefaultPlan`.
 - **Not built:** sep and diagR (no Motus-clear grasp/place from any allowed support); reported, never faked.
+
+### Walking on the bamboo: the `walk` task block (shipped, PTP)
+
+- **Task block:** a `walk` task is a string-identity task like pick/place: `Identity = "walk"`, `Object` = target
+  clamp ("placed-baseR", "stake-S3"), one plane `target` at the clamp point on that cane (its parameter is read back
+  from the plane), and `Gait`. `BambooTrussMotion.WalkTask(target, f, gait)` builds one; `RunSequence(tasks)` runs
+  walk / pick / place blocks in order (BuildAsync hands over to it when a sequence contains walk blocks). The task list
+  shows walk blocks as "Walk → target" with a gait selector. The default task list is `BambooTrussMotion.ShippedTasks()`: walk to S3, baseL, baseR, diagL, then three node walk blocks (S3 → baseL B end, across B onto baseR, back to S3), then sep / diagR attempts.
+- **Step (every gait):** R clamps something fixed → `swap base L→R` at rest → L opens and leaves its cane (open side)
+  or stake → L clamps the next site → `swap base R→L` at rest → R retreats and parks. One gripper always clamped,
+  joints only, FK-exact clamps, only stakes outboard of A and canes fixed at both ends, nothing carried.
+  `BambooWalk.Explore` is a BFS over L clamp sites (cane, parameter, side) with deep planner checkpoints per site.
+- **Gaits (`BambooWalk.Gaits`):** inchworm (R on L's own cane, L ≤ 7 cm), shuffle (R leads ≤ 13 cm, L closes up one
+  3 cm step behind R), brachiation swing (R beside L, L swings ≥ 10 cm to the farthest site), node transfer (L only
+  next to a joint, f = ±1, node to node), side-clamp roll (inchworm + re-clamping the same point from the other side).
+  Default: node transfer.
+- **PTP only:** `BambooTrussPlanner.Ptp = true` — every move is a joint-space point-to-point segment between IK
+  waypoints (densely Motus-checked, joint via-points / RRT if the direct segment hits; a backed-off pose may be used
+  as a PTP via-point). No Cartesian approach / lower / slide / back-off. Keys are labelled `PTP Grasp`, `PTP Place`,
+  `L:PTP to X`, `PTP via`, `PTP carry via`, `PTP Lift`, `PTP Retreat`. The planner's segment check also verifies the
+  exact sample points the Motus scan uses (fixes a carry graze "R-grip jaw- ↔ ground-S1" the coarser check missed).
+- **Benchmark at 0.30 m (PTP):**
+
+  | Gait | S3 → baseL B end | across B onto baseR | baseR → D end | back to S3 |
+  |---|---|---|---|---|
+  | node transfer | ✔ 1 step (33.6 cm) | ✔ 1 node transfer (5.4 cm) | ✘ | ✔ 1 step |
+  | inchworm / shuffle / swing / roll | ✔ (shared brachiate entry) | ✘ | ✘ | ✔ |
+
+  Winner and default: node transfer. The D end is not reached by any gait and is not in the shipped sequence.
+- **Shipped plan (0.30 m, `grounded-ik-7-ptp-walk`, 88 keys, built baseL / baseR / diagL)** — progress ranges:
+  walk to S3 0–17 %, baseL 17–29 %, baseR 29–42 %, diagL 42–56 %, walk (node) → baseL@-1 56–80 %,
+  walk (node) → baseR@-1 80–88 %, walk (node) → stake-S3 88–100 %. sep / diagR are reported unreachable
+  ("no Motus-clear R grasp of strut … from stake-S3"); stock IK only exists from S3, the C place IK only from the B-end sites.
 
 ## What still differs from the HTML preview
 

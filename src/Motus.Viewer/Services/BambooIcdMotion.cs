@@ -47,6 +47,8 @@ public static class BambooIcdMotion
         public string Object { get; set; } = "strut";
         public double JawMm { get; set; } = 40;
         public List<PlaneEdit> Planes { get; set; } = new();
+        /// <summary>/bamboo-truss walk blocks: the gait (see BambooWalk.Gaits); null = default.</summary>
+        public string? Gait { get; set; }
     }
 
     public sealed class MotionKey
