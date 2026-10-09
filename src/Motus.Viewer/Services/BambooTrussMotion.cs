@@ -448,6 +448,9 @@ public static class BambooTrussMotion
             await Yield("brachiate");
             // Goal-driven: every (cane, R anchor, clamp point) is tried from the same checkpoint and judged by how many
             // of the remaining members can then be placed; the best option is replayed (the planner is deterministic).
+            // PTP: every failing option would otherwise spend 3 × 1500 RRT iterations per transit; the search and its
+            // replay use a cheaper RRT (same settings, so the replay reproduces the chosen option).
+            planner.RrtAttempts = 1; planner.RrtIters = 400;
             var cp = planner.Save();
             var builtCp = built.ToList();
             var doubleFixed = BambooTrussLayout.FixedBothEnds(built).ToList();

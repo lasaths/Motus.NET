@@ -18,7 +18,7 @@ public static class BambooWalk
     public sealed record Site(string On, double F, int Side)
     {
         public bool IsStake => On.StartsWith("stake", StringComparison.Ordinal);
-        public override string ToString() => IsStake ? On : $"{On}@{F:+0.00;-0.00}{(Side > 0 ? "+z" : "−z")}";
+        public override string ToString() => IsStake ? On : $"{On}@{F:+0.00;-0.00}{(Side > 0 ? "+z" : Side < 0 ? "−z" : "")}";
     }
 
     /// <summary>One candidate step: R clamps <paramref name="RAnchor"/> (at <paramref name="RAtM"/> m from a cane's centre
@@ -169,9 +169,10 @@ public static class BambooWalk
     /// <paramref name="rAnchorStake"/> is what R clamps when L is on a stake (e.g. "stake-S3@0.13").
     /// </summary>
     public static Result Explore(BambooTrussPlanner p, Gait gait, string rAnchorStake, Func<Site, bool>? goal = null,
-        int maxSteps = 400, Action<string>? log = null)
+        int maxSteps = 400, Action<string>? log = null, double maxSeconds = 90)
     {
         var res = new Result();
+        var clock = System.Diagnostics.Stopwatch.StartNew();
         var canes = BambooTrussLayout.FixedBothEnds(p.PlacedIds).ToList();
         var cur = Current(p, gait.Offsets);
         var start = gait.TrackSides ? cur : cur with { Side = 0 };
@@ -182,12 +183,15 @@ public static class BambooWalk
         queue.Enqueue(start);
         res.Reachable.Add(start);
         var failed = new HashSet<string>();
-        while (queue.Count > 0 && res.Tried < maxSteps)
+        var rrt0 = p.RrtAttempts; var it0 = p.RrtIters;
+        p.RrtAttempts = RrtAttemptsPerStep; p.RrtIters = RrtItersPerStep;
+        try {
+        while (queue.Count > 0 && res.Tried < maxSteps && clock.Elapsed.TotalSeconds <= maxSeconds)
         {
             var from = queue.Dequeue();
             foreach (var mv in gait.Moves(ctx, from))
             {
-                if (res.Tried >= maxSteps) break;
+                if (res.Tried >= maxSteps || clock.Elapsed.TotalSeconds > maxSeconds) break;
                 var toOn = mv.To.StartsWith("stake", StringComparison.Ordinal) ? mv.To : "placed-" + mv.To;
                 var known = res.Reachable.Count(s => s.On == toOn && Math.Abs(s.F - mv.F) < 1e-9);
                 if (known >= (gait.TrackSides && !mv.To.StartsWith("stake") ? 2 : 1)) continue;
@@ -218,5 +222,11 @@ public static class BambooWalk
         }
         p.RollbackDeep(cps[start]);
         return res;
+        } finally { p.RrtAttempts = rrt0; p.RrtIters = it0; }
     }
+
+    /// <summary>RRT-Connect attempts per transit while searching steps (1: a step that needs luck is skipped).</summary>
+    public static int RrtAttemptsPerStep { get; set; } = 1;
+    /// <summary>RRT-Connect iterations per attempt while searching steps.</summary>
+    public static int RrtItersPerStep { get; set; } = 300;
 }

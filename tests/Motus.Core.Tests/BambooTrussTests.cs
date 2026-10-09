@@ -753,6 +753,112 @@ public class BambooTrussTests
 
     // ---------------- playback ----------------
 
+    // ---------------- walking on the bamboo ----------------
+
+    private static readonly Dictionary<string, BambooTrussMotion.TrussBuild> GaitPlans = new();
+
+    /// <summary>Walk to S3, build the chord, then one walk block with <paramref name="gait"/> to the target.</summary>
+    private static BambooTrussMotion.TrussBuild GaitPlan(string gait, string target, double f)
+    {
+        var key = $"{gait}|{target}|{f}";
+        lock (GaitPlans)
+        {
+            if (GaitPlans.TryGetValue(key, out var b)) return b;
+            BambooTrussMotion.UseCell(Cell);
+            var tasks = new List<BambooIcdMotion.TaskEdit> { BambooTrussMotion.WalkTask(BambooTrussLayout.Current.WalkLTarget) };
+            tasks.AddRange(BambooTrussMotion.DefaultTasks(BambooTrussLayout.Members.Where(m => m.Id is "baseL" or "baseR").ToList()));
+            tasks.Add(BambooTrussMotion.WalkTask(target, f, gait));
+            return GaitPlans[key] = BambooTrussMotion.RunSequence(tasks);
+        }
+    }
+
+    /// <summary>
+    /// Each gait walks its benchmark leg (the one it completes at 0.30 m, see the README table) as a <c>walk</c> task
+    /// block: every step keeps one gripper clamped as the base on a stake or a cane fixed at both ends, swaps happen at
+    /// rest with their own label, every clamp is FK-exact (0.5 mm / 0.5°) and the whole PTP path is Motus-clear.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(GaitLegs))]
+    public void Gait_WalksItsLeg_WithValidSteps_FkExact_MotusClear(string gait, string target, double f)
+    {
+        var built = GaitPlan(gait, target, f);
+        Assert.True(string.IsNullOrEmpty(built.Error), built.Error);
+        Assert.Equal(new[] { "baseL", "baseR" }, built.Built.ToArray());
+        Assert.Contains(built.Notes, n => n.StartsWith($"walk ({gait}) → {target}", StringComparison.Ordinal) && n.Contains("steps —"));
+        Assert.Contains(built.Cycles, c => c.MemberId == "walk " + gait);
+        var keys = built.Keys;
+        var scan = Scan(built);
+        var placedIds = new[] { "baseL", "baseR" };
+        var swaps = 0;
+        for (var k = 1; k < keys.Count; k++)
+        {
+            var a = keys[k - 1]; var b = keys[k];
+            if (a.Base != b.Base)
+            {
+                swaps++;
+                Assert.True(K.JointDist(a.Q, b.Q) < 1e-9, $"{b.Label}: swap not at rest");
+                Assert.EndsWith($"swap base {a.Base}→{b.Base}", b.Label);
+            }
+            else Assert.Equal(a.BaseWorld, b.BaseWorld);
+            Assert.DoesNotContain("Approach", b.Label); // PTP only: no Cartesian approach / lower / slide
+            Assert.DoesNotContain("Lower", b.Label);
+            Assert.DoesNotContain("Slide", b.Label);
+            var jaw = b.Base == "L" ? b.GL : b.GR;
+            Assert.True(jaw <= Closed, $"{b.Label}: base not clamped");
+            var on = b.BaseOn!;
+            Assert.True(on.StartsWith("stake-", StringComparison.Ordinal) ||
+                        (on.StartsWith("placed-", StringComparison.Ordinal) && BambooTrussLayout.FixedBothEnds(placedIds).Contains(on["placed-".Length..])),
+                $"{b.Label}: base on {on}");
+            var (pos, axis, inRange) = OnObject(scan, b.T, on, b.BaseWorld!);
+            Assert.True(pos < K.GripPosTolM && axis < K.GripAxisTolDeg && inRange, $"{b.Label}: base {pos * 1000:F4} mm / {axis:F4}° off {on}");
+        }
+        Assert.True(swaps >= 4);
+        foreach (var g in built.Grips)
+            Assert.True(g.PosM < K.GripPosTolM && g.AxisDeg < K.GripAxisTolDeg, $"{g.Label}: {g.PosM * 1000:F4} mm / {g.AxisDeg:F4}°");
+        var full = Scan(built).RunToEnd();
+        Assert.Null(full.TrackMiss);
+        Assert.True(full.FirstHit is null, $"Motus hit: {full.FirstHit?.Describe()} ({full.FirstHit?.Label})");
+        Assert.Equal(1.0, full.LastClearT, 9);
+    }
+
+    public static IEnumerable<object[]> GaitLegs() => new[]
+    {
+        GAIT_LEGS_PLACEHOLDER
+    };
+
+    [Fact]
+    public void WalkBlock_IsAStringIdentityTask_WithGaitAndTargetPlane()
+    {
+        var t = BambooTrussMotion.WalkTask("placed-baseR", 0.5, "swing");
+        Assert.Equal("walk", t.Identity);
+        Assert.Equal("placed-baseR", t.Object);
+        Assert.Equal("swing", t.Gait);
+        Assert.Equal("target", Assert.Single(t.Planes).Name);
+        Assert.Equal(0.5, BambooTrussMotion.WalkTargetF(t), 9);
+        Assert.Equal(5, BambooWalk.Gaits.Select(g => g.Id).Distinct().Count());
+        Assert.True(BambooTrussPlanner.Ptp);
+    }
+
+    /// <summary>Walk search primitives: deep checkpoints restore the full plan state for branching.</summary>
+    [Fact]
+    public void DeepCheckpoint_RestoresKeysCyclesAndPlacedCanes()
+    {
+        BambooTrussMotion.UseCell(Cell);
+        var p = new BambooTrussPlanner(Cell);
+        Assert.True(p.Start());
+        var cp = p.SaveDeep();
+        var n = p.Keys.Count;
+        Assert.True(p.Walk(BambooTrussLayout.Current.WalkRAnchor, BambooTrussLayout.WalkTarget), p.Error);
+        Assert.True(p.Keys.Count > n);
+        var after = p.SaveDeep();
+        p.RollbackDeep(cp);
+        Assert.Equal(n, p.Keys.Count);
+        Assert.Equal(BambooTrussLayout.S1.Name, p.LStake);
+        p.RollbackDeep(after);
+        Assert.Equal(after.KeyCount, p.Keys.Count);
+        Assert.Equal(BambooTrussLayout.Current.WalkLTarget, p.LStake);
+    }
+
     private static List<string> PlannedPhases(BambooTrussMotion.TrussBuild built) => built.Keys.Select(k => k.Label).ToList();
 
     [Theory]

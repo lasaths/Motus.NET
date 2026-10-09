@@ -32,6 +32,27 @@ public sealed class BambooTrussPlanner
     double[]? PtpIk(K.GripTarget t, double backoff, int axisSign) =>
         K.SolveGrip(_base, _baseWorld, t, new[] { _q }, 16, backoff, axisSign: axisSign).OrderBy(x => K.JointDist(x, _q)).FirstOrDefault();
 
+    /// <summary>
+    /// PTP path to <paramref name="qg"/>: the direct joint segment, else via a PTP waypoint at the pose backed off
+    /// along the free gripper's Y (<paramref name="backoffs"/>; the waypoint → target is one joint-interpolated
+    /// segment, densely checked), else via-points / RRT in joint space. Returns the vias (without qg) or null.
+    /// </summary>
+    List<double[]>? PtpPath(double[] qg, K.GripTarget target, int sign, params double[] backoffs)
+    {
+        if (MoveOk(_q, qg, SearchStepDeg) && MoveOk(_q, qg, VerifyStepDeg)) return new List<double[]>();
+        foreach (var b in backoffs)
+        {
+            var qv = K.SolveGrip(_base, _baseWorld, target, new[] { qg }, 8, b, axisSign: sign).OrderBy(x => K.JointDist(x, qg)).FirstOrDefault();
+            if (qv is null || K.JointDist(qv, qg) > 45) continue;
+            if (!PoseOk(qv, _gR, _gL, _hold, _lOn, _rOn) || !MoveOk(qv, qg, VerifyStepDeg)) continue;
+            var pv = TransitPath(_q, qv);
+            if (pv is null) continue;
+            pv.Add(qv);
+            return pv;
+        }
+        return TransitPath(_q, qg);
+    }
+
     /// <summary>Optional PTP departure from a released object: one joint segment to the pose backed off 4 / 2 cm, if
     /// reachable and Motus-clear; otherwise nothing (the next transit leaves from here, Motus-checked).</summary>
     void PtpDepart(K.GripTarget from, string label, string? lOn, string? rOn)
@@ -225,10 +246,16 @@ public sealed class BambooTrussPlanner
             if (Seg(qa, v) && Seg(v, qb)) return new List<double[]> { v };
         }
         // Up to three RRT-Connect attempts (the shared seeded RNG moves on, so each attempt explores differently).
-        return Rrt(qa, qb) ?? Rrt(qa, qb) ?? Rrt(qa, qb);
+        for (var i = 0; i < RrtAttempts; i++)
+            if (Rrt(qa, qb) is { } path) return path;
+        return null;
     }
 
-    const int RrtIters = 1500;
+    /// <summary>RRT-Connect attempts per transit (walk searches lower it: a failing candidate step costs every attempt).</summary>
+    public int RrtAttempts { get; set; } = 3;
+
+    /// <summary>RRT-Connect iterations per attempt (walk searches lower it).</summary>
+    public int RrtIters { get; set; } = 1500;
     const double RrtStepDeg = 8;
 
     static double Dist2(double[] a, double[] b)
@@ -439,7 +466,7 @@ public sealed class BambooTrussPlanner
                 if (!SegOk(_q, _q, _gR, open, _gL, _gL, _hold, _hold, _lOn, _rOn, VerifyStepDeg)) continue;
                 Emit("Open", _q, gR: open);
             }
-            var path = TransitPath(_q, approach[0]);
+            var path = Ptp ? PtpPath(qg, target, sign, ApproachM, ApproachM / 2) : TransitPath(_q, approach[0]);
             if (path is null)
             {
                 Diag.Add("  no transit to pre-grasp");
@@ -594,7 +621,7 @@ public sealed class BambooTrussPlanner
                     for (var i = 0; i + 1 < down.Count && ok; i++)
                         ok = SegOk(down[i], down[i + 1], _gR, _gR, _gL, _gL, 1, 1, _lOn, _rOn, VerifyStepDeg);
                     if (!ok) { Diag.Add("    lower collides"); continue; }
-                    var path = TransitPath(_q, down[0]);
+                    var path = Ptp ? PtpPath(qp, target, sign, 4 * CartStepM, 2 * CartStepM) : TransitPath(_q, down[0]);
                     if (path is null) { Diag.Add("    no carry path"); continue; }
                     if (Ptp)
                     {
@@ -886,7 +913,7 @@ public sealed class BambooTrussPlanner
         var oldLine = PlacedPlacement(BambooTrussLayout.Members.First(x => x.Id == oldL["placed-".Length..]));
         var stake = BambooTrussLayout.StakeNamed(stakeName);
         foreach (var anchorGrip in AnchorGrips(rCane, rOffsetM))
-            for (var idx = 0; idx < 3; idx++)
+            for (var idx = 0; idx < 2; idx++)
             {
                 Restore(snap, startKeys);
                 if (!RGrasp(anchorGrip, anchorGrip.On, 0, pickActive: false, solutionIndex: idx)) continue;
@@ -988,7 +1015,7 @@ public sealed class BambooTrussPlanner
             {
                 if (!SegOk(qg, qg, _gR, _gR, open, closed, _hold, _hold, onName, _rOn, VerifyStepDeg))
                 { Diag.Add($"  L close on {onName} collides: {BambooIcdCell.Describe(ContactsNow(qg, _gR, closed, _hold, onName, _rOn))}"); continue; }
-                var pp = TransitPath(_q, qg);
+                var pp = PtpPath(qg, target, sign, ApproachM, -ApproachM, ApproachM / 2, -ApproachM / 2);
                 if (pp is null) { Diag.Add("  no L PTP path to the clamp"); continue; }
                 foreach (var v in pp) Emit("L:PTP via", v);
                 Emit($"L:PTP to {onName}", qg);
@@ -1074,13 +1101,24 @@ public sealed class BambooTrussPlanner
         if (Ptp)
         {
             var snap0 = Snapshot(); var keys0 = Keys.Count;
-            foreach (var qc in K.SolveGrip(_base, _baseWorld, stake.Grip, new[] { _q }, 32).OrderBy(x => K.JointDist(x, _q)).Take(8))
+            foreach (var qc in K.SolveGrip(_base, _baseWorld, stake.Grip, new[] { _q }, 32).OrderBy(x => K.JointDist(x, _q)).Take(4))
             {
                 Restore(snap0, keys0);
                 if (!PoseOk(qc, _gR, _gL, _hold, _lOn, _rOn)) continue;
                 var closedL = BambooTrussLayout.JawClosedMm;
                 if (!SegOk(qc, qc, _gR, _gR, _gL, closedL, _hold, _hold, stake.Name, _rOn, VerifyStepDeg)) continue;
-                var pp = TransitPath(_q, qc);
+                List<double[]>? pp = null;
+                if (MoveOk(_q, qc, SearchStepDeg) && MoveOk(_q, qc, VerifyStepDeg)) pp = new List<double[]>();
+                if (pp is null)
+                {
+                    // PTP waypoint above the stake's free top, then one joint segment down onto the clamp pose.
+                    var sgn = K.Free(_base, _baseWorld, qc)[6] >= 0 ? 1 : -1;
+                    var qa = K.SolveGrip(_base, _baseWorld, stake.At(stake.Top + BambooTrussLayout.StakeSlideClear), new[] { qc }, 8, axisSign: sgn)
+                        .OrderBy(x => K.JointDist(x, qc)).FirstOrDefault();
+                    if (qa is not null && K.JointDist(qa, qc) < 45 && PoseOk(qa, _gR, _gL, _hold, _lOn, _rOn) && MoveOk(qa, qc, VerifyStepDeg) &&
+                        TransitPath(_q, qa) is { } pa) { pa.Add(qa); pp = pa; }
+                }
+                pp ??= TransitPath(_q, qc);
                 if (pp is null) continue;
                 foreach (var v in pp) Emit("L:PTP via", v);
                 Emit($"L:PTP to {stake.Name}", qc);
