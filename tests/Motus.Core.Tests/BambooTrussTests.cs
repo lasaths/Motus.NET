@@ -823,7 +823,11 @@ public class BambooTrussTests
 
     public static IEnumerable<object[]> GaitLegs() => new[]
     {
-        GAIT_LEGS_PLACEHOLDER
+        new object[] { "node", "placed-baseR", -1.0 },     // S3 → baseL B end → across B onto baseR (2 steps)
+        new object[] { "inchworm", "placed-baseL", -1.0 },
+        new object[] { "shuffle", "placed-baseL", -1.0 },
+        new object[] { "swing", "placed-baseL", -1.0 },
+        new object[] { "roll", "placed-baseL", -1.0 },
     };
 
     [Fact]

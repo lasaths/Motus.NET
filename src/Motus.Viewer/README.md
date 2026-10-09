@@ -160,6 +160,27 @@ Open `http://127.0.0.1:5268/bamboo` (single strut pick/place) or
   live planning; regenerate with `BAMBOO_TRUSS_WRITE_PLAN=1 dotnet test --filter ShippedDefaultPlan`.
 - **Not built:** sep and diagR (no Motus-clear grasp/place from any allowed support); reported, never faked.
 
+### Walking on the bamboo: the `walk` task block (branch `cursor/walk-behaviour`, work in progress)
+
+- **Task block:** a `walk` task is a string-identity task like pick/place: `Identity = "walk"`, `Object` = target
+  clamp ("placed-baseR", "stake-S3"), one plane `target` at the clamp point on that cane (its parameter is read back
+  from the plane), and `Gait`. `BambooTrussMotion.WalkTask(target, f, gait)` builds one; `RunSequence(tasks)` runs
+  walk / pick / place blocks in order (BuildAsync hands over to it when a sequence contains walk blocks). The task list
+  shows walk blocks as "Walk → target" with a gait selector. The default task list (and the shipped plan) has no walk blocks.
+- **Step (every gait):** R clamps something fixed → `swap base L→R` at rest → L opens and leaves its cane (open side)
+  or stake → L clamps the next site → `swap base R→L` at rest → R retreats and parks. One gripper always clamped,
+  joints only, FK-exact clamps, only stakes outboard of A and canes fixed at both ends, nothing carried.
+  `BambooWalk.Explore` is a BFS over L clamp sites (cane, parameter, side) with deep planner checkpoints per site.
+- **Gaits (`BambooWalk.Gaits`):** inchworm (R on L's own cane, L ≤ 7 cm), shuffle (R leads ≤ 13 cm, L closes up one
+  3 cm step behind R), brachiation swing (R beside L, L swings ≥ 10 cm to the farthest site), node transfer (L only
+  next to a joint, f = ±1, node to node), side-clamp roll (inchworm + re-clamping the same point from the other side).
+  Default: node transfer.
+- **PTP only:** `BambooTrussPlanner.Ptp = true` — every move is a joint-space point-to-point segment between IK
+  waypoints (densely Motus-checked, joint via-points / RRT if the direct segment hits; a backed-off pose may be used
+  as a PTP via-point). No Cartesian approach / lower / slide / back-off. Keys are labelled `PTP Grasp`, `PTP Place`,
+  `L:PTP to X`, `PTP via`.
+- **Status:** see the benchmark table in the branch notes; the shipped 0.30 m plan on `cursor/task-model-e962` is unchanged.
+
 ## What still differs from the HTML preview
 
 - The planner keeps the HTML's point-model floor heuristics only as IK-branch *preferences*
