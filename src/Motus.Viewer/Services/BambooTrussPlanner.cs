@@ -640,7 +640,7 @@ public sealed class BambooTrussPlanner
                     if (path is null) { Diag.Add("    no carry path"); continue; }
                     if (Ptp)
                     {
-                        foreach (var v in path) Emit("Carry PTP via", v);
+                        foreach (var v in path) Emit("PTP carry via", v);
                         Emit("PTP Place", qp);
                     }
                     else
