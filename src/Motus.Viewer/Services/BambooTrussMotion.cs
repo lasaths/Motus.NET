@@ -177,6 +177,31 @@ public static class BambooTrussMotion
         return tasks;
     }
 
+    /// <summary>
+    /// The shipped /bamboo-truss task sequence: walk to S3 (stake walk), build baseL, baseR and diagL, then walk on the
+    /// bamboo with node-transfer walk blocks — S3 → baseL B end → across B onto baseR → back to S3 — and finally try
+    /// sep and diagR (reported honestly when they cannot be placed).
+    /// </summary>
+    public static List<BambooIcdMotion.TaskEdit> ShippedTasks()
+    {
+        var site = BambooTrussLayout.Current;
+        var byId = BambooTrussLayout.Members.ToDictionary(m => m.Id);
+        List<BambooIcdMotion.TaskEdit> Member(string id) => DefaultTasks(new[] { byId[id] });
+        var tasks = new List<BambooIcdMotion.TaskEdit> { WalkTask(site.WalkLTarget) };
+        foreach (var id in new[] { "baseL", "baseR", "diagL" }) tasks.AddRange(Member(id));
+        tasks.Add(WalkTask("placed-baseL", -1, BambooWalk.NodeTransfer.Id));
+        tasks.Add(WalkTask("placed-baseR", -1, BambooWalk.NodeTransfer.Id));
+        tasks.Add(WalkTask(site.WalkLTarget, 0, BambooWalk.NodeTransfer.Id));
+        foreach (var id in new[] { "sep", "diagR" }) tasks.AddRange(Member(id));
+        return tasks;
+    }
+
+    static string Signature(IEnumerable<BambooIcdMotion.TaskEdit> tasks) =>
+        string.Join(";", tasks.Select(t => t.Identity == "walk" ? $"walk:{t.Object}:{FingerprintNumber(WalkTargetF(t))}:{t.Gait}" : $"{t.Identity}:{t.Object}"));
+
+    /// <summary>True when <paramref name="tasks"/> is the shipped sequence (the build-time plan applies).</summary>
+    public static bool IsShippedSequence(IReadOnlyList<BambooIcdMotion.TaskEdit> tasks) => Signature(tasks) == Signature(ShippedTasks());
+
     /// <summary>Per-walk-block outcome (for the benchmark table).</summary>
     public sealed record WalkLeg(string Target, string Gait, bool Ok, int Steps, int Tried, double StrideM, double Seconds,
         List<BambooWalk.Step> Path, BambooWalk.Result Search);
@@ -224,7 +249,8 @@ public static class BambooTrussMotion
                 continue;
             }
             bool Goal(BambooWalk.Site s) => s.On == target && (s.IsStake || Math.Abs(s.F - f) < 1e-9);
-            var res = BambooWalk.Explore(p, gait, site.WalkRAnchor, Goal, maxStepsPerWalk, log);
+            var label = target.StartsWith("stake", StringComparison.Ordinal) ? target : $"{target["placed-".Length..]}@{f:+0.00;-0.00}";
+            var res = BambooWalk.Explore(p, gait, site.WalkRAnchor, Goal, maxStepsPerWalk, log, cycleName: $"walk ({gait.Id}) → {label}");
             var path = res.Reached is { } r ? res.PathTo(r) : new List<BambooWalk.Step>();
             var leg = new WalkLeg($"{target}@{f:+0.00;-0.00}", gait.Id, res.Reached is not null, path.Count, res.Tried,
                 path.Count == 0 ? 0 : path.Average(x => x.StrideM), sw.Elapsed.TotalSeconds, path, res);
@@ -257,7 +283,7 @@ public static class BambooTrussMotion
     /// <summary>L side-grasp IK solutions (rolls about the clamped cane) tried per brachiation clamp point.</summary>
     public const int BrachiateLSolutions = 4;
 
-    public const string PlannerVersion = "grounded-ik-6-open-l";
+    public const string PlannerVersion = "grounded-ik-7-ptp-walk";
     public const string DefaultPlanResource = "Motus.Viewer.Services.BambooTrussDefaultPlan.json";
 
     /// <summary>Everything the planner's output depends on (layout, tolerances, version), invariant-formatted.</summary>
@@ -367,8 +393,18 @@ public static class BambooTrussMotion
         Func<string, Task>? onMember = null,
         bool useCache = false)
     {
-        tasks ??= DefaultTasks();
-        if (tasks.Any(t => t.Identity == "walk")) return RunSequence(tasks);
+        tasks ??= ShippedTasks();
+        if (tasks.Any(t => t.Identity == "walk"))
+        {
+            if (useCache && IsShippedSequence(tasks) && LoadCachedDefaultPlan() is { } shipped)
+            {
+                shipped.Tasks = tasks.ToList();
+                return shipped;
+            }
+            if (useCache) Console.WriteLine("[bamboo-truss] shipped plan not used — tasks are not the shipped sequence");
+            if (onMember is not null) await onMember("walk");
+            return RunSequence(tasks);
+        }
         var pairs = Pairs(tasks);
         if (pairs.Count == 0)
             return new TrussBuild { Error = "No pick/place pairs (object-matched).", Tasks = tasks.ToList() };

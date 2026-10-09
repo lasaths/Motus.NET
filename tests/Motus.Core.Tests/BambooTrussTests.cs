@@ -785,7 +785,7 @@ public class BambooTrussTests
         Assert.True(string.IsNullOrEmpty(built.Error), built.Error);
         Assert.Equal(new[] { "baseL", "baseR" }, built.Built.ToArray());
         Assert.Contains(built.Notes, n => n.StartsWith($"walk ({gait}) → {target}", StringComparison.Ordinal) && n.Contains("steps —"));
-        Assert.Contains(built.Cycles, c => c.MemberId == "walk " + gait);
+        Assert.Contains(built.Cycles, c => c.MemberId.StartsWith($"walk ({gait}) → ", StringComparison.Ordinal));
         var keys = built.Keys;
         var scan = Scan(built);
         var placedIds = new[] { "baseL", "baseR" };

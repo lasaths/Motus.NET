@@ -169,7 +169,7 @@ public static class BambooWalk
     /// <paramref name="rAnchorStake"/> is what R clamps when L is on a stake (e.g. "stake-S3@0.13").
     /// </summary>
     public static Result Explore(BambooTrussPlanner p, Gait gait, string rAnchorStake, Func<Site, bool>? goal = null,
-        int maxSteps = 400, Action<string>? log = null, double maxSeconds = 90)
+        int maxSteps = 400, Action<string>? log = null, double maxSeconds = 90, string? cycleName = null)
     {
         var res = new Result();
         var clock = System.Diagnostics.Stopwatch.StartNew();
@@ -200,7 +200,7 @@ public static class BambooWalk
                 if (!failed.Add(sig)) continue;
                 p.RollbackDeep(cps[from]);
                 res.Tried++;
-                var cycle = $"walk {gait.Id}";
+                var cycle = cycleName ?? $"walk {gait.Id}";
                 var ok = mv.Kind switch
                 {
                     "brachiate" => p.Brachiate(mv.RAnchor, mv.To, mv.F, mv.LSol, cycle),

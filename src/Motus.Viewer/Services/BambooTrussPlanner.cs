@@ -177,8 +177,23 @@ public sealed class BambooTrussPlanner
             for (var k = 0; k < 5; k++) q[k] = qa[k] + (qb[k] - qa[k]) * u;
             if (!PoseOk(q, gRa + (gRb - gRa) * u, gLa + (gLb - gLa) * u, s == n ? holdB : holdA, lOn, rOn)) return false;
         }
+        // The verifying pass also checks exactly the samples BambooTrussScan takes on this segment (it samples every
+        // ≤ ScanStepDeg / 1.5), so a shallow graze between the planner's own samples cannot slip through.
+        if (step <= VerifyStepDeg)
+        {
+            var ns = Math.Max(1, (int)Math.Ceiling(1.5 * Math.Max(dq / ScanStepDeg, dg / 0.25)));
+            for (var s = 1; s < ns; s++)
+            {
+                var u = s / (double)ns;
+                for (var k = 0; k < 5; k++) q[k] = qa[k] + (qb[k] - qa[k]) * u;
+                if (!PoseOk(q, gRa + (gRb - gRa) * u, gLa + (gLb - gLa) * u, holdB, lOn, rOn)) return false;
+            }
+        }
         return true;
     }
+
+    /// <summary>Joint step of the playback / test scan (BambooTrussScan maxStepDeg).</summary>
+    public const double ScanStepDeg = 0.5;
 
     bool MoveOk(double[] qa, double[] qb, double step) =>
         SegOk(qa, qb, _gR, _gR, _gL, _gL, _hold, _hold, _lOn, _rOn, step);
