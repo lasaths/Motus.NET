@@ -620,6 +620,7 @@ public sealed class BambooTrussPlanner
                 var sols = K.SolveGrip(_base, _baseWorld, target, new[] { _q }, 32, axisSign: sign)
                     .OrderBy(x => K.JointDist(x, _q)).Take(8).ToList();
                 Diag.Add($"  place flip={flip}: {sols.Count} IK solutions");
+                var placeSnap = Snapshot(); var placeKeys = Keys.Count; var placeROn = _rOn;
                 foreach (var qp in sols)
                 {
                     if (!PoseOk(qp, _gR, _gL, 1, _lOn, _rOn)) { Diag.Add($"    place pose collides: {BambooIcdCell.Describe(ContactsNow(qp, _gR, _gL, 1, _lOn, _rOn))}"); continue; }
@@ -663,6 +664,14 @@ public sealed class BambooTrussPlanner
                     Emit("Open", qp, gR: BambooTrussLayout.JawOpenMm, hold: 2);
                     _rOn = null;
                     if (!RRetreat(target)) return false;
+                    // PTP: the placement must leave R a way out — it parks (Motus-clear transit) before the member
+                    // counts as placed; a pose that wedges R between the canes moves on to the next solution.
+                    if (Ptp && !RPark())
+                    {
+                        Diag.Add("    R wedged after the place (no park)");
+                        Restore(placeSnap, placeKeys); _rOn = placeROn;
+                        continue;
+                    }
                     placed = true;
                     break;
                 }
