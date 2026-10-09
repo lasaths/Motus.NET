@@ -125,6 +125,129 @@ public static class BambooTrussMotion
         return pairs;
     }
 
+    // ---------------- walk task block ----------------
+
+    /// <summary>
+    /// A <c>walk</c> task block for /bamboo-truss: string identity "walk", <c>Object</c> = the target clamp object
+    /// ("placed-baseR", "stake-S3"), one plane "target" at the clamp point on that cane (its parameter along the cane is
+    /// read back from the plane position), and <c>Gait</c> = one of <see cref="BambooWalk.Gaits"/> (null = default).
+    /// </summary>
+    public static BambooIcdMotion.TaskEdit WalkTask(string target, double f = 0, string? gait = null)
+    {
+        BambooIcdCell.StrutPlacement at;
+        if (target.StartsWith("stake", StringComparison.Ordinal))
+        {
+            var st = BambooTrussLayout.StakeNamed(target);
+            at = new BambooIcdCell.StrutPlacement(st.X, st.ClampY, st.Z, -90, 0);
+        }
+        else
+        {
+            var m = BambooTrussLayout.Members.First(x => "placed-" + x.Id == target).Place;
+            var pos = BambooWalk.Pos(target, f);
+            at = new BambooIcdCell.StrutPlacement(pos.X, pos.Y, pos.Z, m.PitchDeg, m.YawDeg);
+        }
+        return new BambooIcdMotion.TaskEdit
+        {
+            Identity = "walk", Object = target, JawMm = BambooTrussLayout.JawClosedMm, Gait = gait,
+            Planes = [Plane("target", at, 0)]
+        };
+    }
+
+    /// <summary>Target parameter of a walk block: its "target" plane projected on the cane, as a fraction of half − 3 cm.</summary>
+    public static double WalkTargetF(BambooIcdMotion.TaskEdit t)
+    {
+        if (t.Object.StartsWith("stake", StringComparison.Ordinal)) return 0;
+        var pl = t.Planes.FirstOrDefault(x => x.Name == "target");
+        if (pl is null) return 0;
+        var m = BambooTrussLayout.Members.First(x => "placed-" + x.Id == t.Object).Place; var u = m.Axis;
+        return Math.Round(((pl.X - m.X) * u.X + (pl.Y0 + pl.YMm / 1000 - m.Y) * u.Y + (pl.Z - m.Z) * u.Z) / BambooWalk.Half * 4) / 4;
+    }
+
+    /// <summary>The walking benchmark at the shipped site: walk to S3, build the chord, then S3 → baseL B end → across B
+    /// onto baseR → baseR D end → back to S3, all with <paramref name="gait"/>.</summary>
+    public static List<BambooIcdMotion.TaskEdit> WalkBenchmarkTasks(string? gait = null)
+    {
+        var members = DefaultTasks(BambooTrussLayout.Members.Where(m => m.Id is "baseL" or "baseR").ToList());
+        var tasks = new List<BambooIcdMotion.TaskEdit> { WalkTask(BambooTrussLayout.Current.WalkLTarget) };
+        tasks.AddRange(members);
+        tasks.Add(WalkTask("placed-baseL", -1, gait));
+        tasks.Add(WalkTask("placed-baseR", -1, gait));
+        tasks.Add(WalkTask("placed-baseR", 1, gait));
+        tasks.Add(WalkTask(BambooTrussLayout.Current.WalkLTarget, 0, gait));
+        return tasks;
+    }
+
+    /// <summary>Per-walk-block outcome (for the benchmark table).</summary>
+    public sealed record WalkLeg(string Target, string Gait, bool Ok, int Steps, int Tried, double StrideM, double Seconds,
+        List<BambooWalk.Step> Path, BambooWalk.Result Search);
+
+    /// <summary>
+    /// Run a task sequence in order: <c>walk</c> blocks walk (stake → stake with the stake walk; otherwise
+    /// <see cref="BambooWalk.Explore"/> with the block's gait), pick/place pairs build their member (only with one end
+    /// fixed). Failures are noted and the sequence continues.
+    /// </summary>
+    public static TrussBuild RunSequence(IReadOnlyList<BambooIcdMotion.TaskEdit> tasks, Action<string>? log = null,
+        List<WalkLeg>? legs = null, int maxStepsPerWalk = 150)
+    {
+        var cell = TryCell();
+        if (cell is null) return new TrussBuild { Error = "Motus cell required (call UseCell with the viewer BambooIcdCell).", Tasks = tasks.ToList() };
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        var site = BambooTrussLayout.Current;
+        var p = new BambooTrussPlanner(cell);
+        var notes = new List<string>();
+        var built = new List<string>();
+        if (!p.Start()) return new TrussBuild { Error = p.Error, Tasks = tasks.ToList() };
+        BambooIcdMotion.TaskEdit? pick = null;
+        foreach (var t in tasks)
+        {
+            if (t.Identity == "pick") { pick = t; continue; }
+            if (t.Identity == "place" && pick is not null && pick.Object == t.Object)
+            {
+                pick = null;
+                var m = BambooTrussLayout.Members.FirstOrDefault(x => x.Id == t.Object);
+                if (m is null) { notes.Add($"{t.Object}: not a truss member — skipped"); continue; }
+                var fx = BambooTrussLayout.FixedNodes(built);
+                if (!fx.Contains(NodeName(m.EdgeA)) && !fx.Contains(NodeName(m.EdgeB))) { notes.Add($"{m.Id}: not built — neither end is fixed yet"); continue; }
+                if (p.BuildMember(m)) { built.Add(m.Id); log?.Invoke($"{m.Id}: built"); }
+                else { notes.Add($"{m.Id}: not built — {p.Error}"); log?.Invoke($"{m.Id}: {p.Error}"); }
+                continue;
+            }
+            if (t.Identity != "walk") continue;
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            var gait = BambooWalk.GaitNamed(t.Gait);
+            var target = t.Object; var f = WalkTargetF(t);
+            if (target.StartsWith("stake", StringComparison.Ordinal) && p.LStake.StartsWith("stake", StringComparison.Ordinal))
+            {
+                if (p.LStake == target) continue;
+                var ok = p.Walk(site.WalkRAnchor, BambooTrussLayout.StakeNamed(target));
+                notes.Add(ok ? $"walk → {target}: stake walk" : $"walk → {target}: not planned — {p.Error}");
+                continue;
+            }
+            bool Goal(BambooWalk.Site s) => s.On == target && (s.IsStake || Math.Abs(s.F - f) < 1e-9);
+            var res = BambooWalk.Explore(p, gait, site.WalkRAnchor, Goal, maxStepsPerWalk, log);
+            var path = res.Reached is { } r ? res.PathTo(r) : new List<BambooWalk.Step>();
+            var leg = new WalkLeg($"{target}@{f:+0.00;-0.00}", gait.Id, res.Reached is not null, path.Count, res.Tried,
+                path.Count == 0 ? 0 : path.Average(x => x.StrideM), sw.Elapsed.TotalSeconds, path, res);
+            legs?.Add(leg);
+            notes.Add(res.Reached is { } rr
+                ? $"walk ({gait.Id}) → {rr}: {path.Count} steps — " + string.Join(" → ", path.Select(x => $"{x.Kind} (R on {x.RAnchor}) to {x.To}"))
+                : $"walk ({gait.Id}) → {target}@{f:+0.00;-0.00}: not reachable with this gait ({res.Tried} steps tried, {res.Reachable.Count} sites reached)");
+            log?.Invoke(notes[^1]);
+        }
+        p.StampTimes();
+        cell.SetMountViewer(BambooTrussLayout.StartBase);
+        var keys = p.Keys;
+        var cycles = new List<CycleBound>();
+        foreach (var (name, first, last) in p.CycleKeys)
+        {
+            if (last < first) continue;
+            cycles.Add(new CycleBound { MemberId = name, FirstKey = first, LastKey = last, T0 = first > 0 ? keys[first - 1].T : 0, T1 = keys[last].T });
+        }
+        notes.InsertRange(0, p.Notes);
+        notes.Add($"planned in {clock.Elapsed.TotalSeconds:F1} s ({p.Checks} Motus pose checks)");
+        return new TrussBuild { Keys = keys, Cycles = cycles, Grips = p.Grips, Notes = notes, Built = built, MotusChecks = p.Checks, Tasks = tasks.ToList() };
+    }
+
     public static TrussBuild Build(IReadOnlyList<BambooIcdMotion.TaskEdit>? tasks = null, bool useCache = false) =>
         BuildAsync(tasks, null, useCache).GetAwaiter().GetResult();
 
@@ -245,6 +368,7 @@ public static class BambooTrussMotion
         bool useCache = false)
     {
         tasks ??= DefaultTasks();
+        if (tasks.Any(t => t.Identity == "walk")) return RunSequence(tasks);
         var pairs = Pairs(tasks);
         if (pairs.Count == 0)
             return new TrussBuild { Error = "No pick/place pairs (object-matched).", Tasks = tasks.ToList() };
