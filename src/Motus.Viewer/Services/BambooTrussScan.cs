@@ -197,6 +197,9 @@ public sealed class BambooTrussScan
         if (_cycles.Count == 0) return env;
         var w = _world[BambooTrussMotion.CycleIndexAt(_keys, _cycles, t)];
         foreach (var (name, m) in w.Placed) env.Add(_cell.StrutAt(m, name));
+        var hubIds = w.Placed.Select(p => p.Name["placed-".Length..]).ToList();
+        if (w.ActiveId is not null && hold == 2 && w.Released is not null) hubIds.Add(w.ActiveId);
+        env.AddRange(BambooTrussLayout.HubObjects(hubIds));
         if (w.ActiveId is null && w.Rest is not null) env.Add(_cell.StrutAt(w.Rest, BambooIcdCell.Strut));
         if (w.ActiveId is not null)
         {
@@ -208,6 +211,16 @@ public sealed class BambooTrussScan
     }
 
     /// <summary>Viewer poses for every cane (placed members, active cane on the feed / held / released).</summary>
+    /// <summary>Inner-node connectors present at t (for drawing; same rule as <see cref="EnvironmentAt"/>).</summary>
+    public List<string> HubsAt(double t, int hold)
+    {
+        if (_cycles.Count == 0) return new List<string>();
+        var w = _world[BambooTrussMotion.CycleIndexAt(_keys, _cycles, t)];
+        var ids = w.Placed.Select(p => p.Name["placed-".Length..]).ToList();
+        if (w.ActiveId is not null && hold == 2 && w.Released is not null) ids.Add(w.ActiveId);
+        return BambooTrussLayout.InnerHubNodes(ids);
+    }
+
     public List<(string Name, double[] Pose)> StrutPoses(double t, int hold, IReadOnlyList<double> qDeg)
     {
         var list = new List<(string, double[])>();

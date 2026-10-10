@@ -135,7 +135,7 @@ public static class BambooTrussMotion
     public static BambooIcdMotion.TaskEdit WalkTask(string target, double f = 0, string? gait = null)
     {
         BambooIcdCell.StrutPlacement at;
-        if (target.StartsWith("stake", StringComparison.Ordinal))
+        if (BambooTrussLayout.IsSupport(target))
         {
             var st = BambooTrussLayout.StakeNamed(target);
             at = new BambooIcdCell.StrutPlacement(st.X, st.ClampY, st.Z, -90, 0);
@@ -156,7 +156,7 @@ public static class BambooTrussMotion
     /// <summary>Target parameter of a walk block: its "target" plane projected on the cane, as a fraction of half − 3 cm.</summary>
     public static double WalkTargetF(BambooIcdMotion.TaskEdit t)
     {
-        if (t.Object.StartsWith("stake", StringComparison.Ordinal)) return 0;
+        if (BambooTrussLayout.IsSupport(t.Object)) return 0;
         var pl = t.Planes.FirstOrDefault(x => x.Name == "target");
         if (pl is null) return 0;
         var m = BambooTrussLayout.Members.First(x => "placed-" + x.Id == t.Object).Place; var u = m.Axis;
@@ -187,11 +187,12 @@ public static class BambooTrussMotion
         var site = BambooTrussLayout.Current;
         var byId = BambooTrussLayout.Members.ToDictionary(m => m.Id);
         List<BambooIcdMotion.TaskEdit> Member(string id) => DefaultTasks(new[] { byId[id] });
-        var tasks = new List<BambooIcdMotion.TaskEdit> { WalkTask(site.WalkLTarget) };
-        // The whole bridge from S3 (diagR before sep: see SiteDefaults.Chosen), then node-transfer walk blocks on it.
-        foreach (var id in new[] { "baseL", "baseR", "diagL", "diagR", "sep" }) tasks.AddRange(Member(id));
-        tasks.Add(WalkTask("placed-baseL", -1, BambooWalk.NodeTransfer.Id));
-        tasks.Add(WalkTask("placed-baseR", -1, BambooWalk.NodeTransfer.Id));
+        // Triangle 1 from the A column (A–T1, T1–M, A–M), walk onto the closed triangle (node transfer onto A–M),
+        // try the far members from there (reported when unreachable), walk back onto the A column.
+        var tasks = new List<BambooIcdMotion.TaskEdit>();
+        foreach (var id in new[] { "AT1", "T1M", "AM" }) tasks.AddRange(Member(id));
+        tasks.Add(WalkTask("placed-AM", -1, BambooWalk.NodeTransfer.Id));
+        foreach (var id in new[] { "MT2", "T1T2", "MD", "T2D" }) tasks.AddRange(Member(id));
         tasks.Add(WalkTask(site.WalkLTarget, 0, BambooWalk.NodeTransfer.Id));
         return tasks;
     }
@@ -231,8 +232,8 @@ public static class BambooTrussMotion
                 pick = null;
                 var m = BambooTrussLayout.Members.FirstOrDefault(x => x.Id == t.Object);
                 if (m is null) { notes.Add($"{t.Object}: not a truss member — skipped"); continue; }
-                var fx = BambooTrussLayout.FixedNodes(built);
-                if (!fx.Contains(NodeName(m.EdgeA)) && !fx.Contains(NodeName(m.EdgeB))) { notes.Add($"{m.Id}: not built — neither end is fixed yet"); continue; }
+                var fx = BambooTrussLayout.ExistingNodes(built);
+                if (!fx.Contains(m.NodeA) && !fx.Contains(m.NodeB)) { notes.Add($"{m.Id}: not built — neither end node exists yet"); continue; }
                 if (p.BuildMember(m)) { built.Add(m.Id); log?.Invoke($"{m.Id}: built"); }
                 else { notes.Add($"{m.Id}: not built — {p.Error}"); log?.Invoke($"{m.Id}: {p.Error}"); }
                 continue;
@@ -241,7 +242,7 @@ public static class BambooTrussMotion
             var sw = System.Diagnostics.Stopwatch.StartNew();
             var gait = BambooWalk.GaitNamed(t.Gait);
             var target = t.Object; var f = WalkTargetF(t);
-            if (target.StartsWith("stake", StringComparison.Ordinal) && p.LStake.StartsWith("stake", StringComparison.Ordinal))
+            if (BambooTrussLayout.IsSupport(target) && BambooTrussLayout.IsSupport(p.LStake))
             {
                 if (p.LStake == target) continue;
                 var ok = p.Walk(site.WalkRAnchor, BambooTrussLayout.StakeNamed(target));
@@ -249,7 +250,7 @@ public static class BambooTrussMotion
                 continue;
             }
             bool Goal(BambooWalk.Site s) => s.On == target && (s.IsStake || Math.Abs(s.F - f) < 1e-9);
-            var label = target.StartsWith("stake", StringComparison.Ordinal) ? target : $"{target["placed-".Length..]}@{f:+0.00;-0.00}";
+            var label = BambooTrussLayout.IsSupport(target) ? target : $"{target["placed-".Length..]}@{f:+0.00;-0.00}";
             var res = BambooWalk.Explore(p, gait, site.WalkRAnchor, Goal, maxStepsPerWalk, log, cycleName: $"walk ({gait.Id}) → {label}");
             var path = res.Reached is { } r ? res.PathTo(r) : new List<BambooWalk.Step>();
             var leg = new WalkLeg($"{target}@{f:+0.00;-0.00}", gait.Id, res.Reached is not null, path.Count, res.Tried,
@@ -283,7 +284,7 @@ public static class BambooTrussMotion
     /// <summary>L side-grasp IK solutions (rolls about the clamped cane) tried per brachiation clamp point.</summary>
     public const int BrachiateLSolutions = 4;
 
-    public const string PlannerVersion = "grounded-ik-8-full-bridge";
+    public const string PlannerVersion = "warren-pit-1";
     public const string DefaultPlanResource = "Motus.Viewer.Services.BambooTrussDefaultPlan.json";
 
     /// <summary>Everything the planner's output depends on (layout, tolerances, version), invariant-formatted.</summary>

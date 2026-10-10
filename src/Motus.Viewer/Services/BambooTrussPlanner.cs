@@ -110,6 +110,10 @@ public sealed class BambooTrussPlanner
         var env = new List<CollisionObject>(_cell.GroundObjects);
         env.AddRange(BambooTrussLayout.FixtureObjects);
         foreach (var (name, w) in _placed) env.Add(_cell.StrutAt(w, name));
+        // Node connectors at inner nodes: present once a placed (or just released) member reaches them.
+        var hubIds = _placed.Select(p => p.Name["placed-".Length..]).ToList();
+        if (_activeId is not null && hold == 2 && _activeReleased is not null) hubIds.Add(_activeId);
+        env.AddRange(BambooTrussLayout.HubObjects(hubIds));
         if (_activeId is not null)
         {
             if (hold == 0 && _activeRest is not null) env.Add(_cell.StrutAt(_activeRest, BambooIcdCell.Strut));
@@ -852,7 +856,14 @@ public sealed class BambooTrussPlanner
                 Restore(snap, startKeys);
                 if (!RGrasp(anchorGrip, anchorGrip.On, 0, pickActive: false, solutionIndex: idx)) continue;
                 if (!SwapTo(K.Gripper.R, anchorGrip.On)) continue;
-                if (!LSlide(from, up: true)) continue;
+                // A stake with a free top: slide up off it. An anchor column (connector above): back off sideways
+                // out of the L-grip's open side.
+                if (from.Name.StartsWith("anchor-", StringComparison.Ordinal))
+                {
+                    var lf0 = K.Free(_base, _baseWorld, _q);
+                    if (!LBackOff(new K.GripTarget(lf0[3], lf0[7], lf0[11], 0, 1, 0, from.Name))) continue;
+                }
+                else if (!LSlide(from, up: true)) continue;
                 var k1 = Keys.Count; var s1 = Snapshot();
                 foreach (var off in offsets)
                 {

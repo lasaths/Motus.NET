@@ -17,7 +17,7 @@ public static class BambooWalk
     /// and the side the arm leaves toward (sign of the L frame's Y·ẑ — the IK branch / roll about the cane).</summary>
     public sealed record Site(string On, double F, int Side)
     {
-        public bool IsStake => On.StartsWith("stake", StringComparison.Ordinal);
+        public bool IsStake => BambooTrussLayout.IsSupport(On);
         public override string ToString() => IsStake ? On : $"{On}@{F:+0.00;-0.00}{(Side > 0 ? "+z" : Side < 0 ? "−z" : "")}";
     }
 
@@ -149,7 +149,7 @@ public static class BambooWalk
     public static Site Current(BambooTrussPlanner p, double[] offsets)
     {
         var on = p.LStake;
-        if (on.StartsWith("stake", StringComparison.Ordinal)) return new Site(on, 0, 0);
+        if (BambooTrussLayout.IsSupport(on)) return new Site(on, 0, 0);
         var w = p.BaseWorldNow;
         var d = BambooTrussLayout.Members.First(m => m.Id == on["placed-".Length..]).Place; var u = d.Axis;
         var f = ((w[3] - d.X) * u.X + (w[7] - d.Y) * u.Y + (w[11] - d.Z) * u.Z) / Half;
@@ -159,7 +159,7 @@ public static class BambooWalk
     }
 
     static Site SiteAfter(BambooTrussPlanner p, string on, double f, bool sides) =>
-        on.StartsWith("stake", StringComparison.Ordinal) ? new Site(on, 0, 0)
+        BambooTrussLayout.IsSupport(on) ? new Site(on, 0, 0)
             : new Site(on, f, sides ? (p.BaseWorldNow[9] >= 0 ? 1 : -1) : 0);
 
     /// <summary>
@@ -192,9 +192,9 @@ public static class BambooWalk
             foreach (var mv in gait.Moves(ctx, from))
             {
                 if (res.Tried >= maxSteps || clock.Elapsed.TotalSeconds > maxSeconds) break;
-                var toOn = mv.To.StartsWith("stake", StringComparison.Ordinal) ? mv.To : "placed-" + mv.To;
+                var toOn = BambooTrussLayout.IsSupport(mv.To) ? mv.To : "placed-" + mv.To;
                 var known = res.Reachable.Count(s => s.On == toOn && Math.Abs(s.F - mv.F) < 1e-9);
-                if (known >= (gait.TrackSides && !mv.To.StartsWith("stake") ? 2 : 1)) continue;
+                if (known >= (gait.TrackSides && !BambooTrussLayout.IsSupport(mv.To) ? 2 : 1)) continue;
                 // Same move already failed from this site (another IK index of an identical request).
                 var sig = $"{from}|{mv}";
                 if (!failed.Add(sig)) continue;

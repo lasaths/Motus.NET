@@ -356,6 +356,24 @@
       scene.add(m);
       registerCollider(r.name, [m]);
     });
+    // /bamboo-truss pit (walls + floor) and node connectors (hubs) — exactly the Motus boxes.
+    (cell.pit || []).forEach(function (b) {
+      var m = new THREE.Mesh(new THREE.BoxGeometry(b.halfX * 2, b.halfY * 2, b.halfZ * 2),
+        new THREE.MeshStandardMaterial({ color: 0x5a4632, roughness: 0.95 }));
+      m.position.set(b.x, b.y, b.z);
+      scene.add(m);
+      registerCollider(b.name, [m]);
+    });
+    hubMeshes = {};
+    (cell.hubs || []).forEach(function (h) {
+      var m = new THREE.Mesh(new THREE.BoxGeometry(h.half * 2, h.half * 2, h.half * 2),
+        new THREE.MeshStandardMaterial({ color: 0xc8c8c8, roughness: 0.5 }));
+      m.position.set(h.x, h.y, h.z);
+      m.visible = !!h.fixed;
+      scene.add(m);
+      registerCollider('hub-' + h.node, [m]);
+      hubMeshes[h.node] = { mesh: m, fixed: !!h.fixed };
+    });
     // Clamp markers: one ring around each clamped gripper's slot axis + a label naming what it is clamped on
     // (pool of two: the base and, when it is also clamped, the other gripper).
     anchorGroup = new THREE.Group();
@@ -478,9 +496,14 @@
    * payload: { q:[5], mount?:{p:[3],q:[4]}, anchors?:[{gripper,on,isBase,held,p:[3],axis:[3]}], hang?:{x,y,z}, gL, gR, strut:[...], struts?:[{name,pose:[7]}], axesVisible, hitParts?:[string] }
    * hitParts are Motus contact body names (URDF collision names, 'pole', 'strut', 'ground', mount parts).
    */
+  var hubMeshes = {};
   window.setBambooPose = function (payloadJson) {
     if (!ready) return;
     var p = typeof payloadJson === 'string' ? JSON.parse(payloadJson) : payloadJson;
+    if (p.hubs) Object.keys(hubMeshes).forEach(function (k) {
+      var h = hubMeshes[k];
+      h.mesh.visible = h.fixed || p.hubs.indexOf(k) >= 0;
+    });
     // Grounded base swapping: the L-grip mount pose is FK from whichever gripper is clamped (full pose).
     if (p.mount && mount && p.mount.p) {
       mount.position.set(p.mount.p[0], p.mount.p[1], p.mount.p[2]);
