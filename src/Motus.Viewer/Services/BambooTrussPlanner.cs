@@ -434,7 +434,7 @@ public sealed class BambooTrussPlanner
         if (_base != K.Gripper.L) return Fail("R-grasp needs the L-grip as base");
         var open = BambooTrussLayout.JawOpenMm;
         var sols = K.SolveGrip(_base, _baseWorld, target, new[] { _q }, 32, axisSign: axisSign)
-            .OrderBy(x => K.JointDist(x, _q)).Take(8).ToList();
+            .OrderBy(x => PreferKey(x)).Take(8).ToList();
         if (solutionIndex >= 0) sols = sols.Skip(solutionIndex).Take(1).ToList();
         Diag.Add($"{_cycle}: R grasp {onName} ({target.X:F3},{target.Y:F3},{target.Z:F3}): {sols.Count} IK solutions");
         foreach (var qg in sols)
@@ -564,8 +564,21 @@ public sealed class BambooTrussPlanner
     {
         BeginCycle(member.Id);
         var store = member.Store;
+        // Re-grasp from a relay: the member's cane is parked in a connector — pick it there, pull it out along its axis.
+        var parkedIdx = _placed.FindIndex(p => p.Name.StartsWith("placed-" + member.Id + ">", StringComparison.Ordinal));
+        (string Name, double[] World)? parked = parkedIdx >= 0 ? _placed[parkedIdx] : null;
+        (double X, double Y, double Z)? pullDir = null;
+        if (parked is { } pk)
+        {
+            var rid = pk.Name["placed-".Length..];
+            store = BambooTrussLayout.Def(rid)!.Place;
+            pullDir = BambooTrussLayout.RelayDir(rid);
+            _placed.RemoveAt(parkedIdx);
+            _envKey = int.MinValue;
+        }
+        var parking = BambooTrussLayout.IsRelay(member.Id);
         _activeId = member.Id;
-        _activeRest = BambooIcdCell.PlacementWorld(store);
+        _activeRest = parked is { } pw ? pw.World : BambooIcdCell.PlacementWorld(store);
         _activeReleased = null;
         _held = null;
         _hold = 0;
@@ -594,7 +607,16 @@ public sealed class BambooTrussPlanner
             // Lift the cane off the rail straight back along the jaw's own +Y (the way it came in; ≈ world up for
             // the near-top grasps the rail allows) — as far as the arm reaches, 2..6 cm.
             List<double[]>? lift = null;
-            if (Ptp)
+            if (Ptp && pullDir is { } pd)
+            {
+                // Pull the cane out of the connector socket along its own axis (3 cm, one joint segment).
+                var pt = new K.GripTarget(pick.X + 0.03 * pd.X, pick.Y + 0.03 * pd.Y, pick.Z + 0.03 * pd.Z, pick.Ax, pick.Ay, pick.Az, pick.On);
+                var qo = K.SolveGrip(_base, _baseWorld, pt, new[] { _q }, 8).OrderBy(x => K.JointDist(x, _q)).FirstOrDefault();
+                if (qo is not null && K.JointDist(qo, _q) < 30 && SegOk(_q, qo, _gR, _gR, _gL, _gL, 1, 1, _lOn, _rOn, VerifyStepDeg))
+                    lift = new List<double[]> { qo };
+                if (lift is null) { Error = $"{member.Id}: no Motus-clear pull-out from the connector (s={s})"; Diag.Add(Error); continue; }
+            }
+            else if (Ptp)
             {
                 // PTP lift: one joint segment to the pose 6…2 cm back along the jaw's +Y (or none: the carry leaves).
                 for (var n = 6; n >= 2 && lift is null; n--)
@@ -613,7 +635,7 @@ public sealed class BambooTrussPlanner
                 prev = q;
             }
             if (!okLift) { Error = $"{member.Id}: lift collides (s={s})"; Diag.Add(Error); continue; }
-            foreach (var q in lift) Emit(Ptp ? "PTP Lift" : "Lift", q);
+            foreach (var q in lift) Emit(pullDir is not null ? "PTP pull out" : Ptp ? "PTP Lift" : "Lift", q);
             // Place targets: tool origin on the design axis at λ from the centre, tool Z = σ·axis (or the flipped cane).
             var placed = false;
             foreach (var flip in new[] { 1, -1 })
@@ -641,12 +663,23 @@ public sealed class BambooTrussPlanner
                     for (var i = 0; i + 1 < down.Count && ok; i++)
                         ok = SegOk(down[i], down[i + 1], _gR, _gR, _gL, _gL, 1, 1, _lOn, _rOn, VerifyStepDeg);
                     if (!ok) { Diag.Add("    lower collides"); continue; }
-                    var path = Ptp ? PtpPath(qp, target, sign, 4 * CartStepM, 2 * CartStepM) : TransitPath(_q, down[0]);
+                    double[]? qIns = null;
+                    if (Ptp && parking)
+                    {
+                        // Socket: the cane end slides into the connector along the cane axis — pre-insert 3 cm out.
+                        var od = BambooTrussLayout.RelayDir(member.Id);
+                        var ti = new K.GripTarget(target.X + 0.03 * od.X, target.Y + 0.03 * od.Y, target.Z + 0.03 * od.Z, target.Ax, target.Ay, target.Az, target.On);
+                        qIns = K.SolveGrip(_base, _baseWorld, ti, new[] { qp }, 8, axisSign: sign).OrderBy(x => K.JointDist(x, qp)).FirstOrDefault();
+                        if (qIns is null || K.JointDist(qIns, qp) > 30 || !PoseOk(qIns, _gR, _gL, 1, _lOn, _rOn) ||
+                            !SegOk(qIns, qp, _gR, _gR, _gL, _gL, 1, 1, _lOn, _rOn, VerifyStepDeg)) { Diag.Add("    no axial insert"); continue; }
+                    }
+                    var path = Ptp ? (qIns is not null ? PtpPath(qIns, target, sign, 4 * CartStepM, 2 * CartStepM) : PtpPath(qp, target, sign, 4 * CartStepM, 2 * CartStepM)) : TransitPath(_q, down[0]);
                     if (path is null) { Diag.Add("    no carry path"); continue; }
                     if (Ptp)
                     {
                         foreach (var v in path) Emit("PTP carry via", v);
-                        Emit("PTP Place", qp);
+                        if (qIns is not null) { Emit("PTP pre-insert", qIns); Emit("PTP insert", qp); }
+                        else Emit("PTP Place", qp);
                     }
                     else
                     {
@@ -689,6 +722,7 @@ public sealed class BambooTrussPlanner
             return true;
         }
         Restore(snapshot, startKeys);
+        if (parked is { } back) { _placed.Insert(parkedIdx, back); _envKey = int.MinValue; }
         return Fail(string.IsNullOrEmpty(Error) ? $"{member.Id}: unreachable" : Error);
     }
 
@@ -975,6 +1009,137 @@ public sealed class BambooTrussPlanner
     /// <summary>Current joint vector (deg).</summary>
     public double[] QNow => _q.ToArray();
 
+    // ---------------- targeted walk landing ----------------
+
+    /// <summary>When set, grasp IK solutions are tried nearest to this free-gripper frame first (targeted landing).</summary>
+    double[]? _preferFree;
+
+    double PreferKey(double[] q)
+    {
+        if (_preferFree is null) return K.JointDist(q, _q);
+        var f = K.Free(_base, _baseWorld, q);
+        var d = 0.0;
+        for (var i = 0; i < 12; i++) d += Math.Abs(f[i] - _preferFree[i]);
+        return d;
+    }
+
+    /// <summary>A landing candidate: R clamps <c>RCane</c> at <c>ROff</c> (frame <c>RFrame</c>), L lands on
+    /// <c>LCane</c> at <c>LOff</c> with frame <c>LFrame</c>; <c>Score</c> = stock + place IK offsets reachable.</summary>
+    public sealed record Landing(string RCane, double ROff, double[] RFrame, string LCane, double LOff, double[] LFrame, int Score);
+
+    /// <summary>Clamp points (m from the centre) tried for targeted landings.</summary>
+    public static double[] LandOffsets { get; set; } = { -1.0, -0.66, -0.33, 0.0, 0.33, 0.66, 1.0 };
+    /// <summary>Real-planner attempts per targeted landing search.</summary>
+    public static int LandTries { get; set; } = 14;
+
+    /// <summary>
+    /// Targeted landing candidates for building <paramref name="member"/>: one node-transfer step from the current L
+    /// base (R clamps a fixed member, L lands on a fixed member). Pure IK first (true FK of both grippers): every R
+    /// grasp solution fixes the R frame, every L solution from there fixes the L landing frame (point + roll); a
+    /// candidate is kept when that L frame has IK both to the stock cane and to the member's place line.
+    /// </summary>
+    public List<Landing> LandingCandidates(BambooTrussLayout.MemberDef member)
+    {
+        var res = new List<Landing>();
+        if (_base != K.Gripper.L) return res;
+        var placedIds = _placed.Select(p => p.Name["placed-".Length..]).ToList();
+        var fixedIds = BambooTrussLayout.FixedBothEnds(placedIds);
+        var half = BambooTrussLayout.StrutLength / 2;
+        var store = member.Store; var d = member.Place; var u = d.Axis;
+        var pk = _placed.FirstOrDefault(p => p.Name.StartsWith("placed-" + member.Id + ">", StringComparison.Ordinal));
+        if (pk.Name is not null) store = BambooTrussLayout.Def(pk.Name["placed-".Length..])!.Place;
+        var stockT = BambooTrussLayout.StockGraspOffsets.Select(o => K.OnStrut(store, o, "s")).ToList();
+        var placeT = BambooTrussLayout.StockGraspOffsets.Select(o => new K.GripTarget(d.X + o * u.X, d.Y + o * u.Y, d.Z + o * u.Z, u.X, u.Y, u.Z, "p")).ToList();
+        int nR = 0, nL = 0, nS = 0;
+        foreach (var rc in fixedIds)
+        {
+            var rl = PlacedPlacement(BambooTrussLayout.Members.First(x => x.Id == rc));
+            foreach (var fr in new[] { -1.0, -0.5, 0.0, 0.5, 1.0 })
+            {
+                var g = K.OnStrut(rl, fr * (half - 0.04), "placed-" + rc);
+                foreach (var q1 in Distinct(K.SolveGrip(K.Gripper.L, _baseWorld, g, new[] { _q }, 16)))
+                {
+                    var G = K.Free(K.Gripper.L, _baseWorld, q1); nR++;
+                    foreach (var lc in fixedIds)
+                    {
+                        var ll = PlacedPlacement(BambooTrussLayout.Members.First(x => x.Id == lc));
+                        foreach (var fl in LandOffsets)
+                        {
+                            var t = K.OnStrut(ll, fl * (half - 0.03), "placed-" + lc);
+                            if ("placed-" + lc == rc) continue;
+                            foreach (var q2 in Distinct(K.SolveGrip(K.Gripper.R, G, t, new[] { q1 }, 12)))
+                            {
+                                var W = K.Free(K.Gripper.R, G, q2); nL++;
+                                var ns = stockT.Count(x => K.SolveGrip(K.Gripper.L, W, x, null, 6).Count > 0);
+                                if (ns == 0) continue;
+                                nS++;
+                                var np = placeT.Count(x => K.SolveGrip(K.Gripper.L, W, x, null, 6).Count > 0);
+                                if (np == 0) continue;
+                                res.Add(new Landing(rc, fr * (half - 0.04), G, lc, fl * (half - 0.03), W, ns + np));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        Diag.Add($"landing {member.Id}: R grasps {nR}, L landings {nL}, with stock IK {nS}, with stock+place IK {res.Count}");
+        return res.OrderByDescending(x => x.Score).ToList();
+    }
+
+    static List<double[]> Distinct(List<double[]> sols)
+    {
+        var outp = new List<double[]>();
+        foreach (var q in sols) if (outp.All(o => K.JointDist(o, q) > 2)) outp.Add(q);
+        return outp;
+    }
+
+    /// <summary>
+    /// One node-transfer step with a targeted landing: R clamps fixed member <paramref name="rCane"/> at
+    /// <paramref name="rOffM"/> (the IK solution nearest <paramref name="rPref"/>), base swaps to R at rest, L backs off
+    /// sideways out of its open side (off an anchor column or a cane), side-clamps fixed member <paramref name="lCane"/>
+    /// at <paramref name="lOffM"/> (solution nearest the wanted landing frame <paramref name="lPref"/>: point + roll),
+    /// base swaps back to L, R retreats and parks.
+    /// </summary>
+    public bool WalkStep(string rCane, double rOffM, double[]? rPref, string lCane, double lOffM, double[]? lPref, string cycle)
+    {
+        BeginCycle(cycle);
+        var startKeys = Keys.Count;
+        var snap = Snapshot();
+        var fixedIds = BambooTrussLayout.FixedBothEnds(_placed.Select(p => p.Name["placed-".Length..]));
+        if (_base != K.Gripper.L) return Fail("walk step: L must be the base");
+        if (!fixedIds.Contains(rCane) || !fixedIds.Contains(lCane)) return Fail("walk step: both canes must be fixed into the structure");
+        var oldL = _lStake;
+        var onAnchor = BambooTrussLayout.IsSupport(oldL);
+        var oldAxis = onAnchor ? (X: 0.0, Y: 1.0, Z: 0.0) : PlacedPlacement(BambooTrussLayout.Members.First(x => x.Id == oldL["placed-".Length..])).Axis;
+        var name = "placed-" + lCane;
+        var target = K.OnStrut(PlacedPlacement(BambooTrussLayout.Members.First(x => x.Id == lCane)), lOffM, name);
+        var anchorGrip = K.OnStrut(PlacedPlacement(BambooTrussLayout.Members.First(x => x.Id == rCane)), rOffM, "placed-" + rCane);
+        for (var idx = 0; idx < 3; idx++)
+        {
+            Restore(snap, startKeys);
+            _preferFree = rPref;
+            var ok = RGrasp(anchorGrip, anchorGrip.On, 0, pickActive: false, solutionIndex: idx);
+            _preferFree = null;
+            if (!ok) continue;
+            if (!SwapTo(K.Gripper.R, anchorGrip.On)) continue;
+            var lf = K.Free(_base, _baseWorld, _q);
+            if (!LBackOff(new K.GripTarget(lf[3], lf[7], lf[11], oldAxis.X, oldAxis.Y, oldAxis.Z, oldL))) continue;
+            _preferFree = lPref;
+            ok = LSideGrasp(target, name);
+            _preferFree = null;
+            if (!ok) continue;
+            if (!SwapTo(K.Gripper.L, name)) continue;
+            if (!RRetreat(anchorGrip)) continue;
+            if (!RPark()) continue;
+            _lStake = name;
+            Notes.Add($"{_cycle}: R clamps {anchorGrip.On} at {rOffM:+0.000;-0.000} m; L {oldL} → {name} at {lOffM:+0.000;-0.000} m (targeted landing); R parks");
+            return true;
+        }
+        _preferFree = null;
+        Restore(snap, startKeys);
+        return Fail(string.IsNullOrEmpty(Error) ? $"walk step: no Motus-clear step onto {name}" : "walk step: " + Error);
+    }
+
     /// <summary>Open L-grip (R-base) backs straight off the cane it released, out of its open side (+y), Motus-checked.</summary>
     bool LBackOff(K.GripTarget from)
     {
@@ -1037,7 +1202,7 @@ public sealed class BambooTrussPlanner
         var open = BambooTrussLayout.LJawOpenMm;
         var closed = BambooTrussLayout.JawClosedMm;
         var sols = K.SolveGrip(_base, _baseWorld, target, new[] { _q }, 32)
-            .OrderBy(x => K.JointDist(x, _q)).Take(8).ToList();
+            .OrderBy(x => PreferKey(x)).Take(8).ToList();
         // A given IK solution fixes the L roll about the cane, i.e. what R can reach afterwards: callers may pick one.
         if (solutionIndex >= 0) sols = sols.Skip(solutionIndex).Take(1).ToList();
         Diag.Add($"{_cycle}: L side grasp {onName} ({target.X:F3},{target.Y:F3},{target.Z:F3}): {sols.Count} IK solutions");

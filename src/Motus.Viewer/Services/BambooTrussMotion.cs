@@ -153,10 +153,24 @@ public static class BambooTrussMotion
         };
     }
 
+    /// <summary>
+    /// A targeted-landing <c>walk</c> block (gait "land"): <c>Object</c> = the member (or relay) id to land for; the
+    /// "target" plane sits on that member's place pose. The landing itself (cane, point, roll) is chosen by the planner.
+    /// </summary>
+    public static BambooIcdMotion.TaskEdit LandTask(string memberId)
+    {
+        var m = BambooTrussLayout.Def(memberId) ?? throw new ArgumentException($"unknown member {memberId}");
+        return new BambooIcdMotion.TaskEdit
+        {
+            Identity = "walk", Object = memberId, JawMm = BambooTrussLayout.JawClosedMm, Gait = LandGait,
+            Planes = [Plane("target", m.Place, 0)]
+        };
+    }
+
     /// <summary>Target parameter of a walk block: its "target" plane projected on the cane, as a fraction of half − 3 cm.</summary>
     public static double WalkTargetF(BambooIcdMotion.TaskEdit t)
     {
-        if (BambooTrussLayout.IsSupport(t.Object)) return 0;
+        if (BambooTrussLayout.IsSupport(t.Object) || t.Gait == LandGait) return 0;
         var pl = t.Planes.FirstOrDefault(x => x.Name == "target");
         if (pl is null) return 0;
         var m = BambooTrussLayout.Members.First(x => "placed-" + x.Id == t.Object).Place; var u = m.Axis;
@@ -186,13 +200,17 @@ public static class BambooTrussMotion
         var site = BambooTrussLayout.Current;
         var byId = BambooTrussLayout.Members.ToDictionary(m => m.Id);
         List<BambooIcdMotion.TaskEdit> Member(string id) => DefaultTasks(new[] { byId[id] });
-        // Triangle 1 from the A column (A–T1, T1–M, A–M), walk onto the closed triangle (node transfer onto A–M),
-        // try the far members from there (reported when unreachable), walk back onto the A column.
+        // Triangle 1 from the A column (A–T1, T1–M, A–M); then each remaining member after a targeted-landing walk
+        // (one node-transfer step to a cane point + roll from which the stock and the place are both Motus-reachable):
+        // M–T2 and T1–T2 (closes triangle 2: T2 rigid), M–D; T2–D through one relay — its cane is parked in M's
+        // connector (pointing out of the plane, +z), the robot walks onto the top chord and re-grasps it there.
         var tasks = new List<BambooIcdMotion.TaskEdit>();
         foreach (var id in new[] { "AT1", "T1M", "AM" }) tasks.AddRange(Member(id));
-        tasks.Add(WalkTask("placed-AM", -1, BambooWalk.NodeTransfer.Id));
-        foreach (var id in new[] { "MT2", "T1T2", "MD", "T2D" }) tasks.AddRange(Member(id));
-        tasks.Add(WalkTask(site.WalkLTarget, 0, BambooWalk.NodeTransfer.Id));
+        foreach (var id in new[] { "MT2", "T1T2", "MD", ShippedRelay, "T2D" })
+        {
+            tasks.Add(LandTask(id));
+            tasks.AddRange(DefaultTasks(new[] { BambooTrussLayout.Def(id)! }));
+        }
         return tasks;
     }
 
@@ -229,15 +247,20 @@ public static class BambooTrussMotion
             if (t.Identity == "place" && pick is not null && pick.Object == t.Object)
             {
                 pick = null;
-                var m = BambooTrussLayout.Members.FirstOrDefault(x => x.Id == t.Object);
+                var m = BambooTrussLayout.Def(t.Object);
                 if (m is null) { notes.Add($"{t.Object}: not a truss member — skipped"); continue; }
                 var fx = BambooTrussLayout.ExistingNodes(built);
                 if (!fx.Contains(m.NodeA) && !fx.Contains(m.NodeB)) { notes.Add($"{m.Id}: not built — neither end node exists yet"); continue; }
-                if (p.BuildMember(m)) { built.Add(m.Id); log?.Invoke($"{m.Id}: built"); }
+                if (p.BuildMember(m)) { if (!BambooTrussLayout.IsRelay(m.Id)) built.Add(m.Id); log?.Invoke($"{m.Id}: built"); }
                 else { notes.Add($"{m.Id}: not built — {p.Error}"); log?.Invoke($"{m.Id}: {p.Error}"); }
                 continue;
             }
             if (t.Identity != "walk") continue;
+            if (t.Gait == LandGait)
+            {
+                notes.Add(Land(p, t.Object, log));
+                continue;
+            }
             var sw = System.Diagnostics.Stopwatch.StartNew();
             var gait = BambooWalk.GaitNamed(t.Gait);
             var target = t.Object; var f = WalkTargetF(t);
@@ -274,6 +297,42 @@ public static class BambooTrussMotion
         return new TrussBuild { Keys = keys, Cycles = cycles, Grips = p.Grips, Notes = notes, Built = built, MotusChecks = p.Checks, Tasks = tasks.ToList() };
     }
 
+    /// <summary>The one relay of the shipped plan: T2–D's cane parked in M's connector, pointing +z.</summary>
+    public static readonly string ShippedRelay = BambooTrussLayout.RelayId("T2D", "M", "z+");
+
+    /// <summary>Walk mode "land": one node-transfer step to a landing (point + roll) chosen for the next member.</summary>
+    public const string LandGait = "land";
+
+    /// <summary>
+    /// Targeted landing walk for member (or relay) <paramref name="id"/>: if it is not buildable from where L stands,
+    /// rank IK landing candidates (<see cref="BambooTrussPlanner.LandingCandidates"/>) and take the first whose walk
+    /// step AND trial build (stock pick → carry → place → R park, Motus-clear) succeed; only the walk is kept.
+    /// </summary>
+    static string Land(BambooTrussPlanner p, string id, Action<string>? log)
+    {
+        var m = BambooTrussLayout.Def(id);
+        if (m is null) return $"walk (land) → {id}: unknown member";
+        var cp = p.SaveDeep();
+        if (p.BuildMember(m)) { p.RollbackDeep(cp); return $"walk (land) → {id}: not needed (buildable from {p.LStake})"; }
+        p.RollbackDeep(cp);
+        var cands = p.LandingCandidates(m);
+        var tried = 0;
+        foreach (var c in cands.GroupBy(c => (c.RCane, c.ROff, c.LCane, c.LOff)).Select(g => g.First()))
+        {
+            if (tried++ >= BambooTrussPlanner.LandTries) break;
+            p.RollbackDeep(cp);
+            if (!p.WalkStep(c.RCane, c.ROff, c.RFrame, c.LCane, c.LOff, c.LFrame, $"walk (land) → {id}")) continue;
+            var cpw = p.SaveDeep();
+            if (!p.BuildMember(m)) continue;
+            p.RollbackDeep(cpw);
+            var note = $"walk (land) → {id}: R on {c.RCane} at {c.ROff:+0.000;-0.000} m, L lands on {c.LCane} at {c.LOff:+0.000;-0.000} m ({cands.Count} IK candidates, {tried} tried)";
+            log?.Invoke(note);
+            return note;
+        }
+        p.RollbackDeep(cp);
+        return $"walk (land) → {id}: no landing found ({cands.Count} IK candidates, {Math.Min(tried, BambooTrussPlanner.LandTries)} tried)";
+    }
+
     public static TrussBuild Build(IReadOnlyList<BambooIcdMotion.TaskEdit>? tasks = null, bool useCache = false) =>
         BuildAsync(tasks, null, useCache).GetAwaiter().GetResult();
 
@@ -283,7 +342,7 @@ public static class BambooTrussMotion
     /// <summary>L side-grasp IK solutions (rolls about the clamped cane) tried per brachiation clamp point.</summary>
     public const int BrachiateLSolutions = 4;
 
-    public const string PlannerVersion = "warren-pit-1";
+    public const string PlannerVersion = "warren-pit-2-relay";
     public const string DefaultPlanResource = "Motus.Viewer.Services.BambooTrussDefaultPlan.json";
 
     /// <summary>Everything the planner's output depends on (layout, tolerances, version), invariant-formatted.</summary>
