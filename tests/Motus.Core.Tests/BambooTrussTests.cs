@@ -48,40 +48,58 @@ public class BambooTrussTests
     // ---------------- layout ----------------
 
     [Fact]
-    public void Layout_IsFiveMemberFrame_TwentyFiveCentimetreCanes_NoHangRod_GroundedFixtures()
+    public void Layout_IsSevenMemberWarrenTruss_EquilateralPanels_NoHangRod_NoStakes()
     {
-        Assert.Equal(0.25, BambooTrussLayout.StrutLength, 9);
-        Assert.Equal(0.25, BambooTrussLayout.Current.Length, 9);
-        Assert.Equal(new[] { "baseL", "baseR", "diagL", "sep", "diagR" }, BambooTrussLayout.Members.Select(m => m.Id).ToArray());
+        Assert.Equal(new[] { "AM", "AT1", "T1M", "MT2", "T1T2", "MD", "T2D" }, BambooTrussLayout.Members.Select(m => m.Id).ToArray());
+        var nodes = BambooTrussLayout.FootNodes.ToDictionary(n => n.Name);
+        Assert.Equal(new[] { "A", "D", "M", "T1", "T2" }, nodes.Keys.OrderBy(n => n));
+        var p = BambooTrussLayout.Panel;
         foreach (var m in BambooTrussLayout.Members)
         {
+            // Every edge is one panel long (equilateral triangles, 60°) and its end nodes are what the id says.
             var dx = m.EdgeB.X - m.EdgeA.X; var dy = m.EdgeB.Y - m.EdgeA.Y; var dz = m.EdgeB.Z - m.EdgeA.Z;
-            Assert.Equal(BambooTrussLayout.StrutLength, Math.Sqrt(dx * dx + dy * dy + dz * dz), 6);
+            Assert.Equal(p, Math.Sqrt(dx * dx + dy * dy + dz * dz), 9);
+            Assert.Equal(m.Id, m.NodeA + m.NodeB);
+            Assert.Equal((nodes[m.NodeA].X, nodes[m.NodeA].Y), (m.EdgeA.X, m.EdgeA.Y));
         }
+        Assert.Equal(nodes["A"].Y, nodes["M"].Y, 12);
+        Assert.Equal(nodes["M"].Y, nodes["D"].Y, 12);
+        Assert.Equal(p * Math.Sqrt(3) / 2, nodes["T1"].Y - nodes["A"].Y, 12);
+        Assert.Equal(nodes["T1"].Y, nodes["T2"].Y, 12);
         Assert.False(Cell.IncludePole);
-        var pads = Cell.Pads.Select(p => p.Name).ToList();
-        Assert.Contains("ground-S1", pads);
-        Assert.Contains("ground-S3", pads);
-        // Stakes stand on the ground (posts from y = 0) and the start base sits on S1's axis, slot along it.
-        var posts = BambooTrussLayout.Posts.ToDictionary(p => p.Name);
-        foreach (var st in BambooTrussLayout.Stakes)
+        // No stakes: the only clamp supports are the anchor columns under A and D, on the node axes.
+        Assert.Equal(new[] { "anchor-A", "anchor-D" }, BambooTrussLayout.Stakes.Select(s => s.Name).ToArray());
+        Assert.DoesNotContain(BambooTrussLayout.FixtureObjects, o => o.Name.StartsWith("stake", StringComparison.Ordinal));
+        Assert.DoesNotContain(Cell.Pads, o => o.Name.Contains("S1") || o.Name.Contains("S3") || o.Name.StartsWith("stake", StringComparison.Ordinal));
+        foreach (var (st, node) in new[] { (BambooTrussLayout.StakeNamed("anchor-A"), nodes["A"]), (BambooTrussLayout.StakeNamed("anchor-D"), nodes["D"]) })
         {
-            Assert.True(posts.ContainsKey(st.Name));
-            Assert.True(st.ClampY + 0.015 < st.Top, $"{st.Name}: L jaws must fit below the free top");
+            Assert.Equal((node.X, node.Z), (st.X, st.Z));
+            Assert.Equal(node.Y - BambooTrussLayout.HubHalf, st.Top, 12);
+            Assert.True(st.ClampY + 0.015 < st.Top);
         }
-        var b = BambooTrussLayout.StartBase;
-        var (pos, axis) = K.Residual(b, BambooTrussLayout.S1.Grip);
+        Assert.Equal("anchor-A", BambooTrussLayout.S1.Name);
+        var (pos, axis) = K.Residual(BambooTrussLayout.StartBase, BambooTrussLayout.S1.Grip);
         Assert.True(pos < 1e-12 && axis < 1e-9);
-        Assert.Equal(new[] { "baseL", "baseR" }, BambooTrussLayout.WalkableMemberIdsAfter(2));
-        Assert.Empty(BambooTrussLayout.WalkableMemberIdsAfter(1));
-        // B is fixed once the chord is complete; C needs two members to fixed nodes.
-        Assert.Equal(new[] { "A", "B", "D" }, BambooTrussLayout.FixedNodes(new[] { "baseL", "baseR" }).OrderBy(n => n));
-        Assert.Contains("C", BambooTrussLayout.FixedNodes(new[] { "baseL", "baseR", "diagL", "sep" }));
     }
 
+    /// <summary>Lassie: all elements in one plane, each cane = panel − 2 × the same node gap, connectors at every node.</summary>
     [Fact]
-    public void Layout_CanesNeverIntersect_LashedAtB()
+    public void Members_AreCoplanar_PanelMinusTwoGaps_WithAConnectorAtEveryNode()
     {
+        var p = BambooTrussLayout.Panel; var g = BambooTrussLayout.NodeGap;
+        Assert.Equal(p - 2 * g, BambooTrussLayout.StrutLength, 12);
+        Assert.True(g > BambooTrussLayout.HubHalf * Math.Sqrt(2) + BambooIcdCell.StrutRadius, "cane ends must clear the connector cube");
+        foreach (var m in BambooTrussLayout.Members)
+        {
+            var pl = m.Place; var u = pl.Axis;
+            // Axis in the vertical plane z = PlaneZ (both ends), centred on its edge.
+            Assert.Equal(BambooTrussLayout.PlaneZ, pl.Z, 12);
+            Assert.Equal(0, u.Z, 12);
+            Assert.Equal((m.EdgeA.X + m.EdgeB.X) / 2, pl.X, 12);
+            Assert.Equal((m.EdgeA.Y + m.EdgeB.Y) / 2, pl.Y, 12);
+        }
+        foreach (var n in BambooTrussLayout.FootNodes) Assert.Equal(BambooTrussLayout.PlaneZ, n.Z, 12);
+        // Canes in one plane never touch each other.
         var all = BambooTrussLayout.Members.Select(m => (Id: m.Id, P: m.Place)).Append((Id: "store", P: BambooTrussLayout.Store)).ToList();
         for (var i = 0; i < all.Count; i++)
         for (var j = i + 1; j < all.Count; j++)
@@ -89,40 +107,72 @@ public class BambooTrussTests
             var d = SegmentDistance(all[i].P, all[j].P, BambooTrussLayout.StrutLength);
             Assert.True(d > 2 * BambooIcdCell.StrutRadius + 0.001, $"{all[i].Id}–{all[j].Id} canes too close: {d * 1000:F1} mm");
         }
-        // The feed cane rests on its pegs (seat gap only).
         Assert.Equal(BambooTrussLayout.RackTop + BambooIcdCell.StrutRadius + BambooTrussLayout.RackSeatGap, BambooTrussLayout.Store.Y, 9);
+        // Connectors: A and D always (supports), inner nodes once a member reaches them — Motus boxes.
+        Assert.Contains(BambooTrussLayout.FixtureObjects, o => o.Name == "hub-A");
+        Assert.Contains(BambooTrussLayout.FixtureObjects, o => o.Name == "hub-D");
+        Assert.Empty(BambooTrussLayout.HubObjects(Array.Empty<string>()));
+        Assert.Equal(new[] { "hub-M", "hub-T1" }, BambooTrussLayout.HubObjects(new[] { "AT1", "T1M" }).Select(o => o.Name).ToArray());
+        Assert.Equal(new[] { "M", "T1", "T2" }, BambooTrussLayout.InnerHubNodes(BambooTrussLayout.Members.Select(m => m.Id)));
     }
 
     /// <summary>
-    /// Lassie's rule: no earth between the anchors. Apart from the A/D anchor pads and posts, no ground object (pad,
-    /// stake, rail/peg) may reach strictly between A and D in x — inside the span only double-fixed canes are clamped.
+    /// Lassie's pit: ground at support level outside A and D, a U-section pit between them (two walls + floor), every
+    /// surface a Motus obstacle; no earth inside the span — the stock and its pegs lie outboard of A.
     /// </summary>
     [Fact]
-    public void NoGroundObject_OtherThanTheAnchors_SitsBetweenThemInX()
+    public void Pit_IsAMotusObstacle_AndThereIsNoEarthInsideTheSpan()
     {
         var hs = BambooTrussLayout.HalfSpan;
         var all = BambooTrussLayout.GroundXExtents().ToList();
-        Assert.Contains(all, g => g.Name == "post-A" && g.IsAnchor);
-        Assert.Contains(all, g => g.Name == "ground-D" && g.IsAnchor);
+        Assert.Contains(all, g => g.Name == "anchor-A" && g.IsAnchor);
+        Assert.Contains(all, g => g.Name == "anchor-D" && g.IsAnchor);
         foreach (var g in all.Where(g => !g.IsAnchor))
-            Assert.True(g.MaxX <= -hs + 1e-9 || g.MinX >= hs - 1e-9,
-                $"{g.Name} spans x [{g.MinX:F3}, {g.MaxX:F3}] — inside the A–D span ({-hs:F3}, {hs:F3})");
-        // The Motus cell carries exactly these pads (no full ground slab), and the fixtures are exactly the posts + pegs.
-        Assert.Equal(BambooTrussLayout.Pads.Select(p => p.Name).OrderBy(n => n), Cell.Pads.Select(p => p.Name).OrderBy(n => n));
-        Assert.Equal(BambooTrussLayout.Posts.Select(p => p.Name).Concat(BambooTrussLayout.Racks.Select(r => r.Name)).OrderBy(n => n),
-            BambooTrussLayout.FixtureObjects.Select(o => o.Name).OrderBy(n => n));
-        // Every stake the robot can clamp stands outboard of A, as does the stock (cane + pegs).
-        foreach (var st in BambooTrussLayout.Stakes)
-            Assert.True(st.X + BambooTrussLayout.StakePadHalf <= -hs, $"{st.Name} pad reaches into the span");
+            Assert.True(g.MaxX <= -hs + BambooTrussLayout.PitEdgeInset + 1e-9 || g.MinX >= hs - BambooTrussLayout.PitEdgeInset - 1e-9,
+                $"{g.Name} spans x [{g.MinX:F3}, {g.MaxX:F3}] — inside the pit");
+        Assert.Equal(new[] { "ground-E", "ground-W" }, Cell.Pads.Select(p => p.Name).OrderBy(n => n));
+        var pit = BambooTrussLayout.PitBoxes.ToDictionary(b => b.Name);
+        Assert.Equal(new[] { "pit-floor", "pit-wall-E", "pit-wall-W" }, pit.Keys.OrderBy(n => n));
+        // Walls go from ground level down to the floor, at the pit edges just inboard of A / D; the floor spans them.
+        var d = BambooTrussLayout.Current.PitDepth;
+        Assert.True(d >= 0.2);
+        foreach (var w in new[] { pit["pit-wall-W"], pit["pit-wall-E"] })
+        {
+            Assert.Equal(0, w.Y + w.HalfY, 12);
+            Assert.Equal(-d, w.Y - w.HalfY, 12);
+        }
+        Assert.Equal(-hs + BambooTrussLayout.PitEdgeInset, pit["pit-wall-W"].X + pit["pit-wall-W"].HalfX, 12);
+        Assert.Equal(hs - BambooTrussLayout.PitEdgeInset, pit["pit-wall-E"].X - pit["pit-wall-E"].HalfX, 12);
+        Assert.Equal(-d, pit["pit-floor"].Y + pit["pit-floor"].HalfY, 12);
+        Assert.True(pit["pit-floor"].HalfX >= hs - BambooTrussLayout.PitEdgeInset);
+        foreach (var n in pit.Keys) Assert.Contains(BambooTrussLayout.FixtureObjects, o => o.Name == n);
+        // Stock flat outboard of A, outside the pit.
+        foreach (var r in BambooTrussLayout.Racks) Assert.True(r.X + r.HalfX < -hs);
         Assert.True(BambooTrussLayout.Store.X + BambooIcdCell.StrutRadius <= -hs, "stock cane lies inside the span");
+        Assert.Equal(0, BambooTrussLayout.Store.PitchDeg, 12);
     }
 
     /// <summary>
-    /// The lower chord at 0.25 m: B is within the arm's grip-to-grip reach of the stake that places baseR (S3), and
-    /// no member is pre-declared unreachable.
+    /// "Fixed into the structure": both end nodes in a rigid (triangulated) subframe that contains an anchor. A lone
+    /// cantilevered member is not fixed; a closed triangle hinged at A is.
     /// </summary>
     [Fact]
-    public void Chord_IsWithinReach_OfTheStakeThatPlacesIt()
+    public void FixedMembers_AreThoseOfAnAnchoredRigidSubframe()
+    {
+        Assert.Empty(BambooTrussLayout.FixedBothEnds(new[] { "AT1" }));
+        Assert.Empty(BambooTrussLayout.FixedBothEnds(new[] { "AT1", "T1M" }));
+        Assert.Equal(new[] { "AM", "AT1", "T1M" }, BambooTrussLayout.FixedBothEnds(new[] { "AT1", "T1M", "AM" }).OrderBy(x => x));
+        Assert.Equal(new[] { "A", "D", "M", "T1" }, BambooTrussLayout.FixedNodes(new[] { "AT1", "T1M", "AM" }).OrderBy(x => x));
+        // Triangle 2 grows the frame (T2 tied by two members), MD alone hangs off M until T2D closes triangle 3.
+        Assert.Equal(5, BambooTrussLayout.FixedBothEnds(new[] { "AT1", "T1M", "AM", "MT2", "T1T2" }).Count);
+        Assert.DoesNotContain("MD", BambooTrussLayout.FixedBothEnds(new[] { "AT1", "T1M", "AM", "MD" }));
+        Assert.Equal(7, BambooTrussLayout.FixedBothEnds(BambooTrussLayout.Members.Select(m => m.Id)).Count);
+        Assert.Equal(new[] { "A", "D" }, BambooTrussLayout.ExistingNodes(Array.Empty<string>()).OrderBy(x => x));
+    }
+
+    /// <summary>The far members are out of reach from the A column (the reason triangle 1 is built from A, then walked).</summary>
+    [Fact]
+    public void FarMembers_AreBeyondReach_OfTheAColumn()
     {
         var rng = new Random(11);
         var reach = 0.0;
@@ -133,11 +183,15 @@ public class BambooTrussTests
             reach = Math.Max(reach, Math.Sqrt(t[3] * t[3] + t[7] * t[7] + t[11] * t[11]));
         }
         Assert.InRange(reach, 0.3, 0.45);
-        var s3 = BambooTrussLayout.StakeNamed("stake-S3");
-        var b = BambooTrussLayout.FootNodes.Single(f => f.Name == "B");
-        var d = Math.Sqrt(Sq(s3.X - b.X) + Sq(s3.ClampY - b.Y) + Sq(s3.Z - b.Z));
-        Assert.True(d < reach, $"B is {d:F3} m from S3's clamp, reach {reach:F3} m");
-        Assert.Empty(BambooTrussLayout.UnreachableMembers);
+        var a = BambooTrussLayout.S1;
+        double Far(string id)
+        {
+            var m = BambooTrussLayout.Members.Single(x => x.Id == id);
+            var near = Math.Min(Math.Sqrt(Sq(m.EdgeA.X - a.X) + Sq(m.EdgeA.Y - a.ClampY)), Math.Sqrt(Sq(m.EdgeB.X - a.X) + Sq(m.EdgeB.Y - a.ClampY)));
+            return near + BambooTrussLayout.NodeGap + 0.025; // nearest cane grasp point
+        }
+        Assert.True(Far("T2D") > reach, $"T2D nearest grasp {Far("T2D"):F3} m vs reach {reach:F3} m");
+        Assert.True(Far("AT1") < reach && Far("AM") < reach && Far("T1M") < reach);
     }
 
     [Fact]
@@ -164,25 +218,21 @@ public class BambooTrussTests
     // ---------------- plan structure ----------------
 
     [Fact]
-    public void Plan_WalksToS3_BuildsTheWholeBridge_ThenWalksOnIt()
+    public void Plan_BuildsTriangle1FromTheAColumn_WalksOntoIt_ReportsTheRest()
     {
         var built = Build();
-        // All five members, diagR before sep (with sep standing first R ends wedged at C).
-        Assert.Equal(new[] { "baseL", "baseR", "diagL", "diagR", "sep" }, built.Built.ToArray());
-        Assert.DoesNotContain(built.Notes, n => n.Contains("not built", StringComparison.Ordinal));
-        Assert.Equal(new[] { "baseL", "baseR", "diagL", "sep", "diagR" }.OrderBy(x => x),
-            BambooTrussLayout.FixedBothEnds(built.Built).OrderBy(x => x));
-        // Node-transfer walk blocks on the finished bridge: S3 → baseR B end → (R on sep) baseL B end → across B onto
-        // baseR → back to S3.
-        Assert.Equal(new[] { "start", "walk", "baseL", "baseR", "diagL", "diagR", "sep",
-                "walk (node) → baseL@-1.00", "walk (node) → baseL@-1.00", "walk (node) → baseR@-1.00", "walk (node) → stake-S3" },
+        // Triangle 1 (A–T1, T1–M, then A–M: with A–M first the in-plane arm hits it placing T1–M).
+        Assert.Equal(new[] { "AT1", "T1M", "AM" }, built.Built.ToArray());
+        foreach (var id in new[] { "MT2", "T1T2", "MD", "T2D" })
+            Assert.Contains(built.Notes, n => n.StartsWith(id + ": not built", StringComparison.Ordinal));
+        Assert.Equal(new[] { "AM", "AT1", "T1M" }, BambooTrussLayout.FixedBothEnds(built.Built).OrderBy(x => x));
+        Assert.Equal(new[] { "start", "AT1", "T1M", "AM", "walk (node) → AM@-1.00", "walk (node) → anchor-A" },
             built.Cycles.Select(c => c.MemberId).ToArray());
-        Assert.Contains(built.Notes, n => n.StartsWith("walk (node) → placed-baseR@-1.00", StringComparison.Ordinal) && n.Contains("node transfer (R on placed-sep)"));
         Assert.Equal(0, built.Cycles[0].T0, 9);
         Assert.Equal(1, built.Cycles[^1].T1, 9);
         var first = built.Keys[0];
         Assert.Equal("L", first.Base);
-        Assert.Equal(BambooTrussLayout.S1.Name, first.BaseOn);
+        Assert.Equal("anchor-A", first.BaseOn);
         Assert.Equal(BambooTrussLayout.StartBase, first.BaseWorld);
         var swaps = new List<(string From, string To, string On)>();
         for (var i = 1; i < built.Keys.Count; i++)
@@ -190,18 +240,12 @@ public class BambooTrussTests
                 swaps.Add((built.Keys[i - 1].Base!, built.Keys[i].Base!, built.Keys[i].BaseOn!));
         Assert.Equal(new[]
         {
-            ("L", "R", "stake-S3"), ("R", "L", "stake-S3"),                    // stake walk S1 → S3
-            ("L", "R", "stake-S3"), ("R", "L", "placed-baseR"),                // S3 → baseR B end (brachiate)
-            ("L", "R", "placed-sep"), ("R", "L", "placed-baseL"),              // R on sep: onto baseL's B end
-            ("L", "R", "placed-sep"), ("R", "L", "placed-baseR"),              // R on sep: across B onto baseR
-            ("L", "R", "placed-baseL"), ("R", "L", "stake-S3")                 // back onto S3
+            ("L", "R", "placed-AM"), ("R", "L", "placed-AM"),    // A column → onto the closed triangle (R on A–M)
+            ("L", "R", "placed-AM"), ("R", "L", "anchor-A")      // back onto the A column
         }, swaps.ToArray());
-        // PTP: the L clamp leaves S1 with one joint move to just above its free top + the slide clearance.
-        var slide = built.Keys.Where(k => k.Label == "walk:L:PTP off " + BambooTrussLayout.S1.Name).ToList();
-        Assert.NotEmpty(slide);
-        var top = BambooTrussPlanner.LWorld(slide[^1].Base, slide[^1].BaseWorld!, slide[^1].Q);
-        Assert.InRange(top[7] - (BambooTrussLayout.S1.Top + BambooTrussLayout.StakeSlideClear), -K.GripPosTolM, K.GripPosTolM);
-        Assert.True(BambooTrussLayout.S1.Top + BambooTrussLayout.StakeSlideClear - BambooTrussLayout.S1.ClampY <= 0.04);
+        // The L clamp leaves the A column sideways (connector above, no free top).
+        Assert.Contains(built.Keys, k => k.Label == "walk (node) → AM@-1.00:L:PTP off anchor-A");
+        Assert.DoesNotContain(built.Keys, k => k.BaseOn is { } on && !on.StartsWith("anchor-", StringComparison.Ordinal) && !on.StartsWith("placed-", StringComparison.Ordinal));
         for (var i = 1; i < built.Keys.Count; i++)
             Assert.True(built.Keys[i].T > built.Keys[i - 1].T, $"key {i} ({built.Keys[i].Label}) not after {built.Keys[i - 1].Label}");
     }
@@ -222,7 +266,7 @@ public class BambooTrussTests
             Assert.Contains("Open", built.Keys[i + 1].Label); // the old base opens on the next key
             n++;
         }
-        Assert.Equal(10, n); // stake walk + four walk steps on the bridge, two swaps each
+        Assert.Equal(4, n); // two walk steps, two swaps each
     }
 
     /// <summary>PTP: every placement leaves R a way out — the member cycle ends with R parked (Motus-clear).</summary>
@@ -234,21 +278,19 @@ public class BambooTrussTests
             Assert.EndsWith($"{c.MemberId}:R:Park", built.Keys[c.LastKey].Label);
     }
 
-    /// <summary>Each cane is placed only when at least one of its ends is already fixed (posts or a triangulated node).</summary>
+    /// <summary>Each cane is placed with at least one end on an existing node (an anchor or a placed member's node).</summary>
     [Fact]
-    public void EveryPlacedMember_HadAFixedEndWhenPlaced()
+    public void EveryPlacedMember_HadAnExistingEndNodeWhenPlaced()
     {
         var built = Build();
         var placed = new List<string>();
         foreach (var id in built.Built)
         {
             var m = BambooTrussLayout.Members.Single(x => x.Id == id);
-            var fixedNodes = BambooTrussLayout.FixedNodes(placed);
-            Assert.True(fixedNodes.Contains(BambooTrussMotion.NodeName(m.EdgeA)) || fixedNodes.Contains(BambooTrussMotion.NodeName(m.EdgeB)),
-                $"{id} placed with neither end fixed");
+            var nodes = BambooTrussLayout.ExistingNodes(placed);
+            Assert.True(nodes.Contains(m.NodeA) || nodes.Contains(m.NodeB), $"{id} placed with neither end node existing");
             placed.Add(id);
         }
-        Assert.Equal(new[] { "baseL", "baseR" }, BambooTrussLayout.FixedBothEnds(placed).Where(x => x.StartsWith("base", StringComparison.Ordinal)).ToArray());
     }
 
     // ---------------- grounded base ----------------
@@ -399,12 +441,12 @@ public class BambooTrussTests
     {
         var built = Build();
         var keys = built.Keys.Select(Clone).ToList();
-        var close = keys.First(k => k.Label == "baseL:Close");
+        var close = keys.First(k => k.Label == "AT1:Close");
         close.Q = close.Q.ToArray();
         close.Q[2] += 2; // a jaw 2° off the planned grasp no longer encloses the cane on its slot axis
         var scan = new BambooTrussScan(Cell, keys, built.Cycles, BambooTrussLayout.Members, BambooTrussLayout.JawClosedMm, 0.5);
         Assert.NotNull(scan.TrackMiss);
-        Assert.Contains("baseL", scan.TrackMiss);
+        Assert.Contains("AT1", scan.TrackMiss);
     }
 
     // ---------------- Motus ----------------
@@ -427,18 +469,20 @@ public class BambooTrussTests
     {
         var built = Build();
         var scan = Scan(built);
-        var after = built.Cycles.Single(c => c.MemberId == "diagL");
+        var after = built.Cycles.Single(c => c.MemberId == "T1M");
         var t = built.Keys[after.FirstKey].T;
         var env = scan.EnvironmentAt(t, 0).Select(o => o.Name).ToList();
-        Assert.Contains("placed-baseL", env);
+        Assert.Contains("placed-AT1", env);
         foreach (var st in BambooTrussLayout.Stakes) Assert.Contains(st.Name, env);
+        // The pit (walls + floor), the ground surfaces' supports and the connectors are Motus obstacles too.
+        foreach (var n in new[] { "pit-wall-W", "pit-wall-E", "pit-floor", "hub-A", "hub-D", "hub-T1" }) Assert.Contains(n, env);
         Assert.Contains("store-peg-1", env);
         Assert.Contains("store-peg-2", env);
-        // The place pose of baseL (same base: L on S3), replayed in the diagL cycle with the jaws closed and nothing in hand,
+        // The place pose of AT1 (same base: L on the A column), replayed in the T1M cycle with the jaws closed and nothing in hand,
         // puts the R jaw around the placed cane — which it may no longer touch — so Motus must report it.
-        var lower = built.Keys.Last(k => k.Label == "baseL:PTP Place");
+        var lower = built.Keys.Last(k => k.Label == "AT1:PTP Place");
         var contacts = scan.ContactsAt(t, lower.Q, BambooTrussLayout.JawClosedMm, lower.GL, 0);
-        Assert.Contains(contacts, c => c.BodyA == "placed-baseL" || c.BodyB == "placed-baseL");
+        Assert.Contains(contacts, c => c.BodyA == "placed-AT1" || c.BodyB == "placed-AT1");
     }
 
     /// <summary>
@@ -450,10 +494,10 @@ public class BambooTrussTests
     {
         var built = Build();
         var scan = Scan(built);
-        var cycle = built.Cycles.Single(c => c.MemberId == "baseL");
+        var cycle = built.Cycles.Single(c => c.MemberId == "AT1");
         var world = scan.World[built.Cycles.IndexOf(cycle)];
         Assert.NotNull(world.HeldOffset);
-        var lift = built.Keys.Last(k => k.Label == "baseL:PTP Lift");
+        var lift = built.Keys.Last(k => k.Label == "AT1:PTP Lift");
         var (lw, rw) = scan.GrippersAt(lift.T);
         var held = Transforms.Multiply(BambooTrussPlanner.ToMotus(rw), Transforms.FromFrame(world.HeldOffset!.Value));
         var grip = BambooTrussPlanner.ToMotus(rw);
@@ -484,7 +528,7 @@ public class BambooTrussTests
     {
         var keys = new List<BambooIcdMotion.MotionKey>
         {
-            new() { T = 0, Label = "baseL:Retreat", Q = new double[5], Hold = 2 },
+            new() { T = 0, Label = "AT1:Retreat", Q = new double[5], Hold = 2 },
             new() { T = 1, Label = "baseR:Approach", Q = new double[] { 10, 0, 0, 0, 0 }, Hold = 0 }
         };
         foreach (var t in new[] { 0.01, 0.3, 0.6, 0.99 })
@@ -532,9 +576,9 @@ public class BambooTrussTests
         foreach (var k in built.Keys)
             foreach (var bad in new[] { ":Approach", "Slide up", "Slide down", ":Lower", "Back off", ":Lift", ":Retreat", ":Transit", ":Carry" })
                 Assert.False(k.Label.Contains(bad, StringComparison.Ordinal), $"non-PTP segment {k.Label}");
-        Assert.Contains(built.Keys, k => k.Label == "baseL:PTP Grasp");
-        Assert.Contains(built.Keys, k => k.Label == "baseL:PTP Place");
-        Assert.Contains(built.Keys, k => k.Label.EndsWith("L:PTP to placed-baseR", StringComparison.Ordinal));
+        Assert.Contains(built.Keys, k => k.Label == "AT1:PTP Grasp");
+        Assert.Contains(built.Keys, k => k.Label == "AT1:PTP Place");
+        Assert.Contains(built.Keys, k => k.Label.EndsWith("L:PTP to placed-AM", StringComparison.Ordinal));
         Assert.True(BambooTrussPlanner.Ptp);
     }
 
@@ -561,18 +605,13 @@ public class BambooTrussTests
             if (clamps.Count(c => !c.Held) == 2) both++;
         }
         Assert.True(both > 0);
-        var close = built.Keys.Single(k => k.Label == "walk:L:Close stake-S3");
+        // Walking back onto the A column: R (base) on A–M, L closes on the column; both clamps FK-exact.
+        var close = built.Keys.Single(k => k.Label == "walk (node) → anchor-A:L:Close anchor-A");
         var at = scan.ClampsAt(close.T, close.Q, close.GR, close.GL);
-        Assert.Contains(at, c => c.Gripper == "R" && c.On == "stake-S3" && c.IsBase);
-        Assert.Contains(at, c => c.Gripper == "L" && c.On == "stake-S3" && !c.IsBase);
-        // Both clamps are FK-exact on the stake: L at its clamp height, R lower down at the walk anchor height.
-        var anchorY = double.Parse(BambooTrussLayout.Current.WalkRAnchor.Split('@')[1], System.Globalization.CultureInfo.InvariantCulture);
-        foreach (var c in at)
-        {
-            var st = BambooTrussLayout.Stakes.Single(x => x.Name == c.On);
-            var (pos, axis) = K.Residual(c.Frame, c.Gripper == "L" ? st.Grip : st.At(anchorY));
-            Assert.True(pos < K.GripPosTolM && axis < K.GripAxisTolDeg, $"{c.Gripper} on {c.On}: {pos * 1000:F4} mm / {axis:F4}°");
-        }
+        Assert.Contains(at, c => c.Gripper == "R" && c.On == "placed-AM" && c.IsBase);
+        var lc = Assert.Single(at, c => c.Gripper == "L" && c.On == "anchor-A" && !c.IsBase);
+        var (pos, axis) = K.Residual(lc.Frame, BambooTrussLayout.StakeNamed("anchor-A").Grip);
+        Assert.True(pos < K.GripPosTolM && axis < K.GripAxisTolDeg, $"L on anchor-A: {pos * 1000:F4} mm / {axis:F4}°");
     }
 
     // ---------------- shipped plan (WASM) ----------------
@@ -640,17 +679,17 @@ public class BambooTrussTests
     }
 
     /// <summary>
-    /// The placed set only grows over the whole plan and is empty before baseL:Open: at 502034e the start/walk
+    /// The placed set only grows over the whole plan and is empty before AT1:Open: at 502034e the start/walk
     /// segments drew no stock and the viewer left a cane on A–B until baseL:Transit. Start/walk now carry the
     /// world "nothing placed, stock full", and Motus checks the walk against the stock.
     /// </summary>
     [Fact]
-    public void PlacedSet_IsMonotonic_AndEmptyBeforeBaseLOpen()
+    public void PlacedSet_IsMonotonic_AndEmptyBeforeTheFirstOpen()
     {
         var built = Build();
         var scan = Scan(built);
-        // The baseL:Open segment (jaws opening, cane already at its member) is the first with a placed cane.
-        var openIdx = built.Keys.FindIndex(k => k.Label == "baseL:Open");
+        // The AT1:Open segment (jaws opening, cane already at its member) is the first with a placed cane.
+        var openIdx = built.Keys.FindIndex(k => k.Label == "AT1:Open");
         var openT = built.Keys[openIdx - 1].T;
         var prev = new List<string>();
         foreach (var t in scan.SampleTimes)
@@ -664,11 +703,11 @@ public class BambooTrussTests
             if (t <= openT + 1e-12) Assert.Single(poses, n => n == BambooIcdCell.Strut);
             prev = placed;
         }
-        // Start / walk: the stock cane is a Motus obstacle.
-        var walk = built.Cycles.Single(c => c.MemberId == "walk");
+        // Walk on triangle 1: the next stock cane and the placed triangle are Motus obstacles.
+        var walk = built.Cycles.Single(c => c.MemberId == "walk (node) → AM@-1.00");
         var tw = built.Keys[walk.FirstKey + 1].T;
         Assert.Contains(scan.EnvironmentAt(tw, 0), o => o.Name == BambooIcdCell.Strut);
-        Assert.DoesNotContain(scan.EnvironmentAt(tw, 0), o => o.Name.StartsWith("placed-", StringComparison.Ordinal));
+        foreach (var id in new[] { "AT1", "T1M", "AM" }) Assert.Contains(scan.EnvironmentAt(tw, 0), o => o.Name == "placed-" + id);
     }
 
     /// <summary>Each base swap is a visible rest pause in playback (both labels are shown for several frames).</summary>
@@ -676,7 +715,7 @@ public class BambooTrussTests
     public void BaseSwaps_AreVisiblePausesInPlayback()
     {
         var built = Build();
-        foreach (var label in new[] { "walk:swap base L→R", "walk:swap base R→L" })
+        foreach (var label in new[] { "walk (node) → AM@-1.00:swap base L→R", "walk (node) → AM@-1.00:swap base R→L" })
         {
             var i = built.Keys.FindIndex(k => k.Label == label);
             Assert.True(i > 0, label);
@@ -689,20 +728,22 @@ public class BambooTrussTests
             var l = BambooTrussMotion.SampleState(built.Keys, play.Advance(0.016)).Label;
             frames[l] = frames.GetValueOrDefault(l) + 1;
         }
-        Assert.True(frames.GetValueOrDefault("walk:swap base L→R") >= 10, $"L→R shown {frames.GetValueOrDefault("walk:swap base L→R")} frames");
-        Assert.True(frames.GetValueOrDefault("walk:swap base R→L") >= 10, $"R→L shown {frames.GetValueOrDefault("walk:swap base R→L")} frames");
+        const string w = "walk (node) → AM@-1.00:";
+        Assert.True(frames.GetValueOrDefault(w + "swap base L→R") >= 10, $"L→R shown {frames.GetValueOrDefault(w + "swap base L→R")} frames");
+        Assert.True(frames.GetValueOrDefault(w + "swap base R→L") >= 10, $"R→L shown {frames.GetValueOrDefault(w + "swap base R→L")} frames");
     }
 
-    /// <summary>The clamp marker for L on S3 is there as soon as its close completes (before the swap).</summary>
+    /// <summary>The clamp marker for L on the A column is there as soon as its close completes (before the swap).</summary>
     [Fact]
     public void LClampMarker_ShowsWhenTheCloseCompletes()
     {
         var built = Build();
         var scan = Scan(built);
-        var close = built.Keys.Single(k => k.Label == "walk:L:Close stake-S3");
+        const string label = "walk (node) → anchor-A:L:Close anchor-A";
+        var close = built.Keys.Single(k => k.Label == label);
         var s = BambooTrussMotion.SampleState(built.Keys, close.T);
-        Assert.Equal("walk:L:Close stake-S3", s.Label);
-        Assert.Contains(scan.ClampsAt(close.T, s.Q, s.GR, s.GL), c => c.Gripper == "L" && c.On == "stake-S3");
+        Assert.Equal(label, s.Label);
+        Assert.Contains(scan.ClampsAt(close.T, s.Q, s.GR, s.GL), c => c.Gripper == "L" && c.On == "anchor-A");
     }
 
     /// <summary>
@@ -766,7 +807,7 @@ public class BambooTrussTests
 
     private static readonly Dictionary<string, BambooTrussMotion.TrussBuild> GaitPlans = new();
 
-    /// <summary>Walk to S3, build the chord, then one walk block with <paramref name="gait"/> to the target.</summary>
+    /// <summary>Build triangle 1 from the A column, then one walk block with <paramref name="gait"/> to the target.</summary>
     private static BambooTrussMotion.TrussBuild GaitPlan(string gait, string target, double f)
     {
         var key = $"{gait}|{target}|{f}";
@@ -774,15 +815,15 @@ public class BambooTrussTests
         {
             if (GaitPlans.TryGetValue(key, out var b)) return b;
             BambooTrussMotion.UseCell(Cell);
-            var tasks = new List<BambooIcdMotion.TaskEdit> { BambooTrussMotion.WalkTask(BambooTrussLayout.Current.WalkLTarget) };
-            tasks.AddRange(BambooTrussMotion.DefaultTasks(BambooTrussLayout.Members.Where(m => m.Id is "baseL" or "baseR").ToList()));
+            var tasks = new List<BambooIcdMotion.TaskEdit>();
+            foreach (var id in new[] { "AT1", "T1M", "AM" }) tasks.AddRange(BambooTrussMotion.DefaultTasks(BambooTrussLayout.Members.Where(m => m.Id == id).ToList()));
             tasks.Add(BambooTrussMotion.WalkTask(target, f, gait));
             return GaitPlans[key] = BambooTrussMotion.RunSequence(tasks);
         }
     }
 
     /// <summary>
-    /// Each gait walks its benchmark leg (benchmarked at 0.30 m, see the README table; still walks at 0.25 m) as a <c>walk</c> task
+    /// The shipped node-transfer gait walks from the A column onto triangle 1 as a <c>walk</c> task
     /// block: every step keeps one gripper clamped as the base on a stake or a cane fixed at both ends, swaps happen at
     /// rest with their own label, every clamp is FK-exact (0.5 mm / 0.5°) and the whole PTP path is Motus-clear.
     /// </summary>
@@ -792,12 +833,12 @@ public class BambooTrussTests
     {
         var built = GaitPlan(gait, target, f);
         Assert.True(string.IsNullOrEmpty(built.Error), built.Error);
-        Assert.Equal(new[] { "baseL", "baseR" }, built.Built.ToArray());
+        Assert.Equal(new[] { "AT1", "T1M", "AM" }, built.Built.ToArray());
         Assert.Contains(built.Notes, n => n.StartsWith($"walk ({gait}) → {target}", StringComparison.Ordinal) && n.Contains("steps —"));
         Assert.Contains(built.Cycles, c => c.MemberId.StartsWith($"walk ({gait}) → ", StringComparison.Ordinal));
         var keys = built.Keys;
         var scan = Scan(built);
-        var placedIds = new[] { "baseL", "baseR" };
+        var placedIds = new[] { "AT1", "T1M", "AM" };
         var swaps = 0;
         for (var k = 1; k < keys.Count; k++)
         {
@@ -815,13 +856,13 @@ public class BambooTrussTests
             var jaw = b.Base == "L" ? b.GL : b.GR;
             Assert.True(jaw <= Closed, $"{b.Label}: base not clamped");
             var on = b.BaseOn!;
-            Assert.True(on.StartsWith("stake-", StringComparison.Ordinal) ||
+            Assert.True(on.StartsWith("anchor-", StringComparison.Ordinal) ||
                         (on.StartsWith("placed-", StringComparison.Ordinal) && BambooTrussLayout.FixedBothEnds(placedIds).Contains(on["placed-".Length..])),
                 $"{b.Label}: base on {on}");
             var (pos, axis, inRange) = OnObject(scan, b.T, on, b.BaseWorld!);
             Assert.True(pos < K.GripPosTolM && axis < K.GripAxisTolDeg && inRange, $"{b.Label}: base {pos * 1000:F4} mm / {axis:F4}° off {on}");
         }
-        Assert.True(swaps >= 4);
+        Assert.True(swaps >= 2);
         foreach (var g in built.Grips)
             Assert.True(g.PosM < K.GripPosTolM && g.AxisDeg < K.GripAxisTolDeg, $"{g.Label}: {g.PosM * 1000:F4} mm / {g.AxisDeg:F4}°");
         var full = Scan(built).RunToEnd();
@@ -832,19 +873,15 @@ public class BambooTrussTests
 
     public static IEnumerable<object[]> GaitLegs() => new[]
     {
-        new object[] { "node", "placed-baseR", -1.0 },     // S3 → baseL B end → across B onto baseR (2 steps)
-        new object[] { "inchworm", "placed-baseL", -1.0 },
-        new object[] { "shuffle", "placed-baseL", -1.0 },
-        new object[] { "swing", "placed-baseL", -1.0 },
-        new object[] { "roll", "placed-baseL", -1.0 },
+        new object[] { "node", "placed-AM", -1.0 },     // A column → onto the closed triangle 1 (node transfer)
     };
 
     [Fact]
     public void WalkBlock_IsAStringIdentityTask_WithGaitAndTargetPlane()
     {
-        var t = BambooTrussMotion.WalkTask("placed-baseR", 0.5, "swing");
+        var t = BambooTrussMotion.WalkTask("placed-AM", 0.5, "swing");
         Assert.Equal("walk", t.Identity);
-        Assert.Equal("placed-baseR", t.Object);
+        Assert.Equal("placed-AM", t.Object);
         Assert.Equal("swing", t.Gait);
         Assert.Equal("target", Assert.Single(t.Planes).Name);
         Assert.Equal(0.5, BambooTrussMotion.WalkTargetF(t), 9);
@@ -861,15 +898,16 @@ public class BambooTrussTests
         Assert.True(p.Start());
         var cp = p.SaveDeep();
         var n = p.Keys.Count;
-        Assert.True(p.Walk(BambooTrussLayout.Current.WalkRAnchor, BambooTrussLayout.WalkTarget), p.Error);
+        Assert.True(p.BuildMember(BambooTrussLayout.Members.Single(m => m.Id == "AT1")), p.Error);
         Assert.True(p.Keys.Count > n);
         var after = p.SaveDeep();
         p.RollbackDeep(cp);
         Assert.Equal(n, p.Keys.Count);
         Assert.Equal(BambooTrussLayout.S1.Name, p.LStake);
+        Assert.Empty(p.PlacedIds);
         p.RollbackDeep(after);
         Assert.Equal(after.KeyCount, p.Keys.Count);
-        Assert.Equal(BambooTrussLayout.Current.WalkLTarget, p.LStake);
+        Assert.Equal(new[] { "AT1" }, p.PlacedIds.ToArray());
     }
 
     private static List<string> PlannedPhases(BambooTrussMotion.TrussBuild built) => built.Keys.Select(k => k.Label).ToList();
@@ -927,7 +965,7 @@ public class BambooTrussTests
 
     private static bool IsFixed(string? on) =>
         !string.IsNullOrEmpty(on) && on.Split('|').Any(o =>
-            o.StartsWith("stake-", StringComparison.Ordinal) || o.StartsWith("placed-", StringComparison.Ordinal));
+            BambooTrussLayout.IsSupport(o) || o.StartsWith("placed-", StringComparison.Ordinal));
 
     /// <summary>Distance (m) of a grip frame (viewer) from a fixed object's axis, slot-axis error (deg), within its length.</summary>
     private static (double Pos, double Axis, bool InRange) OnObject(BambooTrussScan scan, double t, string obj, double[] frameViewer)

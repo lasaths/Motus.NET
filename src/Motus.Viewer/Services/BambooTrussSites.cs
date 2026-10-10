@@ -1,40 +1,33 @@
 namespace Motus.Viewer.Services;
 
 /// <summary>
-/// Sites (cane length + outboard supports + stock + walk) found by the offline length sweep for /bamboo-truss.
-/// <see cref="Chosen"/> is the shipped one; see the README for the sweep table.
+/// Sites (cane length + node gap + supports + stock + walk) for /bamboo-truss. <see cref="Chosen"/> is the shipped one.
 /// </summary>
 public static class SiteDefaults
 {
-    static BambooTrussLayout.Stake St(string n, double x, double z, double clampY, double heading) =>
-        new(n, x, z, clampY, clampY + BambooTrussLayout.StakeTopAbove, heading);
+    /// <summary>Anchor column under a support node: clampable from the ground up to just under the node connector.</summary>
+    public static BambooTrussLayout.Stake Anchor(string name, double x, double nodeY, double clampY, double heading) =>
+        new(name, x, BambooTrussLayout.PlaneZ, clampY, nodeY - BambooTrussLayout.HubHalf, heading);
+
+    public static BambooTrussLayout.Site Make(double cane, double gap, double nodeY, double clampY, double heading,
+        double feedDx, double feedZ, double feedYaw = 0, double pitDepth = 0.25, double feedTop = 0.12)
+    {
+        var p = cane + 2 * gap;
+        return new BambooTrussLayout.Site(
+            cane, gap, nodeY, pitDepth,
+            [Anchor("anchor-A", -p, nodeY, clampY, heading), Anchor("anchor-D", p, nodeY, clampY, 180 - heading)],
+            "anchor-A",
+            -p + feedDx, feedZ, feedYaw, feedTop,
+            "placed-AM", "anchor-A",
+            new Dictionary<string, string>());
+    }
 
     /// <summary>
-    /// 0.30 m canes (previous shipped site): builds the lower chord + diagL only — sep and diagR have no Motus-clear
-    /// stock grasp / carry from any allowed support. Kept for sweeps and comparison.
+    /// Shipped site: 0.24 m canes, 30 mm node gap (panel 0.30 m), nodes A / M / D 0.19 m above the ground, a 0.25 m pit.
+    /// The robot starts with L on the pin column at A (clamp height 0.09 m, heading 60°); the stock lies flat in the
+    /// truss plane 0.12 m outboard of A (on its pegs, outside the pit). Chosen by a reach + real-planner sweep
+    /// (39 IK-feasible sites × build orders): triangle 1 builds in the order A–T1, T1–M, A–M (A–M first leaves no
+    /// Motus-clear place for T1–M: the in-plane arm hits A–M).
     /// </summary>
-    public static BambooTrussLayout.Site Site030 { get; } = new(
-        0.30,
-        [St("stake-S1", -0.295, 0.060, 0.18, 90), St("stake-S3", -0.295, -0.040, 0.21, 70)],
-        "stake-S1",
-        -0.3857, 0.0165, 0, 0.12,
-        "stake-S3@0.13", "stake-S3",
-        new Dictionary<string, string>());
-
-    /// <summary>Shift of everything outboard of A when A moves in with a shorter cane: HalfSpan(0.30) − HalfSpan(0.25).</summary>
-    static readonly double Dx025 = Math.Sqrt(0.75) * (0.30 - 0.25);
-
-    /// <summary>
-    /// 0.25 m canes — the whole bridge. Same stakes / stock as the 0.30 m site, moved in with anchor A by
-    /// HalfSpan(0.30) − HalfSpan(0.25) = 43.3 mm (still outboard of the A pad). From S3 the arm builds all five members
-    /// in the order baseL, baseR, diagL, diagR, sep (diagR before sep: with sep standing first, R ends wedged
-    /// between the canes at C). Every placement must leave R a Motus-clear park.
-    /// </summary>
-    public static BambooTrussLayout.Site Chosen { get; } = new(
-        0.25,
-        [St("stake-S1", -0.295 + Dx025, 0.060, 0.18, 90), St("stake-S3", -0.295 + Dx025, -0.040, 0.21, 70)],
-        "stake-S1",
-        -0.3857 + Dx025, 0.0165, 0, 0.12,
-        "stake-S3@0.13", "stake-S3",
-        new Dictionary<string, string>());
+    public static BambooTrussLayout.Site Chosen { get; } = Make(0.24, 0.03, 0.19, 0.09, 60, -0.12, 0.11);
 }

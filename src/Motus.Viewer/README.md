@@ -91,77 +91,58 @@ dotnet run --urls http://127.0.0.1:5268
 ```
 
 Open `http://127.0.0.1:5268/bamboo` (single strut pick/place) or
-`http://127.0.0.1:5268/bamboo-truss` (material store → five-member truss frame).
+`http://127.0.0.1:5268/bamboo-truss` (material store → Warren truss over a pit).
 
-### `/bamboo-truss`: grounded, base-swapping true IK
+### `/bamboo-truss`: Warren truss over a U-shaped pit (grounded, base-swapping true IK)
 
-- **Truss:** five-member bridge frame (rhombus) A–B–D–C, canes `BambooTrussLayout.StrutLength` = **0.25 m**
-  (side = height = L, half-span L·√3/2 = 0.217 m): baseL `/` A–B, baseR `_` B–D, diagL A–C, sep `|` B–C,
-  diagR D–C. Canes meeting at a node sit in 16 mm lash layers (`LashDz`); A and D sit over anchor posts on pads.
-  No hang rod (`IncludePole = false`), no floating mount. Length, stakes, stock and walk live in one `Site`
-  (`BambooTrussSites.cs` → `SiteDefaults.Chosen`, switchable with `BambooTrussLayout.Use`).
-- **No earth between the anchors:** apart from the A/D anchor pads and posts, nothing on the ground lies
-  strictly between A and D in x (`GroundXExtents`, enforced by a test). Both stakes, their pads and the stock
-  stand **outboard of A**; inside the span the robot may only clamp canes fixed at both ends. A member is
-  placed only when one of its ends is already fixed (A/D, or B/C once triangulated).
-- **Why 0.25 m (offline length sweep, reach + Motus search; whole bridge since the PTP planner):**
-
-  | L | baseR from any outboard stake (pure reach) | real planner (Motus) |
-  |---|---|---|
-  | 0.50 / 0.45 / 0.40 | 0 of 400 random stakes; 0 from post-A | baseL only (previous 0.5 m site) |
-  | 0.35 | 0 of 400 random + 3000 near-A stakes; only from post-A (h≈90°, never with baseL) | post-A cannot reach the stock (0 pickable poses) → no chord |
-  | 0.30 | reachable (stakes 5 mm outboard of the A pad, h 70–110°) | baseL + baseR + diagL (sep / diagR: no Motus-clear stock grasp / carry from any support) |
-  | **0.25** | reachable (same stakes / stock moved in with A by 43.3 mm) | **all five** with PTP, order baseL, baseR, diagL, diagR, sep |
-  | 0.22 / 0.20 | — | stock grasp blocked by the pegs / stakes / post A (Cartesian planner) |
-
-  baseR's nearest point is B (x = 0); the closest legal stake is at x = −(L·√3/2 + 0.035). The arm's
-  ≈ 0.42 m grip-to-grip reach has to span that plus the clamp-height/z offsets while the same stake also
-  reaches the stock behind it — feasible at ≤ 0.30 m. At 0.30 m sep / diagR stay out of reach of a Motus-clear
-  carry; at 0.25 m everything is placed from S3 without relays or cradles.
-- **Grounded start:** the L-grip starts clamped on **stake S1** (−0.252, clamp y 0.18, z 0.06, heading 90°);
-  stake **S3** stands at (−0.252, y 0.21, z −0.04, heading 70°). The stock cane lies flat along z at
-  (−0.342, 0.0165) on two narrow **pegs** (`store-peg-1/2`, 0.5 mm seat gap), just outboard of A.
-- **Members built: all five** — baseL, baseR, diagL, diagR, sep, every one from stake S3 (stock pick → PTP carry →
-  place). diagR goes before sep: with sep standing first, R ends wedged between sep / diagL at C after the place and
-  has no Motus-clear way back to the stock (RRT 3 × 1500 fails from q = [81, 90, −5, −88, −81]). Every PTP placement
-  must now leave R a Motus-clear park (`R:Park` ends each member cycle); a pose that wedges R is skipped. No cradle /
-  relay, no new stakes: cane length + build order were enough. Each member is placed with one end fixed (baseL, diagL:
-  A; baseR, diagR: D; sep: B).
-- **Invariant:** at every instant ≥ 1 gripper is clamped on a real fixed object (a stake, or a cane fixed at
-  both ends) and is the IK base (`MotionKey.Base / BaseWorld / BaseOn`). The other gripper moves only by
-  joint IK (`BambooGripKinematics.SolveGrip`, damped least squares on full FK, 5 constraints: grasp centre on
-  the object axis + slot axis along it). Grips are accepted within **0.5 mm / 0.5°** (achieved ≈ 1e-7 mm).
-  A base swap happens at rest: the newly clamped gripper's FK frame becomes the base, then the old one opens.
-- **Phases (PTP, shipped):** `start:Park` → `walk`: `PTP via` / `PTP Grasp` / `Close` R on **stake S3** low (y 0.13) →
-  **`swap base L→R`** (own key, at rest) → `L:Open` → `L:PTP off stake-S1` (PTP to top + clear) → `L:PTP via` →
-  `L:PTP to stake-S3` → `L:Close stake-S3` → **`swap base R→L`** → `R:Open` → `PTP Retreat` → `R:Park`; then per member
-  `PTP via` / `PTP Grasp` / `Close` (R on the stock) → `PTP Lift` → `PTP carry via` (joint via-points / RRT-Connect,
-  Motus-checked) → `PTP Place` → `Open` (cane released exactly on its member) → `PTP Retreat` → `R:Park`; then three node
-  `walk` blocks on the finished bridge (S3 → baseL B end in two steps: brachiate onto baseR's B end, node transfer with R on
-  sep; across B onto baseR with R on sep; back to S3), each R grasp → `swap base L→R` → `L:Open` →
-  `L:PTP off X` / `L:PTP via` → `L:PTP to Y` → `L:Close Y` → `swap base R→L` → `R:Open` → `PTP Retreat` → `R:Park`.
-  Only canes fixed at both ends are side-clamped (open +y slot). With `Ptp = false` the older Cartesian
-  Approach / Lower / Slide phases and the goal-driven brachiation search are still available.
-- **Collision:** Motus.NET for every link, both grippers, every mount part (now checked against the
-  environment, not only self), the held cane, pads, posts, stakes, rail, placed canes (at their real
-  released poses) and self. The only allowed touches are a gripper's jaw plates on what it clamps.
-  Cylinder meshes are subdivided along their length (~25 mm rings) so the BVH works for long canes.
-- **Scan:** `BambooTrussScan` re-derives everything from the keys (base frame, FK of both grippers, held
-  offset from the Close key, released pose from the Open key) and checks every ≤ 0.5° step.
-- **Viewer:** the mount is drawn at its full FK pose; an amber ring + label marks **every** clamped gripper
-  ("L clamped on stake-S1 (base)", "R clamped on stake-S3 (base)"), both at once when both clamp; a blue ring
-  marks the cane in hand. Labels are pushed apart in screen space so "R holds cane" never overlaps the base label. Hold and world for each segment come from the key that ends it (`CycleIndexAt`).
-- **World per segment:** start / walk = nothing placed, stock full (the next cane is drawn on the pegs and is a
-  Motus obstacle for the planner and the scan); each member cycle then picks it. Base swaps are rest pauses with
-  1.2 % of the timeline each so "swap base L→R / R→L" are visible. Pick/place frame labels are drawn small and only
-  for the member being built.
-- **Play:** `BambooTrussPlayback` dwells 0.35 s at the end of every block (last key of a same-label run),
-  keeps time as a double, and never runs past the Motus-verified frontier (time-boxed `StepFor` scan).
-- **WASM:** live planning takes ≈ 7 s desktop but minutes in interpreted WASM and cannot yield inside a
-  phase, so the page loads the default plan from `Services/BambooTrussDefaultPlan.json` (embedded; keyed by
-  `LayoutFingerprint` with numbers rounded to 1e-6 — WASM and desktop `Math` differ in the last ulp — falls back to live planning if stale; the reason is logged to the browser console as `[bamboo-truss] shipped plan not used — …`). A test requires it to be byte-identical to
-  live planning; regenerate with `BAMBOO_TRUSS_WRITE_PLAN=1 dotnet test --filter ShippedDefaultPlan`.
-- **Not built:** nothing — all five members. Anything a planner run cannot reach is reported, never faked.
+- **Truss (Lassie's redesign):** classic three-triangle Warren truss, all triangles equilateral (60°), panel
+  **P = 0.30 m**: bottom chord A–M (`AM`), M–D (`MD`); diagonals A–T1 (`AT1`), T1–M (`T1M`), M–T2 (`MT2`),
+  T2–D (`T2D`); top chord T1–T2 (`T1T2`). Pin support at A, roller at D. **Every member axis lies in one vertical
+  plane** (z = `PlaneZ` = 0.11): no lash layers / offsets any more.
+- **Node connectors:** a 30 mm cube (`HubHalf` = 15 mm) at every node, drawn and a Motus obstacle. A and D's
+  connectors sit on the support columns from the start; M / T1 / T2 appear with the first member that reaches them
+  (`HubObjects`, same rule in planner, scan and viewer). Every cane = **P − 2 × node gap** = 0.30 − 2 × 0.03 =
+  **0.24 m** (`Site.Gap`), identical for all members, so cane ends stop 30 mm short of the node centre (≥ 4.5 mm
+  clear of the cube) and canes never touch each other.
+- **Pit:** ground surfaces at support level (top y = 0) outside A and D (`ground-W`, `ground-E`, 0.55 m wide,
+  ±0.45 m across the plane); between them a U-section pit 0.576 m wide (edges 12 mm inboard of the A / D column
+  axes) and **0.25 m deep**: two vertical walls (`pit-wall-W/E`) and a floor (`pit-floor`). All are Motus boxes and
+  drawn in the viewer. There is no earth inside the span: the robot can only clamp the anchor columns or members.
+- **No stakes.** S1 / S3 and every other clamp stake are gone. The only fixed clamp supports are the **anchor
+  columns** under A and D (14 mm, from the ground up to the connector; `anchor-A`, `anchor-D`). The robot starts
+  with its L-grip clamped on `anchor-A` (clamp height 0.09 m, heading 60°). With the connector above the column has
+  no free top, so the L-grip leaves it sideways out of its open (+y) side (`L:PTP off anchor-A`).
+- **Fixed members (walkable):** a member may be clamped once both its end nodes belong to a **rigid, anchored
+  subframe**: a cluster seeded by a closed triangle of placed members, grown by every node tied to it by two placed
+  members, merged when clusters share two nodes, and counted only if it contains A or D (`AnchoredRigidClusters`,
+  `FixedBothEnds`). A lone cantilevered member is not fixed; the closed triangle A–M–T1 hinged at A is. A member is
+  placed with at least one end on an existing node (A / D or a node a placed member reaches; `ExistingNodes`).
+- **Stock:** the cane lies flat in the truss plane on two pegs 0.12 m outboard of A, outside the pit.
+- **Shipped plan (`warren-pit-1`, 3 of 7 members):** from `anchor-A` the R-grip builds **triangle 1** in the order
+  **A–T1, T1–M, A–M** (stock pick → PTP carry → place → R parks after every place). With A–M first, the in-plane arm
+  hits A–M when placing T1–M (θ4 / θ5 ↔ placed-AM in every place pose). Then a node-transfer `walk` block moves onto
+  the closed triangle (R clamps A–M → swap → L backs off the column → L side-clamps A–M → swap → R parks), the four
+  far members are tried from there and reported, and a second walk block steps back onto `anchor-A`. Planning
+  ≈ 9 s desktop; the whole path is Motus-clear in the scan.
+- **Not built (reported, never faked): MT2, T1T2, MD, T2D.** From the A column there is no IK at all to place them
+  (IK sweep over 39 sites × 4 clamp heights × 12 headings × stock positions). From the L clamp sites the walk
+  actually reaches on triangle 1 (A–M at ±0.09 m from its centre, the IK solutions the side clamp lands in), the
+  stock grasp has 0 IK solutions at 3 of 5 grasp offsets and the place has 0 IK solutions. A pure-reach check of
+  every site on triangle 1 (3 canes × 5 points × 2 sides × 12 rolls, collisions ignored) finds sites that reach
+  both the stock and MT2 (36), T1T2 (42), MD (18) — but **none for T2D** (0 of 20 place sites reaches the stock), so
+  T2D needs a relay. Connector relays (park a cane in a node connector, walk on, re-grasp) are an allowed design
+  but not implemented yet; nor is targeting a specific clamp roll on a member during the walk.
+- **Invariant:** at every instant ≥ 1 gripper is clamped on a real fixed object (an anchor column, or a member
+  fixed into the structure) and is the IK base (`MotionKey.Base / BaseWorld / BaseOn`). The other gripper moves only
+  by joint IK (`BambooGripKinematics.SolveGrip`). Grips are accepted within **0.5 mm / 0.5°**. Base swaps happen at
+  rest with their own labelled key. PTP only: joint-space moves (via-points / RRT-Connect), every segment
+  Motus-checked at the scan's sample fractions (graze fix); never walks while carrying; no hang rod.
+- **Collision:** Motus.NET for every link, both grippers, every mount part, the held cane, ground surfaces, pit
+  walls and floor, anchor columns, connectors, stock pegs, placed canes and self. The only allowed touches are a
+  gripper's jaw plates on what it clamps.
+- **Scan / playback / WASM:** unchanged — `BambooTrussScan` re-derives everything from the keys; the page loads the
+  embedded `Services/BambooTrussDefaultPlan.json` keyed by the 6-decimal `LayoutFingerprint`; regenerate with
+  `BAMBOO_TRUSS_WRITE_PLAN=1 dotnet test --filter ShippedDefaultPlan`.
 
 ### Walking on the bamboo: the `walk` task block (shipped, PTP)
 
