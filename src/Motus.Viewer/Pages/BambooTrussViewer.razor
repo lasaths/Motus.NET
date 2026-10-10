@@ -8,30 +8,50 @@
 @using System.Text.Json
 @using System.Xml.Linq
 
-<PageTitle>Bamboo truss (store → bridge span)</PageTitle>
+<PageTitle>Bamboo truss (Warren truss over a pit)</PageTitle>
 
 <div class="viewer-container">
+    <div class="main-col">
     <div class="viewport-wrap">
         <div id="viewport"></div>
+    </div>
+    <div class="timeline" data-motus="@_motusState">
+        <div class="tl-controls">
+            <button type="button" class="@(_isPlaying ? "active" : "")" disabled="@(!IsRobotReady)" @onclick="TogglePlay">
+                @(_isPlaying ? "Pause" : "Play")
+            </button>
+            <button type="button" disabled="@(!IsRobotReady)" @onclick="ResetAll">Reset</button>
+            <div class="tl-readout">
+                <span class="tl-pct">@(_t * 100 >= 99.95 ? "100" : (_t * 100).ToString("F1"))%</span>
+                <span class="tl-phase @(!string.IsNullOrEmpty(_motionError) || _collision ? "err" : "")">@_phase</span>
+            </div>
+        </div>
+        <div class="tl-body">
+            <div class="tl-blocks">
+                @foreach (var b in _blocks)
+                {
+                    var blk = b;
+                    <div class="tl-block tl-@blk.Kind @(blk.T0 <= _t && _t < blk.T1 ? "on" : "")" title="@($"{blk.Label} · {blk.T0 * 1000:F0}–{blk.T1 * 1000:F0}")"
+                         style="left:@((blk.T0 * 100).ToString("F3", System.Globalization.CultureInfo.InvariantCulture))%;width:@(((blk.T1 - blk.T0) * 100).ToString("F3", System.Globalization.CultureInfo.InvariantCulture))%"
+                         @onclick="() => JumpTo(blk.T0)">
+                        <span>@blk.Label</span>
+                    </div>
+                }
+                <div class="tl-playhead" style="left:@((_t * 100).ToString("F3", System.Globalization.CultureInfo.InvariantCulture))%"></div>
+            </div>
+            <div class="tl-track">
+                <div class="tl-fill" style="width:@((_t * 100).ToString("F3", System.Globalization.CultureInfo.InvariantCulture))%"></div>
+                <input type="range" class="tl-scrub" min="0" max="1000" step="1" value="@_scrub"
+                       disabled="@(!IsRobotReady)" @oninput="OnScrub" aria-label="Motion" />
+            </div>
+        </div>
+    </div>
     </div>
 
     <aside class="controls">
         <h1>Bamboo truss (Warren truss over a pit)</h1>
         <p class="sub">Three-triangle Warren truss A–M–D / T1–T2 over a U-shaped pit, all members in one plane with node connectors (0.24 m canes = 0.30 m panel − 2 × 30 mm gap). No stakes: the arm starts on the pin column at A and moves on what it builds. Shipped: triangle 1 (A–T1, T1–M, A–M) from the A column, then a node-transfer walk onto it; M–T2, T1–T2, M–D, T2–D are reported unreachable. One gripper is always clamped on a fixed object (anchor column or a member of the rigid anchored subframe) and is the IK base; Motus.NET owns FK/IK/collision; Three.js only draws.</p>
         <div class="phase @(!string.IsNullOrEmpty(_motionError) || _collision ? "err" : "")" data-motus="@_motusState">@_phase</div>
-
-        <div class="row">
-            <label>Motion <span>@_scrubPct%</span></label>
-            <input type="range" min="0" max="1000" step="1" value="@_scrub"
-                   disabled="@(!IsRobotReady)"
-                   @oninput="OnScrub" />
-        </div>
-        <div class="btns">
-            <button type="button" class="@(_isPlaying ? "active" : "")" disabled="@(!IsRobotReady)" @onclick="TogglePlay">
-                @(_isPlaying ? "Pause" : "Play")
-            </button>
-            <button type="button" disabled="@(!IsRobotReady)" @onclick="ResetAll">Reset</button>
-        </div>
 
         <div id="tasks">
             @for (var ti = 0; ti < _tasks.Count; ti++)
@@ -156,6 +176,7 @@
     private List<BambooIcdMotion.TaskEdit> _tasks = BambooTrussMotion.ShippedTasks();
     private List<BambooIcdMotion.MotionKey> _keys = new();
     private List<BambooTrussMotion.CycleBound> _cycles = new();
+    private List<BambooTrussTimeline.Block> _blocks = new();
     private BambooTrussScan? _trussScan;
     private string _motionError = "";
     private string _motusNote = "";
@@ -281,6 +302,7 @@
         }
         _keys = built.Keys;
         _cycles = built.Cycles;
+        _blocks = BambooTrussTimeline.Blocks(_keys, _cycles);
         _scanCts?.Cancel();
         _trussScan = null;
         _motusNote = "";
@@ -491,6 +513,16 @@
         _manual = true;
         _gR = v;
         RunManualCollision();
+        await PushPoseAsync();
+    }
+
+    /// <summary>Timeline: clicking a task block jumps to its start (Motus stops still apply via ApplyTask).</summary>
+    private async Task JumpTo(double t)
+    {
+        if (!IsRobotReady) return;
+        StopPlay();
+        _manual = false;
+        ApplyTask(Math.Clamp(t + 1e-9, 0, 1));
         await PushPoseAsync();
     }
 
