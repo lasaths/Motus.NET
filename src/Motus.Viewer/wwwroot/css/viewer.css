@@ -190,3 +190,53 @@ button.mini { padding: 5px 10px; }
   right: 0.75rem;
   top: 0.5rem;
 }
+
+/* /bamboo-truss bottom timeline: task blocks, playhead, scrub track; play / reset on its left. */
+.main-col { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.main-col .viewport-wrap { flex: 1; min-height: 0; }
+.timeline {
+  flex: none;
+  height: 92px;
+  display: flex;
+  gap: 14px;
+  align-items: stretch;
+  background: #0d0d0d;
+  border-top: 1px solid #2a2a2a;
+  padding: 10px 14px;
+}
+.tl-controls { flex: none; width: 210px; display: flex; flex-wrap: wrap; gap: 8px; align-content: flex-start; }
+.tl-readout { width: 100%; font-family: Menlo, Monaco, "Courier New", monospace; font-size: 10px; line-height: 1.35; }
+.tl-pct { color: #fff; font-weight: 700; margin-right: 8px; }
+.tl-phase { color: #aaa; letter-spacing: 0.06em; text-transform: uppercase; word-break: break-word; }
+.tl-phase.err { color: #e07a55; }
+.timeline[data-motus="stopped"] .tl-playhead { background: #e07a55; }
+.tl-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+.tl-blocks { position: relative; flex: 1; background: #151515; border: 1px solid #222; border-radius: 3px; overflow: hidden; }
+.tl-block {
+  position: absolute; top: 3px; bottom: 3px;
+  border-radius: 2px;
+  border-right: 1px solid #0d0d0d;
+  cursor: pointer;
+  overflow: hidden;
+  opacity: 0.72;
+}
+.tl-block:hover, .tl-block.on { opacity: 1; }
+.tl-block.on { box-shadow: inset 0 0 0 1px #fff; }
+.tl-block span {
+  display: block; padding: 3px 4px;
+  font-family: Menlo, Monaco, "Courier New", monospace; font-size: 9px; letter-spacing: 0.04em;
+  color: #0b0b0b; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.tl-pick { background: #c8a050; }
+.tl-place { background: #e0c070; }
+.tl-retreat { background: #6f6a5a; }
+.tl-walk { background: #3f8fc8; }
+.tl-swap { background: #ffb020; }
+.tl-park { background: #a070d0; }
+.tl-swap span, .tl-retreat span { color: #eee; }
+.tl-playhead { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px; background: #fff; pointer-events: none; }
+.tl-track { position: relative; height: 14px; }
+.tl-track .tl-fill { position: absolute; left: 0; top: 6px; height: 2px; background: #888; pointer-events: none; }
+.tl-track input.tl-scrub { position: absolute; left: 0; top: 0; width: 100%; height: 14px; background: transparent; }
+.tl-track input.tl-scrub::-webkit-slider-runnable-track { height: 2px; background: #333; }
+.tl-track input.tl-scrub::-webkit-slider-thumb { margin-top: -5px; }

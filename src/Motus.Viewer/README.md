@@ -91,7 +91,9 @@ dotnet run --urls http://127.0.0.1:5268
 ```
 
 Open `http://127.0.0.1:5268/bamboo` (single strut pick/place) or
-`http://127.0.0.1:5268/bamboo-truss` (material store → Warren truss over a pit).
+`http://127.0.0.1:5268/bamboo-truss` (material store → Warren truss over a pit). A bottom **timeline** shows one
+block per task (pick / place / retreat / walk / swap / park-relay, colour-coded), the playhead, the current % and phase;
+click or drag the track to scrub, click a block to jump to its start; Play/Pause and Reset sit on its left.
 
 ### `/bamboo-truss`: Warren truss over a U-shaped pit (grounded, base-swapping true IK)
 
@@ -118,20 +120,6 @@ Open `http://127.0.0.1:5268/bamboo` (single strut pick/place) or
   `FixedBothEnds`). A lone cantilevered member is not fixed; the closed triangle A–M–T1 hinged at A is. A member is
   placed with at least one end on an existing node (A / D or a node a placed member reaches; `ExistingNodes`).
 - **Stock:** the cane lies flat in the truss plane on two pegs 0.12 m outboard of A, outside the pit.
-- **Shipped plan (`warren-pit-1`, 3 of 7 members):** from `anchor-A` the R-grip builds **triangle 1** in the order
-  **A–T1, T1–M, A–M** (stock pick → PTP carry → place → R parks after every place). With A–M first, the in-plane arm
-  hits A–M when placing T1–M (θ4 / θ5 ↔ placed-AM in every place pose). Then a node-transfer `walk` block moves onto
-  the closed triangle (R clamps A–M → swap → L backs off the column → L side-clamps A–M → swap → R parks), the four
-  far members are tried from there and reported, and a second walk block steps back onto `anchor-A`. Planning
-  ≈ 9 s desktop; the whole path is Motus-clear in the scan.
-- **Not built (reported, never faked): MT2, T1T2, MD, T2D.** From the A column there is no IK at all to place them
-  (IK sweep over 39 sites × 4 clamp heights × 12 headings × stock positions). From the L clamp sites the walk
-  actually reaches on triangle 1 (A–M at ±0.09 m from its centre, the IK solutions the side clamp lands in), the
-  stock grasp has 0 IK solutions at 3 of 5 grasp offsets and the place has 0 IK solutions. A pure-reach check of
-  every site on triangle 1 (3 canes × 5 points × 2 sides × 12 rolls, collisions ignored) finds sites that reach
-  both the stock and MT2 (36), T1T2 (42), MD (18) — but **none for T2D** (0 of 20 place sites reaches the stock), so
-  T2D needs a relay. Connector relays (park a cane in a node connector, walk on, re-grasp) are an allowed design
-  but not implemented yet; nor is targeting a specific clamp roll on a member during the walk.
 - **Invariant:** at every instant ≥ 1 gripper is clamped on a real fixed object (an anchor column, or a member
   fixed into the structure) and is the IK base (`MotionKey.Base / BaseWorld / BaseOn`). The other gripper moves only
   by joint IK (`BambooGripKinematics.SolveGrip`). Grips are accepted within **0.5 mm / 0.5°**. Base swaps happen at

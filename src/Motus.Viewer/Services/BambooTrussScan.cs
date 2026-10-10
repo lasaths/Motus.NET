@@ -61,7 +61,7 @@ public sealed class BambooTrussScan
         var placed = new List<(string, double[])>();
         foreach (var c in _cycles)
         {
-            var member = _members.FirstOrDefault(m => m.Id == c.MemberId);
+            var member = _members.FirstOrDefault(m => m.Id == c.MemberId) ?? (BambooTrussLayout.IsRelay(c.MemberId) ? BambooTrussLayout.Def(c.MemberId) : null);
             if (member is null)
             {
                 // start / walk: nothing new in hand, the stock is full (next cane on the pegs).
@@ -69,6 +69,9 @@ public sealed class BambooTrussScan
                 continue;
             }
             var rest = BambooIcdCell.PlacementWorld(member.Store);
+            // A cane parked in a connector for this member: it is picked from there (and leaves the placed set).
+            var parked = placed.FindIndex(p => p.Item1.StartsWith("placed-" + member.Id + ">", StringComparison.Ordinal));
+            if (parked >= 0) { rest = placed[parked].Item2; placed.RemoveAt(parked); }
             Frame? held = null; double[]? released = null; string? miss = null;
             var close = FindKey(c, ":Close", k => k.Hold == 1);
             var open = FindKey(c, ":Open", k => k.Hold == 2);

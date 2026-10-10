@@ -307,6 +307,44 @@ public static class BambooTrussLayout
         return false;
     }
 
+    // ---------------- relays: a cane parked in a node connector ----------------
+
+    /// <summary>
+    /// Relay id "MEMBER>NODE/DIR": member MEMBER's cane parked in NODE's connector, pointing away from it along DIR
+    /// (in-plane angle in degrees from +x, or "z+" / "z−" out of the plane). The connector is a socket: the cane end
+    /// slides in along its axis and is held fully; the parked cane ends one node gap from the node centre (like a
+    /// placed member) and is a Motus obstacle until it is re-grasped and pulled out along its axis.
+    /// </summary>
+    public static string RelayId(string member, string node, string dir) => $"{member}>{node}/{dir}";
+
+    public static bool IsRelay(string id) => id.Contains('>') && !id.StartsWith("walk", StringComparison.Ordinal);
+
+    /// <summary>Unit direction (viewer) of a relay id's DIR part.</summary>
+    public static (double X, double Y, double Z) RelayDir(string id)
+    {
+        var dir = id[(id.IndexOf('/') + 1)..];
+        if (dir == "z+") return (0, 0, 1);
+        if (dir == "z-") return (0, 0, -1);
+        var a = double.Parse(dir, System.Globalization.CultureInfo.InvariantCulture) * Math.PI / 180;
+        return (Math.Cos(a), Math.Sin(a), 0);
+    }
+
+    public static string RelayNode(string id) => id[(id.IndexOf('>') + 1)..id.IndexOf('/')];
+    public static string RelayMember(string id) => id[..id.IndexOf('>')];
+
+    /// <summary>Member definition for a member id or a relay id (relay: picked from the stock, placed parked).</summary>
+    public static MemberDef? Def(string id)
+    {
+        var m = Members.FirstOrDefault(x => x.Id == id);
+        if (m is not null || !IsRelay(id)) return m;
+        var n = FootNodes.First(f => f.Name == RelayNode(id));
+        var d = RelayDir(id);
+        var len = StrutLength + 2 * NodeGap;
+        var a = (n.X, n.Y, n.Z);
+        var b = (n.X + d.X * len, n.Y + d.Y * len, n.Z + d.Z * len);
+        return new MemberDef(id, $"{RelayMember(id)} parked at {RelayNode(id)}", "·", Store, AlongEdge(a, b), a, b, RelayNode(id), "");
+    }
+
     /// <summary>Members no allowed support can reach, with the reason (reported, never faked).</summary>
     public static IReadOnlyDictionary<string, string> UnreachableMembers => Current.Unreachable;
 
