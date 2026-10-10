@@ -770,6 +770,43 @@ public class BambooTrussTests
         Assert.True(accepted >= 30, $"only {accepted} of {offered} probe segments accepted");
     }
 
+    // ---------------- core task types ----------------
+
+    /// <summary>
+    /// The shipped sequence is a list of core tasks (pick / place / walk land / park): it passes the robot-independent
+    /// sequence rules, has exactly one park (T2–D in M's connector, +z), and the viewer blocks round-trip losslessly.
+    /// </summary>
+    [Fact]
+    public void ShippedTasks_AreCoreTasks_PassingTheSequenceRules_AndRoundTrip()
+    {
+        var edits = BambooTrussMotion.ShippedTasks();
+        var core = BambooTaskModel.ToCore(edits);
+        Assert.All(core, c => Assert.Contains(c.Identity, TaskIdentities.All));
+        Assert.Empty(TaskSequenceRules.Validate(core));
+        var park = Assert.Single(core.Select(CoreTasks.AsPark).Where(x => x is not null));
+        Assert.Equal(("T2D", "M", "z+"), (park!.Object, park.Connector, park.Direction));
+        Assert.Equal(BambooTrussMotion.ShippedRelay, BambooTaskModel.RelayIdOf(park));
+        Assert.Equal(5, core.Count(c => CoreTasks.AsWalk(c) is { Mode: WalkMode.Land }));
+        Assert.Equal(7, core.Count(c => c.Identity == TaskIdentities.Place));
+        Assert.Equal(8, core.Count(c => c.Identity == TaskIdentities.Pick)); // T2–D is picked twice (stock, connector)
+        for (var i = 0; i < edits.Count; i++)
+        {
+            var back = BambooTaskModel.FromCore(core[i]);
+            Assert.Equal((edits[i].Identity, edits[i].Object, edits[i].JawMm, edits[i].Gait, edits[i].Via), (back.Identity, back.Object, back.JawMm, back.Gait, back.Via));
+            Assert.Equal(edits[i].Planes.Count, back.Planes.Count);
+            for (var j = 0; j < back.Planes.Count; j++)
+            {
+                var (a, b) = (edits[i].Planes[j], back.Planes[j]);
+                Assert.Equal((a.Name, a.X, a.Y0, a.Z, a.PitchDeg, a.YawDeg, a.YMm), (b.Name, b.X, b.Y0, b.Z, b.PitchDeg, b.YawDeg, b.YMm));
+                // The core frame itself carries the same pose (position and cane axis) without the metadata.
+                var f = BambooTaskModel.ToFrame(a);
+                Assert.Equal(a.Y0 + a.YMm / 1000, f.Y, 12);
+            }
+        }
+        Assert.True(BambooTrussMotion.IsShippedSequence(core.Select(BambooTaskModel.FromCore).ToList()));
+        Assert.DoesNotContain(Build().Notes, n => n.StartsWith("task rule", StringComparison.Ordinal));
+    }
+
     // ---------------- reach map + scene check ----------------
 
     /// <summary>Reach map from the A column (configured clamp): the stock and triangle 1 by IK, not the far members.</summary>
