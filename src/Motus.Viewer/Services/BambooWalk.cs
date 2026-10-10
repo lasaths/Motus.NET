@@ -173,7 +173,7 @@ public static class BambooWalk
     {
         var res = new Result();
         var clock = System.Diagnostics.Stopwatch.StartNew();
-        var canes = BambooTrussLayout.FixedBothEnds(p.PlacedIds).ToList();
+        var canes = p.Clampable(p.PlacedIds).ToList();
         var cur = Current(p, gait.Offsets);
         var start = gait.TrackSides ? cur : cur with { Side = 0 };
         var cps = new Dictionary<Site, BambooTrussPlanner.DeepCheckpoint> { [start] = p.SaveDeep() };

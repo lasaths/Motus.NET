@@ -308,7 +308,7 @@
         _motusNote = "";
         if (_cell is not null)
         {
-            _trussScan = new BambooTrussScan(_cell, _keys, _cycles, BambooTrussLayout.Members, _gL, BambooViewerScanStepDeg);
+            _trussScan = new BambooTrussScan(_cell, _keys, _cycles, BambooTrussLayout.Members, _gL);
             if (_trussScan.TrackMiss is { } miss) _motusNote = $"Motus: {miss} — strut stays on the ground.";
             _scanCts = new CancellationTokenSource();
             _ = BackgroundTrussScan(_trussScan, _scanCts.Token);
@@ -320,7 +320,6 @@
     }
 
     /// <summary>Joint step between Motus checks along the motion (degrees). 0.5° keeps every part from tunnelling.</summary>
-    private const double BambooViewerScanStepDeg = 0.5;
 
     /// <summary>Wall-clock budget per background Motus slice (ms). A fixed sample count could block the
     /// WASM UI thread for seconds in expensive stretches; a time budget keeps every frame paintable.</summary>

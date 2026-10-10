@@ -14,18 +14,29 @@ namespace Motus.Viewer.Services;
 /// </summary>
 public sealed class BambooTrussPlanner
 {
-    /// <summary>Joint step for the coarse via search (degrees).</summary>
-    public const double SearchStepDeg = 2.0;
-    /// <summary>Joint step every accepted segment is verified at (degrees) — finer than the viewer scan's 0.5°.</summary>
-    public const double VerifyStepDeg = 0.4;
+    /// <summary>Motion rules (PTP-only, park after place, sample resolutions, …) this planner follows.</summary>
+    public MotionConstraints Constraints { get; }
+
+    /// <summary>Joint step for the coarse via search (degrees) — <see cref="MotionConstraints.SearchStepDeg"/>.</summary>
+    public double SearchStepDeg => Constraints.SearchStepDeg;
+    /// <summary>Joint step every accepted segment is verified at (degrees) — <see cref="MotionConstraints.VerifyStepDeg"/>.</summary>
+    public double VerifyStepDeg => Constraints.VerifyStepDeg;
     /// <summary>Pre-grasp / retreat distance along the gripper's own +Y (metres).</summary>
     public const double ApproachM = 0.04;
     /// <summary>
-    /// Point-to-point only (Lassie: "the robot can only move point to point"): every move is a joint-space PTP segment
-    /// between IK waypoints (all joints interpolated, densely Motus-checked; via-points / RRT in joint space when the
-    /// direct segment hits). No Cartesian straight-line approach / lower / slide / back-off is required or emitted.
+    /// Point-to-point only (Lassie: "the robot can only move point to point") — <see cref="MotionConstraints.PointToPointOnly"/>:
+    /// every move is a joint-space PTP segment between IK waypoints (all joints interpolated, densely Motus-checked;
+    /// via-points / RRT in joint space when the direct segment hits).
     /// </summary>
-    public static bool Ptp { get; set; } = true;
+    bool Ptp => Constraints.PointToPointOnly;
+
+    /// <summary>
+    /// Placed members a gripper may clamp (walk on): with <see cref="MotionConstraints.FixedMemberRule"/> only the
+    /// members of the rigid anchored subframe (<see cref="BambooTrussLayout.FixedBothEnds"/>), else every placed member.
+    /// </summary>
+    public IReadOnlyList<string> Clampable(IEnumerable<string> placedIds) =>
+        Constraints.FixedMemberRule ? BambooTrussLayout.FixedBothEnds(placedIds)
+        : placedIds.Where(id => BambooTrussLayout.Members.Any(m => m.Id == id)).ToList();
 
     /// <summary>PTP waypoint: the IK solution for the free gripper at <paramref name="t"/> backed off
     /// <paramref name="backoff"/> along its own +Y, nearest to the current joints (any branch).</summary>
@@ -98,7 +109,11 @@ public sealed class BambooTrussPlanner
     /// <summary>Why candidate grips were rejected (diagnostics for notes / tests).</summary>
     public List<string> Diag { get; } = new();
 
-    public BambooTrussPlanner(BambooIcdCell cell) { _cell = cell; }
+    public BambooTrussPlanner(BambooIcdCell cell, MotionConstraints? constraints = null)
+    {
+        _cell = cell;
+        Constraints = (constraints ?? MotionConstraints.Current).Validate();
+    }
 
     // ---------------- world ----------------
 
@@ -107,36 +122,14 @@ public sealed class BambooTrussPlanner
     {
         var key = HashCode.Combine(hold, _placed.Count, _activeId, _activeReleased is null);
         if (_env is not null && key == _envKey) return _env;
-        var env = new List<CollisionObject>(_cell.GroundObjects);
-        env.AddRange(BambooTrussLayout.FixtureObjects);
-        foreach (var (name, w) in _placed) env.Add(_cell.StrutAt(w, name));
-        // Node connectors at inner nodes: present once a placed (or just released) member reaches them.
-        var hubIds = _placed.Select(p => p.Name["placed-".Length..]).ToList();
-        if (_activeId is not null && hold == 2 && _activeReleased is not null) hubIds.Add(_activeId);
-        env.AddRange(BambooTrussLayout.HubObjects(hubIds));
-        if (_activeId is not null)
-        {
-            if (hold == 0 && _activeRest is not null) env.Add(_cell.StrutAt(_activeRest, BambooIcdCell.Strut));
-            else if (hold == 2 && _activeReleased is not null) env.Add(_cell.StrutAt(_activeReleased, "placed-" + _activeId));
-        }
-        // Between members (start, walk) the stock is full: the next cane lies on the pegs.
-        else env.Add(_cell.StrutAt(BambooIcdCell.PlacementWorld(BambooTrussLayout.Store), BambooIcdCell.Strut));
+        // Between members (start, walk) the stock is full: the next cane lies on the pegs (activeId null).
+        var env = BambooTrussCollision.Environment(_cell, _placed, _activeId, _activeId is null ? null : _activeRest, _activeReleased, heldTracked: true, hold);
         _envKey = key;
         return _env = env;
     }
 
     /// <summary>Allowed touches: jaw plates of each gripper on what it clamps (and only that).</summary>
-    public static List<(string A, string B)> Allowed(string? lOn, string? rOn)
-    {
-        var list = new List<(string, string)>();
-        if (!string.IsNullOrEmpty(lOn))
-            foreach (var o in lOn.Split('|'))
-                foreach (var p in BambooIcdCell.LGripPlates) list.Add((p, o));
-        if (!string.IsNullOrEmpty(rOn))
-            foreach (var o in rOn.Split('|'))
-                foreach (var p in BambooIcdCell.RGripPlates) list.Add((p, o));
-        return list;
-    }
+    public static List<(string A, string B)> Allowed(string? lOn, string? rOn) => BambooTrussCollision.Allowed(lOn, rOn);
 
     /// <summary>L-grip (mount) world frame, viewer coordinates, for a base and joint angles.</summary>
     public static double[] LWorld(string? baseGripper, double[] baseWorld, IReadOnlyList<double> q) =>
@@ -155,16 +148,14 @@ public sealed class BambooTrussPlanner
     {
         Checks++;
         PoseWatch.Start();
-        _cell.SetMountViewer(LNow(q));
-        var ok = _cell.PoseContacts(q, gR, gL, hold == 1 ? _held : null, Env(hold), Allowed(lOn, rOn), 1).Count == 0;
+        var ok = BambooTrussCollision.Contacts(_cell, BaseName, _baseWorld, q, gR, gL, hold == 1 ? _held : null, Env(hold), lOn, rOn, 1).Count == 0;
         PoseWatch.Stop();
         return ok;
     }
 
     public IReadOnlyList<CollisionContact> ContactsNow(double[] q, double gR, double gL, int hold, string? lOn, string? rOn)
     {
-        _cell.SetMountViewer(LNow(q));
-        return _cell.PoseContacts(q, gR, gL, hold == 1 ? _held : null, Env(hold), Allowed(lOn, rOn), 8);
+        return BambooTrussCollision.Contacts(_cell, BaseName, _baseWorld, q, gR, gL, hold == 1 ? _held : null, Env(hold), lOn, rOn, 8);
     }
 
     /// <summary>Segment from the current state to (qb, gRb, gLb): intermediate samples keep the current hold.</summary>
@@ -173,7 +164,7 @@ public sealed class BambooTrussPlanner
     {
         var dq = K.JointDist(qa, qb);
         var dg = Math.Max(Math.Abs(gRb - gRa), Math.Abs(gLb - gLa));
-        var n = Math.Max(1, (int)Math.Ceiling(Math.Max(dq / step, dg / (step <= VerifyStepDeg ? 0.25 : 1.0))));
+        var n = Math.Max(1, (int)Math.Ceiling(Math.Max(dq / step, dg / (step <= VerifyStepDeg ? Constraints.JawStepMm : Constraints.SearchJawStepMm))));
         var q = new double[5];
         for (var s = 1; s <= n; s++)
         {
@@ -181,11 +172,11 @@ public sealed class BambooTrussPlanner
             for (var k = 0; k < 5; k++) q[k] = qa[k] + (qb[k] - qa[k]) * u;
             if (!PoseOk(q, gRa + (gRb - gRa) * u, gLa + (gLb - gLa) * u, s == n ? holdB : holdA, lOn, rOn)) return false;
         }
-        // The verifying pass also checks exactly the samples BambooTrussScan takes on this segment (it samples every
-        // ≤ ScanStepDeg / 1.5), so a shallow graze between the planner's own samples cannot slip through.
+        // The verifying pass also checks exactly the canonical samples BambooTrussScan takes on this segment
+        // (BambooTrussCollision.CanonicalCount), with the end key's hold, so whatever it accepts the scan accepts.
         if (step <= VerifyStepDeg)
         {
-            var ns = Math.Max(1, (int)Math.Ceiling(1.5 * Math.Max(dq / ScanStepDeg, dg / 0.25)));
+            var ns = BambooTrussCollision.CanonicalCount(dq, dg, Constraints);
             for (var s = 1; s < ns; s++)
             {
                 var u = s / (double)ns;
@@ -196,8 +187,8 @@ public sealed class BambooTrussPlanner
         return true;
     }
 
-    /// <summary>Joint step of the playback / test scan (BambooTrussScan maxStepDeg).</summary>
-    public const double ScanStepDeg = 0.5;
+    /// <summary>Joint step of the playback / test scan — <see cref="MotionConstraints.ScanStepDeg"/>.</summary>
+    public double ScanStepDeg => Constraints.ScanStepDeg;
 
     bool MoveOk(double[] qa, double[] qb, double step) =>
         SegOk(qa, qb, _gR, _gR, _gL, _gL, _hold, _hold, _lOn, _rOn, step);
@@ -703,7 +694,7 @@ public sealed class BambooTrussPlanner
                     if (!RRetreat(target)) return false;
                     // PTP: the placement must leave R a way out — it parks (Motus-clear transit) before the member
                     // counts as placed; a pose that wedges R between the canes moves on to the next solution.
-                    if (Ptp && !RPark())
+                    if (Constraints.ParkAfterPlace && !RPark())
                     {
                         Diag.Add("    R wedged after the place (no park)");
                         Restore(placeSnap, placeKeys); _rOn = placeROn;
@@ -751,7 +742,7 @@ public sealed class BambooTrussPlanner
         {
             var id = anchor["placed-".Length..];
             if (!_placed.Any(p => p.Name == anchor)) return Fail($"walk: {anchor} is not placed");
-            if (!BambooTrussLayout.FixedBothEnds(_placed.Select(p => p.Name["placed-".Length..])).Contains(id))
+            if (!Clampable(_placed.Select(p => p.Name["placed-".Length..])).Contains(id))
                 return Fail($"walk: {anchor} is not fixed at both ends — the robot may not clamp it");
             var m = BambooTrussLayout.Members.First(x => x.Id == id);
             var half = BambooTrussLayout.StrutLength / 2 - 0.04;
@@ -803,6 +794,60 @@ public sealed class BambooTrussPlanner
     public IReadOnlyList<string> PlacedIds => _placed.Select(p => p.Name["placed-".Length..]).ToList();
     /// <summary>Stake the L clamp is on (when L is the base).</summary>
     public string LStake => _lStake;
+
+    // ---------------- verification hooks (planner ⇔ scan agreement) ----------------
+
+    /// <summary>Current joints (degrees), jaw openings (mm), base gripper and what each gripper is on.</summary>
+    public double[] JointsNow => _q.ToArray();
+    public double GRNow => _gR;
+    public double GLNow => _gL;
+    public string BaseGripper => BaseName;
+    public string? LOn => _lOn;
+    public string? ROn => _rOn;
+
+    /// <summary>
+    /// Accept-and-emit one arbitrary PTP segment to (<paramref name="q"/>, jaws) exactly as the planner accepts its own
+    /// segments (coarse pass, then the verify pass incl. the canonical scan points); emits a "probe" key if accepted.
+    /// For the agreement property: whatever this accepts, <see cref="BambooTrussScan"/> must accept.
+    /// </summary>
+    public bool ProbeMove(double[] q, double gR, double gL)
+    {
+        if (!SegOk(_q, q, _gR, gR, _gL, gL, _hold, _hold, _lOn, _rOn, SearchStepDeg)) return false;
+        if (!SegOk(_q, q, _gR, gR, _gL, gL, _hold, _hold, _lOn, _rOn, VerifyStepDeg)) return false;
+        Emit("probe", q, gR, gL);
+        return true;
+    }
+
+    /// <summary>
+    /// Resume planning after key <paramref name="k"/> of an existing plan: keys and cycles up to k are kept, the robot
+    /// state (base, joints, jaws, clamps) is key k's, the standing canes are <paramref name="placed"/>; new keys go into
+    /// cycle <paramref name="cycle"/>. Only between members (hold 0, no cane in hand or being placed).
+    /// </summary>
+    public void ResumeAt(IReadOnlyList<BambooIcdMotion.MotionKey> keys, IReadOnlyList<BambooTrussMotion.CycleBound> cycles, int k,
+        IEnumerable<(string Name, double[] World)> placed, string cycle)
+    {
+        var key = keys[k];
+        if (key.Hold != 0) throw new InvalidOperationException($"ResumeAt: key {k} ({key.Label}) holds a cane");
+        Keys.Clear();
+        Keys.AddRange(keys.Take(k + 1).Select(x => new BambooIcdMotion.MotionKey
+        {
+            T = x.T, Label = x.Label, Q = x.Q.ToArray(), GR = x.GR, GL = x.GL, Hold = x.Hold, Base = x.Base,
+            BaseWorld = x.BaseWorld?.ToArray(), BaseOn = x.BaseOn, LOn = x.LOn, ROn = x.ROn
+        }));
+        CycleKeys.Clear();
+        foreach (var c in cycles.Where(c => c.FirstKey <= k)) CycleKeys.Add((c.MemberId, c.FirstKey, Math.Min(c.LastKey, k)));
+        _base = key.Base == "R" ? K.Gripper.R : K.Gripper.L;
+        _baseWorld = key.BaseWorld!.ToArray();
+        _baseOn = key.BaseOn ?? _baseOn;
+        _q = key.Q.ToArray(); _gR = key.GR; _gL = key.GL; _hold = 0;
+        _lOn = key.LOn; _rOn = key.ROn;
+        if (key.LOn is { } lo && (BambooTrussLayout.IsSupport(lo) || lo.StartsWith("placed-", StringComparison.Ordinal))) _lStake = lo;
+        _held = null; _activeId = null; _activeRest = null; _activeReleased = null;
+        _placed.Clear(); _placed.AddRange(placed.Select(p => (p.Name, p.World.ToArray())));
+        _envKey = int.MinValue;
+        Error = "";
+        BeginCycle(cycle);
+    }
 
     /// <summary>R-grip (open, L-base) transits to a Motus-clear park posture well away from where it is.</summary>
     bool RPark()
@@ -873,7 +918,7 @@ public sealed class BambooTrussPlanner
         var startKeys = Keys.Count;
         var snap = Snapshot();
         var placedIds = _placed.Select(p => p.Name["placed-".Length..]).ToList();
-        if (!BambooTrussLayout.FixedBothEnds(placedIds).Contains(memberId))
+        if (!Clampable(placedIds).Contains(memberId))
             return Fail($"brachiate: {memberId} is not fixed at both ends — the robot may not clamp it");
         if (_lStake.StartsWith("placed-", StringComparison.Ordinal))
             return Fail("brachiate: L is already on the structure");
@@ -929,7 +974,7 @@ public sealed class BambooTrussPlanner
         var startKeys = Keys.Count;
         var snap = Snapshot();
         var placedIds = _placed.Select(p => p.Name["placed-".Length..]).ToList();
-        var fixedBoth = BambooTrussLayout.FixedBothEnds(placedIds);
+        var fixedBoth = Clampable(placedIds);
         if (!_lStake.StartsWith("placed-", StringComparison.Ordinal) || _base != K.Gripper.L)
             return Fail("hand-over-hand: L must be the base, clamped on a placed cane");
         if (!fixedBoth.Contains(lCane) || !fixedBoth.Contains(rCane["placed-".Length..]))
@@ -973,7 +1018,7 @@ public sealed class BambooTrussPlanner
         BeginCycle(cycle);
         var startKeys = Keys.Count;
         var snap = Snapshot();
-        var fixedBoth = BambooTrussLayout.FixedBothEnds(_placed.Select(p => p.Name["placed-".Length..]));
+        var fixedBoth = Clampable(_placed.Select(p => p.Name["placed-".Length..]));
         if (!_lStake.StartsWith("placed-", StringComparison.Ordinal) || _base != K.Gripper.L)
             return Fail("step to stake: L must be the base, clamped on a placed cane");
         if (!fixedBoth.Contains(rCane["placed-".Length..]))
@@ -1043,7 +1088,7 @@ public sealed class BambooTrussPlanner
         var res = new List<Landing>();
         if (_base != K.Gripper.L) return res;
         var placedIds = _placed.Select(p => p.Name["placed-".Length..]).ToList();
-        var fixedIds = BambooTrussLayout.FixedBothEnds(placedIds);
+        var fixedIds = Clampable(placedIds);
         var half = BambooTrussLayout.StrutLength / 2;
         var store = member.Store; var d = member.Place; var u = d.Axis;
         var pk = _placed.FirstOrDefault(p => p.Name.StartsWith("placed-" + member.Id + ">", StringComparison.Ordinal));
@@ -1105,7 +1150,7 @@ public sealed class BambooTrussPlanner
         BeginCycle(cycle);
         var startKeys = Keys.Count;
         var snap = Snapshot();
-        var fixedIds = BambooTrussLayout.FixedBothEnds(_placed.Select(p => p.Name["placed-".Length..]));
+        var fixedIds = Clampable(_placed.Select(p => p.Name["placed-".Length..]));
         if (_base != K.Gripper.L) return Fail("walk step: L must be the base");
         if (!fixedIds.Contains(rCane) || !fixedIds.Contains(lCane)) return Fail("walk step: both canes must be fixed into the structure");
         var oldL = _lStake;
@@ -1176,7 +1221,7 @@ public sealed class BambooTrussPlanner
         {
             var id = anchor["placed-".Length..];
             if (!_placed.Any(p => p.Name == anchor)) yield break;
-            if (!BambooTrussLayout.FixedBothEnds(_placed.Select(p => p.Name["placed-".Length..])).Contains(id)) yield break;
+            if (!Clampable(_placed.Select(p => p.Name["placed-".Length..])).Contains(id)) yield break;
             var m = BambooTrussLayout.Members.First(x => x.Id == id);
             var half = BambooTrussLayout.StrutLength / 2 - 0.04;
             if (rOffsetM is { } off) { yield return K.OnStrut(PlacedPlacement(m), Math.Clamp(off, -half, half), anchor); yield break; }

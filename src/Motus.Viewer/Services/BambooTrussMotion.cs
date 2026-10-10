@@ -286,12 +286,7 @@ public static class BambooTrussMotion
         p.StampTimes();
         cell.SetMountViewer(BambooTrussLayout.StartBase);
         var keys = p.Keys;
-        var cycles = new List<CycleBound>();
-        foreach (var (name, first, last) in p.CycleKeys)
-        {
-            if (last < first) continue;
-            cycles.Add(new CycleBound { MemberId = name, FirstKey = first, LastKey = last, T0 = first > 0 ? keys[first - 1].T : 0, T1 = keys[last].T });
-        }
+        var cycles = CyclesOf(p);
         notes.InsertRange(0, p.Notes);
         notes.Add($"planned in {clock.Elapsed.TotalSeconds:F1} s ({p.Checks} Motus pose checks)");
         return new TrussBuild { Keys = keys, Cycles = cycles, Grips = p.Grips, Notes = notes, Built = built, MotusChecks = p.Checks, Tasks = tasks.ToList() };
@@ -299,6 +294,19 @@ public static class BambooTrussMotion
 
     /// <summary>The one relay of the shipped plan: T2–D's cane parked in M's connector, pointing +z.</summary>
     public static readonly string ShippedRelay = BambooTrussLayout.RelayId("T2D", "M", "z+");
+
+    /// <summary>Cycle bounds (key ranges and times) of a planner whose keys are stamped (<see cref="BambooTrussPlanner.StampTimes"/>).</summary>
+    public static List<CycleBound> CyclesOf(BambooTrussPlanner p)
+    {
+        var keys = p.Keys;
+        var cycles = new List<CycleBound>();
+        foreach (var (name, first, last) in p.CycleKeys)
+        {
+            if (last < first) continue;
+            cycles.Add(new CycleBound { MemberId = name, FirstKey = first, LastKey = last, T0 = first > 0 ? keys[first - 1].T : 0, T1 = keys[last].T });
+        }
+        return cycles;
+    }
 
     /// <summary>Walk mode "land": one node-transfer step to a landing (point + roll) chosen for the next member.</summary>
     public const string LandGait = "land";
