@@ -770,6 +770,119 @@ public class BambooTrussTests
         Assert.True(accepted >= 30, $"only {accepted} of {offered} probe segments accepted");
     }
 
+    // ---------------- reach map + scene check ----------------
+
+    /// <summary>Reach map from the A column (configured clamp): the stock and triangle 1 by IK, not the far members.</summary>
+    [Fact]
+    public void ReachMap_FromTheAColumn_ReachesStockAndTriangle1_NotTheFarMembers()
+    {
+        var map = new BambooReachMap();
+        var a = BambooReachMap.AnchorSites("anchor-A")[0];
+        Assert.Equal(BambooTrussLayout.StartBase, a.BaseWorld);
+        Assert.True(map.Query(a, BambooReachMap.Stock()).Ik);
+        foreach (var id in new[] { "AT1", "T1M", "AM" })
+            Assert.True(map.Query(a, BambooReachMap.PlaceOf(BambooTrussLayout.Members.Single(m => m.Id == id))).Ik, id);
+        foreach (var id in new[] { "MT2", "T1T2", "MD", "T2D" })
+            Assert.False(map.Query(a, BambooReachMap.PlaceOf(BambooTrussLayout.Members.Single(m => m.Id == id))).Ik, id);
+        // The distance prefilter is sound: no configuration puts the free gripper beyond MaxReachM.
+        var rng = new Random(5);
+        var q = new double[5];
+        for (var i = 0; i < 2000; i++)
+        {
+            for (var k = 0; k < 5; k++) q[k] = BambooIcdMotion.LimitsDeg[k].Min + (BambooIcdMotion.LimitsDeg[k].Max - BambooIcdMotion.LimitsDeg[k].Min) * rng.NextDouble();
+            var t = K.Tlr(q);
+            Assert.True(Math.Sqrt(t[3] * t[3] + t[7] * t[7] + t[11] * t[11]) < BambooReachMap.MaxReachM);
+        }
+    }
+
+    /// <summary>Cane clamp sites are proper grip frames: on the cane axis, slot axis along it, orthonormal, right-handed.</summary>
+    [Fact]
+    public void ReachMap_CaneSites_AreGripFramesOnTheCane()
+    {
+        var m = BambooTrussLayout.Members.Single(x => x.Id == "AM");
+        var sites = BambooReachMap.CaneSites("placed-AM", m.Place, new[] { -0.09, 0.0, 0.09 }, new[] { 0.0, 90, 200 });
+        Assert.Equal(9, sites.Count);
+        foreach (var s in sites)
+        {
+            var (pos, axis) = K.Residual(s.BaseWorld, K.OnStrut(m.Place, s.OffM, "placed-AM"));
+            Assert.True(pos < 1e-12 && axis < 1e-6);
+            var f = s.BaseWorld;
+            var x = K.ColX(f); var y = K.ColY(f); var z = K.ColZ(f);
+            double Dot((double X, double Y, double Z) a, (double X, double Y, double Z) b) => a.X * b.X + a.Y * b.Y + a.Z * b.Z;
+            Assert.True(Math.Abs(Dot(x, y)) < 1e-12 && Math.Abs(Dot(y, z)) < 1e-12 && Math.Abs(Dot(x, z)) < 1e-12);
+            Assert.True(Math.Abs(Dot(x, x) - 1) < 1e-12 && Math.Abs(Dot(y, y) - 1) < 1e-12);
+            var c = (X: y.Y * z.Z - y.Z * z.Y, Y: y.Z * z.X - y.X * z.Z, Z: y.X * z.Y - y.Y * z.X);
+            Assert.True(Dot(c, x) > 1 - 1e-12); // x = y × z
+        }
+    }
+
+    /// <summary>
+    /// Scene check on the shipped Warren layout: all 7 members reachable; T2–D needs a relay, and the shipped relay
+    /// (M's connector, +z) is one of the single-park options; the others have direct sites. Collision-checked too.
+    /// </summary>
+    [Fact]
+    public void SceneCheck_Warren_SevenReachable_T2DNeedsARelay()
+    {
+        foreach (var collision in new[] { false, true })
+        {
+            var r = BambooSceneCheck.Run(Cell, null, new BambooSceneCheck.Options { Collision = collision });
+            _out.WriteLine($"collision={collision}: {r.Summary} in {r.Seconds:F1} s");
+            foreach (var d in r.Details) _out.WriteLine("  " + d);
+            Assert.True(r.Ok, r.Summary);
+            var t2d = r.Members.Single(m => m.MemberId == "T2D");
+            Assert.True(t2d.NeedsRelay);
+            Assert.Contains("M/z+", t2d.RelayOptions);
+            foreach (var m in r.Members.Where(m => m.MemberId != "T2D")) Assert.True(m.SitesBoth > 0, m.Verdict);
+        }
+    }
+
+    /// <summary>
+    /// Reach map ⇔ planner: wherever the shipped plan grasps and places a cane, the base it stood on reaches that
+    /// grasp and that place by the reach map's IK (from the recorded base frame).
+    /// </summary>
+    [Fact]
+    public void ReachMap_AgreesWithThePlanner_AtEveryShippedPickAndPlace()
+    {
+        var built = Build();
+        var map = new BambooReachMap { IkSeeds = 12 };
+        foreach (var c in built.Cycles.Where(c => BambooTrussLayout.Def(c.MemberId) is not null))
+        {
+            var def = BambooTrussLayout.Def(c.MemberId)!;
+            var close = built.Keys.Skip(c.FirstKey).Take(c.LastKey - c.FirstKey + 1).First(k => k.Label.EndsWith(":Close", StringComparison.Ordinal));
+            Assert.Equal("L", close.Base);
+            var site = new BambooReachMap.ClampSite(close.BaseOn!, 0, 0, close.BaseWorld!);
+            var parked = built.Cycles.Any(x => x.MemberId.StartsWith(c.MemberId + ">", StringComparison.Ordinal));
+            var pick = parked ? new BambooReachMap.TargetLine("parked", BambooTrussLayout.Def(BambooTrussMotion.ShippedRelay)!.Place, BambooTrussLayout.StockGraspOffsets)
+                : BambooReachMap.Stock();
+            Assert.True(map.Query(site, pick).Ik, $"{c.MemberId}: pick not in the reach map of {close.BaseOn}");
+            Assert.True(map.Query(site, BambooReachMap.PlaceOf(def)).Ik, $"{c.MemberId}: place not in the reach map of {close.BaseOn}");
+        }
+    }
+
+    /// <summary>Fail fast: with the stock out of every site's reach, planning is refused before any key is planned, with numbers.</summary>
+    [Fact]
+    public void SceneCheck_FailsFast_BeforePlanning_WhenTheStockIsOutOfReach()
+    {
+        var far = SiteDefaults.Make(0.24, 0.03, 0.19, 0.09, 60, -1.5, 0.32);
+        var keep = BambooTrussLayout.Current;
+        try
+        {
+            BambooTrussLayout.Use(far);
+            var r = BambooSceneCheck.Run();
+            Assert.False(r.Ok);
+            Assert.All(r.Members, m => Assert.Equal(0, m.SitesStock));
+            Assert.All(r.Members, m => Assert.Contains("UNREACHABLE — stock from 0", m.Verdict));
+            BambooTrussMotion.UseCell(Cell);
+            var clock = System.Diagnostics.Stopwatch.StartNew();
+            var b = BambooTrussMotion.RunSequence(BambooTrussMotion.ShippedTasks());
+            Assert.Empty(b.Keys);
+            Assert.Contains("not planned", b.Error);
+            Assert.Contains(b.Notes, n => n.StartsWith("scene check: 0/7", StringComparison.Ordinal));
+            Assert.True(clock.Elapsed.TotalSeconds < 60, $"fail-fast took {clock.Elapsed.TotalSeconds:F0} s");
+        }
+        finally { BambooTrussLayout.Use(keep); }
+    }
+
     // ---------------- clamp markers ----------------
 
     /// <summary>

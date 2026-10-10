@@ -236,8 +236,21 @@ public static class BambooTrussMotion
         if (cell is null) return new TrussBuild { Error = "Motus cell required (call UseCell with the viewer BambooIcdCell).", Tasks = tasks.ToList() };
         var clock = System.Diagnostics.Stopwatch.StartNew();
         var site = BambooTrussLayout.Current;
-        var p = new BambooTrussPlanner(cell);
         var notes = new List<string>();
+        if (SceneCheckFirst)
+        {
+            // Fail fast: every member must be reachable (directly or by a relay chain) before anything is planned.
+            var members = tasks.Where(t => t.Identity == "place").Select(t => BambooTrussLayout.Def(t.Object))
+                .Where(m => m is not null && !BambooTrussLayout.IsRelay(m.Id)).Select(m => m!).DistinctBy(m => m.Id).ToList();
+            var check = BambooSceneCheck.Run(null, members);
+            notes.Add(check.Summary);
+            notes.AddRange(check.Details.Select(d => "scene check · " + d));
+            log?.Invoke(check.Summary);
+            if (!check.Ok)
+                return new TrussBuild { Error = check.Summary + " — not planned: " + string.Join("; ", check.Members.Where(m => !m.Reachable).Select(m => $"{m.MemberId}: {m.Verdict}")),
+                    Notes = notes, Tasks = tasks.ToList() };
+        }
+        var p = new BambooTrussPlanner(cell);
         var built = new List<string>();
         if (!p.Start()) return new TrussBuild { Error = p.Error, Tasks = tasks.ToList() };
         BambooIcdMotion.TaskEdit? pick = null;
@@ -307,6 +320,9 @@ public static class BambooTrussMotion
         }
         return cycles;
     }
+
+    /// <summary>Run <see cref="BambooSceneCheck"/> (IK reach, ≈ 9 s desktop) before planning and refuse to plan an unreachable scene.</summary>
+    public static bool SceneCheckFirst { get; set; } = true;
 
     /// <summary>Walk mode "land": one node-transfer step to a landing (point + roll) chosen for the next member.</summary>
     public const string LandGait = "land";

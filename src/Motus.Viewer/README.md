@@ -167,6 +167,25 @@ click or drag the track to scrub, click a block to jump to its start; Play/Pause
   walk (node) → baseL@-1 59.2–71.5 % (brachiate S3 → baseR B end) and 71.5–81.3 % (node transfer, R on sep),
   walk (node) → baseR@-1 81.3–89.6 % (R on sep), walk (node) → stake-S3 89.6–100 %.
 
+### Motion rules, shared collision check, reach map, scene check (`/bamboo-truss`)
+
+- **`MotionConstraints`** — one profile (PTP-only, one clamped base, swaps at rest, fixed-member rule, park after
+  place, clearance margin, sample resolutions). `BambooTrussPlanner(cell, constraints?)` and `BambooTrussScan(...,
+  constraints?)` read it; `Validate()` rejects rules the planner cannot honour (a clearance margin needs distance
+  queries Motus does not have yet, so it must be 0).
+- **`BambooTrussCollision`** — the single collision check: environment, allowed jaw contacts, pose contacts, and the
+  canonical sample points of a segment (n = ⌈1.5 · max(Δq / 0.5°, Δjaw / 0.25 mm)⌉, fractions s/n). The planner's
+  verify pass checks these points (plus finer ones); the scan checks exactly these points (mapped through the playback
+  easing). Property test: any segment the planner accepts, the scan accepts.
+- **`BambooReachMap`** — for a clamp site (`AnchorSites`, `CaneSites`: base-gripper frame on a column or a cane, any
+  heading / roll), does the free gripper reach a target line (`Stock()`, `PlaceOf(member)`, a parked pose) by IK,
+  optionally with a Motus-clear pose (`Collision`)? `Query(site, line)`, `Matrix(sites, lines)` (parallel,
+  deterministic), sound distance prefilter `MaxReachM`.
+- **`BambooSceneCheck.Run`** — before planning (`BambooTrussMotion.SceneCheckFirst`): per member, the number of sites
+  reaching the stock, the place, and both; if none reaches both, the shortest relay chain over connector park poses
+  (and all single-park options). Optimistic about build order, so a failure means "cannot be built from this layout"
+  and planning is refused with those numbers. Warren: 7/7, T2–D needs a relay (304 sites × 28 lines, ≈ 9 s IK-only).
+
 ## What still differs from the HTML preview
 
 - The planner keeps the HTML's point-model floor heuristics only as IK-branch *preferences*
