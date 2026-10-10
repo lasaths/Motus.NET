@@ -147,6 +147,14 @@
     camera.lookAt(look);
   }
 
+  // Orbit-camera hook (screenshots / docs): spherical angles in degrees around a look-at point.
+  window.setBambooCamera = function (thetaDeg, phiDeg, d, lx, ly, lz) {
+    theta = thetaDeg * Math.PI / 180; phi = phiDeg * Math.PI / 180; dist = d;
+    if (typeof lx === 'number') look.set(lx, ly, lz);
+    updateCamera();
+    return [theta, phi, dist];
+  };
+
   function resize() {
     if (!view || !renderer) return;
     var w = view.clientWidth, h = view.clientHeight;
