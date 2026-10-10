@@ -52,9 +52,12 @@ public sealed class BambooTrussScan
         IReadOnlyList<BambooTrussMotion.CycleBound> cycles,
         IReadOnlyList<BambooTrussLayout.MemberDef>? members = null,
         double gLmm = 24,
-        double maxStepDeg = 0.5)
+        double? maxStepDeg = null,
+        MotionConstraints? constraints = null)
     {
         _cell = cell;
+        var profile = constraints ?? MotionConstraints.Current;
+        Constraints = maxStepDeg is { } step ? profile with { ScanStepDeg = step } : profile;
         _keys = keys;
         _cycles = cycles;
         _members = members ?? BambooTrussLayout.Members;
@@ -92,8 +95,11 @@ public sealed class BambooTrussScan
             if (released is not null) placed.Add(("placed-" + member.Id, released));
         }
         cell.SetMountViewer(BambooTrussLayout.StartBase);
-        BuildSamples(maxStepDeg);
+        BuildSamples();
     }
+
+    /// <summary>Motion rules the scan samples by (canonical points: <see cref="BambooTrussCollision.CanonicalCount"/>).</summary>
+    public MotionConstraints Constraints { get; }
 
     BambooIcdMotion.MotionKey? FindKey(BambooTrussMotion.CycleBound c, string suffix, Func<BambooIcdMotion.MotionKey, bool> pred)
     {
@@ -104,7 +110,11 @@ public sealed class BambooTrussScan
 
     static double[] RWorld(BambooIcdMotion.MotionKey k) => BambooTrussPlanner.RWorld(k.Base, k.BaseWorld!, k.Q);
 
-    void BuildSamples(double maxStepDeg)
+    /// <summary>
+    /// Sample times: on every key segment exactly the canonical joint-space fractions the planner verifies
+    /// (<see cref="BambooTrussCollision.CanonicalCount"/>), mapped through the playback easing to times.
+    /// </summary>
+    void BuildSamples()
     {
         _ts.Add(0);
         for (var i = 0; i + 1 < _keys.Count; i++)
@@ -112,8 +122,8 @@ public sealed class BambooTrussScan
             var a = _keys[i]; var b = _keys[i + 1];
             var dq = K.JointDist(a.Q, b.Q);
             var dg = Math.Max(Math.Abs(b.GR - a.GR), Math.Abs(b.GL - a.GL));
-            var n = Math.Max(1, (int)Math.Ceiling(1.5 * Math.Max(dq / maxStepDeg, dg / 0.25)));
-            for (var s = 1; s <= n; s++) _ts.Add(a.T + (b.T - a.T) * s / n);
+            var n = BambooTrussCollision.CanonicalCount(dq, dg, Constraints);
+            for (var s = 1; s <= n; s++) _ts.Add(a.T + (b.T - a.T) * BambooTrussCollision.TimeForFraction(s / (double)n));
         }
     }
 
@@ -147,6 +157,13 @@ public sealed class BambooTrussScan
     public double Progress => _ts.Count == 0 ? 1 : Math.Min(1, _next / (double)_ts.Count);
 
     public BambooTrussScan RunToEnd() { AdvanceTo(1.0); return this; }
+
+    /// <summary>Skip (treat as verified) every sample at or before <paramref name="t"/> — e.g. an already-scanned plan prefix.</summary>
+    public BambooTrussScan SkipTo(double t)
+    {
+        while (_next < _ts.Count && _ts[_next] <= t + 1e-12) { LastClearT = _ts[_next]; _next++; }
+        return this;
+    }
 
     /// <summary>Base (clamped) gripper at t: which one, its fixed world frame (viewer) and what it is clamped on.</summary>
     public (string Gripper, double[] World, string On) BaseAt(double t)
@@ -195,22 +212,14 @@ public sealed class BambooTrussScan
     /// <summary>Environment (everything that is not the robot) at t for a hold state.</summary>
     public List<CollisionObject> EnvironmentAt(double t, int hold)
     {
-        var env = new List<CollisionObject>(_cell.GroundObjects);
-        env.AddRange(BambooTrussLayout.FixtureObjects);
-        if (_cycles.Count == 0) return env;
-        var w = _world[BambooTrussMotion.CycleIndexAt(_keys, _cycles, t)];
-        foreach (var (name, m) in w.Placed) env.Add(_cell.StrutAt(m, name));
-        var hubIds = w.Placed.Select(p => p.Name["placed-".Length..]).ToList();
-        if (w.ActiveId is not null && hold == 2 && w.Released is not null) hubIds.Add(w.ActiveId);
-        env.AddRange(BambooTrussLayout.HubObjects(hubIds));
-        if (w.ActiveId is null && w.Rest is not null) env.Add(_cell.StrutAt(w.Rest, BambooIcdCell.Strut));
-        if (w.ActiveId is not null)
+        if (_cycles.Count == 0)
         {
-            if (hold == 0 && w.Rest is not null) env.Add(_cell.StrutAt(w.Rest, BambooIcdCell.Strut));
-            else if (hold == 2 && w.Released is not null) env.Add(_cell.StrutAt(w.Released, "placed-" + w.ActiveId));
-            else if (hold == 1 && w.HeldOffset is null && w.Rest is not null) env.Add(_cell.StrutAt(w.Rest, BambooIcdCell.Strut));
+            var env = new List<CollisionObject>(_cell.GroundObjects);
+            env.AddRange(BambooTrussLayout.FixtureObjects);
+            return env;
         }
-        return env;
+        var w = _world[BambooTrussMotion.CycleIndexAt(_keys, _cycles, t)];
+        return BambooTrussCollision.Environment(_cell, w.Placed, w.ActiveId, w.Rest, w.Released, w.HeldOffset is not null, hold);
     }
 
     /// <summary>Viewer poses for every cane (placed members, active cane on the feed / held / released).</summary>
@@ -251,10 +260,9 @@ public sealed class BambooTrussScan
         var s = BambooTrussMotion.SampleState(_keys, t);
         var k = _keys.Count > 0 ? _keys[s.SegEnd] : null;
         var (g, w, _) = BaseAt(t);
-        _cell.SetMountViewer(BambooTrussPlanner.LWorld(g, w, q));
         var world = _cycles.Count > 0 ? _world[BambooTrussMotion.CycleIndexAt(_keys, _cycles, t)] : null;
         var held = hold == 1 ? world?.HeldOffset : null;
-        return _cell.PoseContacts(q, gR, gL, held, EnvironmentAt(t, hold), BambooTrussPlanner.Allowed(k?.LOn, k?.ROn), max);
+        return BambooTrussCollision.Contacts(_cell, g, w, q, gR, gL, held, EnvironmentAt(t, hold), k?.LOn, k?.ROn, max);
     }
 
     void CheckNext()

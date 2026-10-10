@@ -12,6 +12,9 @@ namespace Motus.Core.Tests;
 /// </summary>
 public class BambooTrussTests
 {
+    private readonly Xunit.Abstractions.ITestOutputHelper _out;
+    public BambooTrussTests(Xunit.Abstractions.ITestOutputHelper output) { _out = output; }
+
     private static readonly Lazy<BambooIcdCell> LazyCell = new(() =>
     {
         var cell = BambooIcdCell.LoadFile(UrdfPath, BambooTrussLayout.StrutLength);
@@ -41,7 +44,7 @@ public class BambooTrussTests
     }
 
     private static BambooTrussScan Scan(BambooTrussMotion.TrussBuild built) =>
-        new(Cell, built.Keys, built.Cycles, BambooTrussLayout.Members, BambooTrussLayout.JawClosedMm, 0.5);
+        new(Cell, built.Keys, built.Cycles, BambooTrussLayout.Members, BambooTrussLayout.JawClosedMm);
 
     private const double Closed = BambooTrussLayout.JawClosedMm + 1e-9;
 
@@ -517,7 +520,7 @@ public class BambooTrussTests
         var close = keys.First(k => k.Label == "AT1:Close");
         close.Q = close.Q.ToArray();
         close.Q[2] += 2; // a jaw 2° off the planned grasp no longer encloses the cane on its slot axis
-        var scan = new BambooTrussScan(Cell, keys, built.Cycles, BambooTrussLayout.Members, BambooTrussLayout.JawClosedMm, 0.5);
+        var scan = new BambooTrussScan(Cell, keys, built.Cycles, BambooTrussLayout.Members, BambooTrussLayout.JawClosedMm);
         Assert.NotNull(scan.TrackMiss);
         Assert.Contains("AT1", scan.TrackMiss);
     }
@@ -652,7 +655,119 @@ public class BambooTrussTests
         Assert.Contains(built.Keys, k => k.Label == "AT1:PTP Grasp");
         Assert.Contains(built.Keys, k => k.Label == "AT1:PTP Place");
         Assert.Contains(built.Keys, k => k.Label.EndsWith("L:PTP to placed-AM", StringComparison.Ordinal));
-        Assert.True(BambooTrussPlanner.Ptp);
+        Assert.True(MotionConstraints.Current.PointToPointOnly);
+    }
+
+    // ---------------- motion constraints + shared collision check ----------------
+
+    /// <summary>One profile: planner and scan read the same rules and sample resolution; unsupported rules are rejected.</summary>
+    [Fact]
+    public void MotionConstraints_AreOneProfile_SharedByPlannerAndScan()
+    {
+        var c = MotionConstraints.Current;
+        Assert.Same(MotionConstraints.Bamboo, c);
+        Assert.True(c.PointToPointOnly && c.OneClampedBase && c.SwapAtRest && c.FixedMemberRule && c.ParkAfterPlace);
+        Assert.Equal(0, c.ClearanceMarginM);
+        var p = new BambooTrussPlanner(Cell);
+        Assert.Same(c, p.Constraints);
+        Assert.Equal(c.VerifyStepDeg, p.VerifyStepDeg);
+        var built = Build();
+        Assert.Equal(c.ScanStepDeg, Scan(built).Constraints.ScanStepDeg);
+        Assert.Throws<NotSupportedException>(() => new BambooTrussPlanner(Cell, c with { ClearanceMarginM = 0.002 }));
+        Assert.Throws<NotSupportedException>(() => new BambooTrussPlanner(Cell, c with { SwapAtRest = false }));
+        Assert.Throws<NotSupportedException>(() => new BambooTrussPlanner(Cell, c with { OneClampedBase = false }));
+        // Swaps at rest: every key whose base differs from the previous key's has the same joints.
+        for (var i = 1; i < built.Keys.Count; i++)
+            if (built.Keys[i].Base != built.Keys[i - 1].Base)
+                Assert.True(K.JointDist(built.Keys[i].Q, built.Keys[i - 1].Q) < 1e-9, $"{built.Keys[i].Label}: base swap while moving");
+        // Fixed-member rule: off, every placed member is clampable.
+        var open = new BambooTrussPlanner(Cell, c with { FixedMemberRule = false });
+        Assert.Equal(new[] { "AM" }, open.Clampable(new[] { "AM" }));
+        Assert.Empty(p.Clampable(new[] { "AM" }));
+    }
+
+    /// <summary>The scan samples each key segment at exactly the canonical joint-space fractions the planner verifies.</summary>
+    [Fact]
+    public void Scan_SamplesTheCanonicalPoints_ThePlannerVerifies()
+    {
+        var built = Build();
+        var scan = Scan(built);
+        var c = scan.Constraints;
+        var ts = scan.SampleTimes;
+        var idx = 1;
+        for (var i = 0; i + 1 < built.Keys.Count; i++)
+        {
+            var a = built.Keys[i]; var b = built.Keys[i + 1];
+            var n = BambooTrussCollision.CanonicalCount(K.JointDist(a.Q, b.Q), Math.Max(Math.Abs(b.GR - a.GR), Math.Abs(b.GL - a.GL)), c);
+            for (var s = 1; s <= n; s++, idx++)
+            {
+                var st = BambooTrussMotion.SampleState(built.Keys, ts[idx]);
+                var f = s / (double)n;
+                for (var k = 0; k < 5; k++)
+                    Assert.True(Math.Abs(st.Q[k] - (a.Q[k] + (b.Q[k] - a.Q[k]) * f)) < 1e-6, $"segment {i} sample {s}: joint {k} off the canonical point");
+            }
+        }
+        Assert.Equal(ts.Count, idx);
+    }
+
+    /// <summary>
+    /// Agreement property: any segment the planner accepts, the scan accepts. From states across the shipped plan
+    /// (start, every walk — R as base with L open, and L as base — and after each member), random PTP segments (joints
+    /// ±35°, toward earlier configurations, free-jaw strokes) are offered to the planner exactly as it checks its own;
+    /// every accepted one is appended to the plan and the scan must find the appended part Motus-clear.
+    /// </summary>
+    [Fact]
+    public void Property_AnySegmentThePlannerAccepts_TheScanAccepts()
+    {
+        var built = Build();
+        var scan = Scan(built);
+        var rng = new Random(20261010);
+        var states = new List<int>();
+        foreach (var cy in built.Cycles)
+        {
+            var hold0 = Enumerable.Range(cy.FirstKey, Math.Max(0, cy.LastKey - cy.FirstKey + 1)).Where(i => built.Keys[i].Hold == 0).ToList();
+            if (hold0.Count == 0) continue;
+            if (cy.MemberId.StartsWith("walk", StringComparison.Ordinal))
+            {
+                var rBase = hold0.Where(i => built.Keys[i].Base == "R" && built.Keys[i].LOn is null).ToList();
+                if (rBase.Count > 0) states.Add(rBase[rBase.Count / 2]);
+            }
+            states.Add(hold0[^1]);
+        }
+        Assert.Contains(states, i => built.Keys[i].Base == "R" && built.Keys[i].LOn is null);
+        int accepted = 0, offered = 0;
+        foreach (var k in states.Distinct())
+        {
+            var p = new BambooTrussPlanner(Cell);
+            var world = scan.World[BambooTrussMotion.CycleIndexAt(built.Keys, built.Cycles, built.Keys[k].T)];
+            var placed = world.Placed.ToList();
+            if (world.ActiveId is not null && world.Released is not null) placed.Add(("placed-" + world.ActiveId, world.Released));
+            p.ResumeAt(built.Keys, built.Cycles, k, placed, "walk (probe)");
+            var here = 0;
+            for (var i = 0; i < 40; i++)
+            {
+                var q0 = p.JointsNow;
+                var q = new double[5];
+                var toward = rng.NextDouble() < 0.5 ? built.Keys[rng.Next(built.Keys.Count)].Q : null;
+                for (var j = 0; j < 5; j++)
+                {
+                    var target = toward is not null ? q0[j] + (toward[j] - q0[j]) * rng.NextDouble() : q0[j] + (rng.NextDouble() * 2 - 1) * 35;
+                    q[j] = Math.Clamp(target, BambooIcdMotion.LimitsDeg[j].Min, BambooIcdMotion.LimitsDeg[j].Max);
+                }
+                double gR = p.GRNow, gL = p.GLNow;
+                if (p.BaseGripper == "L" && p.ROn is null) gR = BambooTrussLayout.JawClosedMm + rng.NextDouble() * (BambooTrussLayout.JawOpenMm - BambooTrussLayout.JawClosedMm);
+                if (p.BaseGripper == "R" && p.LOn is null) gL = BambooTrussLayout.JawClosedMm + rng.NextDouble() * (BambooTrussLayout.LJawOpenMm - BambooTrussLayout.JawClosedMm);
+                offered++;
+                if (p.ProbeMove(q, gR, gL)) { accepted++; here++; }
+            }
+            if (here == 0) continue;
+            p.StampTimes();
+            var probe = new BambooTrussScan(Cell, p.Keys, BambooTrussMotion.CyclesOf(p), BambooTrussLayout.Members, BambooTrussLayout.JawClosedMm);
+            probe.SkipTo(p.Keys[k].T).RunToEnd();
+            Assert.True(probe.FirstHit is null, $"state {k} ({built.Keys[k].Label}): planner accepted, scan hit at {probe.FirstHit?.Label}: {probe.FirstHit?.Describe()}");
+        }
+        _out.WriteLine($"agreement: {states.Distinct().Count()} states, {accepted} of {offered} probe segments accepted by the planner, all scan-clear");
+        Assert.True(accepted >= 30, $"only {accepted} of {offered} probe segments accepted");
     }
 
     // ---------------- clamp markers ----------------
@@ -963,7 +1078,7 @@ public class BambooTrussTests
         Assert.Equal("target", Assert.Single(t.Planes).Name);
         Assert.Equal(0.5, BambooTrussMotion.WalkTargetF(t), 9);
         Assert.Equal(5, BambooWalk.Gaits.Select(g => g.Id).Distinct().Count());
-        Assert.True(BambooTrussPlanner.Ptp);
+        Assert.True(MotionConstraints.Current.PointToPointOnly);
     }
 
     /// <summary>Walk search primitives: deep checkpoints restore the full plan state for branching.</summary>
