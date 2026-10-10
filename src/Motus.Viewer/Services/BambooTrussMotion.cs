@@ -6,7 +6,7 @@ namespace Motus.Viewer.Services;
 /// <summary>
 /// Motus string-identity tasks and motion keys for /bamboo-truss. Each member is a pick (single store feed) →
 /// place (cane exactly on its truss edge) pair, built by <see cref="BambooTrussPlanner"/> from a grounded base:
-/// the L-grip clamped on anchor stake S1. After the chord is double-fixed the arm walks with base swaps.
+/// the L-grip clamped on the anchor column at A. Once triangle 1 is closed (rigid, hinged at A) the arm walks on it with base swaps.
 /// </summary>
 public static class BambooTrussMotion
 {
@@ -178,9 +178,8 @@ public static class BambooTrussMotion
     }
 
     /// <summary>
-    /// The shipped /bamboo-truss task sequence: walk to S3 (stake walk), build baseL, baseR and diagL, then walk on the
-    /// bamboo with node-transfer walk blocks — S3 → baseL B end → across B onto baseR → back to S3 — and finally try
-    /// sep and diagR (reported honestly when they cannot be placed).
+    /// The shipped /bamboo-truss task sequence (Warren truss over the pit): triangle 1 from the A column, a node-transfer
+    /// walk onto it, the far members tried from there (reported when unreachable), then a walk back onto the A column.
     /// </summary>
     public static List<BambooIcdMotion.TaskEdit> ShippedTasks()
     {
