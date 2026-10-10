@@ -349,65 +349,19 @@ public static class BambooTrussLayout
     public static IReadOnlyDictionary<string, string> UnreachableMembers => Current.Unreachable;
 
     /// <summary>Nodes a new member may start from: the anchors A, D and every node a placed member reaches.</summary>
-    public static HashSet<string> ExistingNodes(IEnumerable<string> placed)
-    {
-        var set = new HashSet<string>(StringComparer.Ordinal) { "A", "D" };
-        var ids = placed.ToHashSet(StringComparer.Ordinal);
-        foreach (var m in Members.Where(m => ids.Contains(m.Id))) { set.Add(m.NodeA); set.Add(m.NodeB); }
-        return set;
-    }
+    public static HashSet<string> ExistingNodes(IEnumerable<string> placed) => BambooStructureGraph.FromLayout().ExistingNodes(placed);
 
-    /// <summary>
-    /// Rigid, anchored subframes of the placed members. A rigid cluster is seeded by any closed triangle of placed
-    /// members and grows by every node tied to it by two placed members (a triangulated, statically determinate
-    /// joint); clusters sharing two nodes merge. A cluster counts once it contains an anchor (A or D) — e.g. a
-    /// closed triangle hinged at A. Returns the node sets of the anchored clusters.
-    /// </summary>
-    public static List<HashSet<string>> AnchoredRigidClusters(IEnumerable<string> placed)
-    {
-        var ids = placed.ToHashSet(StringComparer.Ordinal);
-        var edges = Members.Where(m => ids.Contains(m.Id)).Select(m => (m.NodeA, m.NodeB)).ToList();
-        bool Has(string a, string b) => edges.Any(e => (e.NodeA == a && e.NodeB == b) || (e.NodeA == b && e.NodeB == a));
-        var nodes = edges.SelectMany(e => new[] { e.NodeA, e.NodeB }).Distinct().ToList();
-        var clusters = new List<HashSet<string>>();
-        for (var i = 0; i < nodes.Count; i++)
-        for (var j = i + 1; j < nodes.Count; j++)
-        for (var k = j + 1; k < nodes.Count; k++)
-            if (Has(nodes[i], nodes[j]) && Has(nodes[j], nodes[k]) && Has(nodes[i], nodes[k]))
-                clusters.Add(new HashSet<string>(StringComparer.Ordinal) { nodes[i], nodes[j], nodes[k] });
-        for (var changed = true; changed;)
-        {
-            changed = false;
-            foreach (var c in clusters)
-                foreach (var n in nodes.Where(n => !c.Contains(n)))
-                    if (c.Count(x => Has(x, n)) >= 2) { c.Add(n); changed = true; }
-            for (var a = 0; a < clusters.Count && !changed; a++)
-            for (var b = a + 1; b < clusters.Count && !changed; b++)
-                if (clusters[a].Count(clusters[b].Contains) >= 2) { clusters[a].UnionWith(clusters[b]); clusters.RemoveAt(b); changed = true; }
-        }
-        return clusters.Where(c => c.Contains("A") || c.Contains("D")).ToList();
-    }
+    /// <summary>Rigid, anchored subframes of the placed members (<see cref="BambooStructureGraph.AnchoredRigidGroups"/>).</summary>
+    public static List<HashSet<string>> AnchoredRigidClusters(IEnumerable<string> placed) => BambooStructureGraph.FromLayout().AnchoredRigidGroups(placed);
 
     /// <summary>Fixed nodes: the anchors plus every node of an anchored rigid cluster.</summary>
-    public static HashSet<string> FixedNodes(IEnumerable<string> placed)
-    {
-        var set = new HashSet<string>(StringComparer.Ordinal) { "A", "D" };
-        foreach (var c in AnchoredRigidClusters(placed)) set.UnionWith(c);
-        return set;
-    }
+    public static HashSet<string> FixedNodes(IEnumerable<string> placed) => BambooStructureGraph.FromLayout().FixedNodes(placed);
 
     /// <summary>
     /// Members fixed into the structure — the only canes the robot may clamp: both end nodes lie in one anchored
-    /// rigid cluster (<see cref="AnchoredRigidClusters"/>).
+    /// rigid cluster (<see cref="BambooStructureGraph.Fixed"/>).
     /// </summary>
-    public static IReadOnlyList<string> FixedBothEnds(IEnumerable<string> placed)
-    {
-        var list = placed.ToList();
-        var clusters = AnchoredRigidClusters(list);
-        return Members.Where(m => list.Contains(m.Id))
-            .Where(m => clusters.Any(c => c.Contains(m.NodeA) && c.Contains(m.NodeB)))
-            .Select(m => m.Id).ToList();
-    }
+    public static IReadOnlyList<string> FixedBothEnds(IEnumerable<string> placed) => BambooStructureGraph.FromLayout().Fixed(placed);
 
     /// <summary>Members fixed into the structure after the first <paramref name="placedCount"/> members are placed.</summary>
     public static IReadOnlyList<string> WalkableMemberIdsAfter(int placedCount) =>

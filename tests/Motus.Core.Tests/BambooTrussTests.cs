@@ -224,14 +224,15 @@ public class BambooTrussTests
     public void Plan_BuildsAllSevenMembers_WithTargetedLandings_AndOneRelay()
     {
         var built = Build();
-        // Triangle 1 from the A column (A–T1, T1–M, then A–M: with A–M first the in-plane arm hits it placing T1–M),
-        // then M–T2, T1–T2 (triangle 2), M–D, and T2–D through one relay in M's connector.
-        Assert.Equal(new[] { "AT1", "T1M", "AM", "MT2", "T1T2", "MD", "T2D" }, built.Built.ToArray());
+        // Order from the build search (P4): triangle 1 from the A column (A–T1, T1–M, A–M), then T1–T2, M–D, M–T2
+        // after targeted landings, and T2–D through one relay in M's connector.
+        Assert.Equal(new[] { "AT1", "T1M", "AM", "T1T2", "MD", "MT2", "T2D" }, built.Built.ToArray());
         Assert.DoesNotContain(built.Notes, n => n.Contains("not built", StringComparison.Ordinal) || n.Contains("no landing found", StringComparison.Ordinal));
         Assert.Equal(BambooTrussLayout.Members.Select(m => m.Id).OrderBy(x => x), BambooTrussLayout.FixedBothEnds(built.Built).OrderBy(x => x));
         var relay = BambooTrussMotion.ShippedRelay;
-        Assert.Equal(new[] { "start", "AT1", "T1M", "AM", "walk (land) → MT2", "MT2", "walk (land) → T1T2", "T1T2",
-                "walk (land) → MD", "MD", "walk (land) → " + relay, relay, "walk (land) → T2D", "T2D" },
+        Assert.Equal(BambooTrussLayout.RelayId("T2D", "M", "z+"), relay);
+        Assert.Equal(new[] { "start", "AT1", "T1M", "AM", "walk (land) → T1T2", "T1T2", "walk (land) → MD", "MD",
+                "walk (land) → MT2", "MT2", "walk (land) → " + relay, relay, "walk (land) → T2D", "T2D" },
             built.Cycles.Select(c => c.MemberId).ToArray());
         Assert.Equal(0, built.Cycles[0].T0, 9);
         Assert.Equal(1, built.Cycles[^1].T1, 9);
@@ -257,7 +258,7 @@ public class BambooTrussTests
         }
         Assert.Equal(10, swaps);
         // The L clamp leaves the A column sideways (connector above, no free top).
-        Assert.Contains(built.Keys, k => k.Label == "walk (land) → MT2:L:PTP off anchor-A");
+        Assert.Contains(built.Keys, k => k.Label == "walk (land) → T1T2:L:PTP off anchor-A");
         Assert.DoesNotContain(built.Keys, k => k.BaseOn is { } on && !on.StartsWith("anchor-", StringComparison.Ordinal) && !on.StartsWith("placed-", StringComparison.Ordinal));
         for (var i = 1; i < built.Keys.Count; i++)
             Assert.True(built.Keys[i].T > built.Keys[i - 1].T, $"key {i} ({built.Keys[i].Label}) not after {built.Keys[i - 1].Label}");
@@ -805,6 +806,50 @@ public class BambooTrussTests
         }
         Assert.True(BambooTrussMotion.IsShippedSequence(core.Select(BambooTaskModel.FromCore).ToList()));
         Assert.DoesNotContain(Build().Notes, n => n.StartsWith("task rule", StringComparison.Ordinal));
+    }
+
+    // ---------------- structure graph + build search ----------------
+
+    /// <summary>The truss as a graph: nodes, members, anchors; fixed (walkable) members follow from rigid anchored groups.</summary>
+    [Fact]
+    public void StructureGraph_Warren_FixedSetsPerBuildState()
+    {
+        var g = BambooStructureGraph.FromLayout();
+        Assert.Equal(new[] { "A", "D" }, g.Anchors.OrderBy(x => x));
+        Assert.Equal(7, g.Edges.Count);
+        Assert.Equal(new[] { "AM", "AT1" }, g.Frontier(Array.Empty<string>()).Where(id => id != "MD" && id != "T2D").OrderBy(x => x));
+        Assert.Contains("T2D", g.Frontier(Array.Empty<string>())); // D exists from the start (anchor)
+        Assert.Empty(g.Fixed(new[] { "AT1", "T1M" }));                // open chain: hinged, not rigid
+        Assert.Equal(new[] { "AM", "AT1", "T1M" }, g.Fixed(new[] { "AT1", "T1M", "AM" }).OrderBy(x => x));
+        // T1–T2 alone hangs off the rigid triangle: not fixed until M–T2 closes triangle 2.
+        Assert.DoesNotContain("T1T2", g.Fixed(new[] { "AT1", "T1M", "AM", "T1T2", "MD" }));
+        Assert.Contains("T1T2", g.Fixed(new[] { "AT1", "T1M", "AM", "T1T2", "MD", "MT2" }));
+        Assert.Equal(7, g.Fixed(BambooTrussLayout.Members.Select(m => m.Id)).Count);
+        // The layout API delegates to the graph.
+        Assert.Equal(g.Fixed(new[] { "AT1", "T1M", "AM" }), BambooTrussLayout.FixedBothEnds(new[] { "AT1", "T1M", "AM" }));
+        Assert.Throws<ArgumentException>(() => new BambooStructureGraph(g.Nodes, new[] { new BambooStructureGraph.Edge("X", "A", "nowhere") }));
+    }
+
+    /// <summary>
+    /// The default sequence is derived, not hand-ordered: the build search (structure graph + reach map with the real
+    /// fixed set of each build state, relay candidates = the scene check's single-park options, every choice confirmed
+    /// with the planner) finds a complete 7/7 sequence — the one shipped — and re-planning it is identical.
+    /// </summary>
+    [Fact]
+    public void BuildSearch_DerivesTheShippedSequence_EveryChoicePlannerConfirmed()
+    {
+        BambooTrussMotion.UseCell(Cell);
+        var r = BambooBuildSearch.Run(Cell, null, _out.WriteLine);
+        Assert.True(r.Complete, string.Join("\n", r.Log));
+        Assert.Equal(new[] { "AT1", "T1M", "AM", "T1T2", "MD", "MT2", "T2D" }, r.Order.Select(c => c.MemberId).ToArray());
+        Assert.Equal(new[] { "Direct", "Direct", "Direct", "Land", "Land", "Land", "Relay" }, r.Order.Select(c => c.Mode.ToString()).ToArray());
+        var relay = r.Order[^1].Relay!;
+        var candidates = BambooSceneCheck.Run().Members.Single(m => m.MemberId == "T2D").RelayOptions;
+        Assert.Equal(11, candidates.Count);
+        Assert.Contains(relay[(relay.IndexOf('>') + 1)..], candidates);
+        Assert.Empty(TaskSequenceRules.Validate(BambooTaskModel.ToCore(r.Tasks)));
+        Assert.True(BambooTrussMotion.IsShippedSequence(r.Tasks), "the search result is the shipped sequence");
+        Assert.Equal(Build().Built, r.Order.Select(c => c.MemberId));
     }
 
     // ---------------- reach map + scene check ----------------

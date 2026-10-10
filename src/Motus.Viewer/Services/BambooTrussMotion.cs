@@ -203,30 +203,47 @@ public static class BambooTrussMotion
     /// The shipped /bamboo-truss task sequence (Warren truss over the pit): triangle 1 from the A column, a node-transfer
     /// walk onto it, the far members tried from there (reported when unreachable), then a walk back onto the A column.
     /// </summary>
+    static (string Fingerprint, List<BambooIcdMotion.TaskEdit> Tasks, string Source)? _shippedTasks;
+
+    /// <summary>Where <see cref="ShippedTasks"/> came from: "shipped plan", "build search" or "graph order (search incomplete)".</summary>
+    public static string ShippedTasksSource => _shippedTasks?.Source ?? "not derived yet";
+
+    /// <summary>
+    /// The default task sequence, derived by <see cref="BambooBuildSearch"/> (structure graph + reach map, every choice
+    /// confirmed with the planner) — no hand-ordered list. The build-time plan carries the searched sequence, so the page
+    /// reads it from there; when the layout changed the search runs live, and if it cannot complete the members are
+    /// listed in graph order (the scene check then explains what is unreachable). Returns a fresh copy.
+    /// </summary>
     public static List<BambooIcdMotion.TaskEdit> ShippedTasks()
     {
-        var site = BambooTrussLayout.Current;
-        var byId = BambooTrussLayout.Members.ToDictionary(m => m.Id);
-        List<BambooIcdMotion.TaskEdit> Member(string id) => DefaultTasks(new[] { byId[id] });
-        // Triangle 1 from the A column (A–T1, T1–M, A–M); then each remaining member after a targeted-landing walk
-        // (one node-transfer step to a cane point + roll from which the stock and the place are both Motus-reachable):
-        // M–T2 and T1–T2 (closes triangle 2: T2 rigid), M–D; T2–D through one relay — its cane is parked in M's
-        // connector (pointing out of the plane, +z), the robot walks onto the top chord and re-grasps it there.
-        var tasks = new List<BambooIcdMotion.TaskEdit>();
-        foreach (var id in new[] { "AT1", "T1M", "AM" }) tasks.AddRange(Member(id));
-        foreach (var id in new[] { "MT2", "T1T2", "MD" })
+        var fp = LayoutFingerprint;
+        if (_shippedTasks is not { } c || c.Fingerprint != fp)
         {
-            tasks.Add(LandTask(id));
-            tasks.AddRange(Member(id));
+            var source = "shipped plan";
+            var tasks = LoadCachedTasks(fp);
+            if (tasks is null && TryCell() is { } cell)
+            {
+                var r = BambooBuildSearch.Run(cell);
+                source = r.Complete ? "build search" : "graph order (search incomplete)";
+                tasks = r.Complete ? r.Tasks : null;
+            }
+            if (tasks is null) source = "graph order (search incomplete)";
+            _shippedTasks = c = (fp, tasks ?? DefaultTasks(), source);
         }
-        // T2–D: land for the park, pick from the stock, park in M's connector; land, re-grasp from the connector, place.
-        var t2d = byId["T2D"];
-        tasks.Add(LandTask(ShippedRelay));
-        tasks.Add(DefaultTasks(new[] { t2d })[0]);
-        tasks.Add(ParkTask("T2D", "M", "z+"));
-        tasks.Add(LandTask("T2D"));
-        tasks.AddRange(RelayTasks(t2d, ShippedRelay));
-        return tasks;
+        var json = System.Text.Json.JsonSerializer.Serialize(c.Tasks);
+        return System.Text.Json.JsonSerializer.Deserialize<List<BambooIcdMotion.TaskEdit>>(json)!;
+    }
+
+    static List<BambooIcdMotion.TaskEdit>? LoadCachedTasks(string fp)
+    {
+        try
+        {
+            using var stream = typeof(BambooTrussMotion).Assembly.GetManifestResourceStream(DefaultPlanResource);
+            if (stream is null) return null;
+            var c = System.Text.Json.JsonSerializer.Deserialize<PlanCache>(stream);
+            return c is not null && c.Fingerprint == fp && c.Tasks.Count > 0 ? c.Tasks : null;
+        }
+        catch (System.Text.Json.JsonException) { return null; }
     }
 
     static string Signature(IEnumerable<BambooIcdMotion.TaskEdit> tasks) =>
@@ -358,8 +375,9 @@ public static class BambooTrussMotion
         return new TrussBuild { Keys = keys, Cycles = cycles, Grips = p.Grips, Notes = notes, Built = built, MotusChecks = p.Checks, Tasks = tasks.ToList() };
     }
 
-    /// <summary>The one relay of the shipped plan: T2–D's cane parked in M's connector, pointing +z.</summary>
-    public static readonly string ShippedRelay = BambooTrussLayout.RelayId("T2D", "M", "z+");
+    /// <summary>The (first) relay of the shipped sequence, e.g. T2–D's cane parked in M's connector pointing +z ("T2D>M/z+").</summary>
+    public static string ShippedRelay => ShippedTasks().Where(t => t.Identity == "park" && t.Via is not null)
+        .Select(t => BambooTrussLayout.RelayId(t.Object, t.Via!.Split('/')[0], t.Via!.Split('/')[1])).FirstOrDefault() ?? "";
 
     /// <summary>Cycle bounds (key ranges and times) of a planner whose keys are stamped (<see cref="BambooTrussPlanner.StampTimes"/>).</summary>
     public static List<CycleBound> CyclesOf(BambooTrussPlanner p)
@@ -385,12 +403,19 @@ public static class BambooTrussMotion
     /// rank IK landing candidates (<see cref="BambooTrussPlanner.LandingCandidates"/>) and take the first whose walk
     /// step AND trial build (stock pick → carry → place → R park, Motus-clear) succeed; only the walk is kept.
     /// </summary>
-    static string Land(BambooTrussPlanner p, string id, Action<string>? log)
+    static string Land(BambooTrussPlanner p, string id, Action<string>? log) => LandStep(p, id, log).Note;
+
+    /// <summary>
+    /// Targeted-landing walk for <paramref name="id"/>: not needed when it is buildable from where the robot stands;
+    /// otherwise the first landing (of <see cref="BambooTrussPlanner.LandTries"/> IK candidates) from which the real
+    /// planner builds it. The trial build is rolled back (the planner state, random stream included, is as after the walk).
+    /// </summary>
+    internal static (bool Ok, bool Walked, string Note) LandStep(BambooTrussPlanner p, string id, Action<string>? log)
     {
         var m = BambooTrussLayout.Def(id);
-        if (m is null) return $"walk (land) → {id}: unknown member";
+        if (m is null) return (false, false, $"walk (land) → {id}: unknown member");
         var cp = p.SaveDeep();
-        if (p.BuildMember(m)) { p.RollbackDeep(cp); return $"walk (land) → {id}: not needed (buildable from {p.LStake})"; }
+        if (p.BuildMember(m)) { p.RollbackDeep(cp); return (true, false, $"walk (land) → {id}: not needed (buildable from {p.LStake})"); }
         p.RollbackDeep(cp);
         var cands = p.LandingCandidates(m);
         var tried = 0;
@@ -404,10 +429,10 @@ public static class BambooTrussMotion
             p.RollbackDeep(cpw);
             var note = $"walk (land) → {id}: R on {c.RCane} at {c.ROff:+0.000;-0.000} m, L lands on {c.LCane} at {c.LOff:+0.000;-0.000} m ({cands.Count} IK candidates, {tried} tried)";
             log?.Invoke(note);
-            return note;
+            return (true, true, note);
         }
         p.RollbackDeep(cp);
-        return $"walk (land) → {id}: no landing found ({cands.Count} IK candidates, {Math.Min(tried, BambooTrussPlanner.LandTries)} tried)";
+        return (false, false, $"walk (land) → {id}: no landing found ({cands.Count} IK candidates, {Math.Min(tried, BambooTrussPlanner.LandTries)} tried)");
     }
 
     public static TrussBuild Build(IReadOnlyList<BambooIcdMotion.TaskEdit>? tasks = null, bool useCache = false) =>
@@ -419,7 +444,7 @@ public static class BambooTrussMotion
     /// <summary>L side-grasp IK solutions (rolls about the clamped cane) tried per brachiation clamp point.</summary>
     public const int BrachiateLSolutions = 4;
 
-    public const string PlannerVersion = "warren-pit-2-relay";
+    public const string PlannerVersion = "warren-pit-3-search";
     public const string DefaultPlanResource = "Motus.Viewer.Services.BambooTrussDefaultPlan.json";
 
     /// <summary>Everything the planner's output depends on (layout, tolerances, version), invariant-formatted.</summary>
@@ -457,13 +482,15 @@ public static class BambooTrussMotion
         public List<string> Notes { get; set; } = new();
         public List<string> Built { get; set; } = new();
         public int MotusChecks { get; set; }
+        /// <summary>The task sequence the plan was made from (derived by <see cref="BambooBuildSearch"/>).</summary>
+        public List<BambooIcdMotion.TaskEdit> Tasks { get; set; } = new();
     }
 
     public static string SerializePlan(TrussBuild b) => System.Text.Json.JsonSerializer.Serialize(new PlanCache
     {
         Fingerprint = LayoutFingerprint, Keys = b.Keys, Cycles = b.Cycles, Grips = b.Grips,
         Notes = b.Notes.Where(n => !n.StartsWith("planned in", StringComparison.Ordinal)).ToList(),
-        Built = b.Built, MotusChecks = b.MotusChecks
+        Built = b.Built, MotusChecks = b.MotusChecks, Tasks = b.Tasks
     });
 
     /// <summary>
@@ -532,7 +559,7 @@ public static class BambooTrussMotion
         bool useCache = false)
     {
         tasks ??= ShippedTasks();
-        if (tasks.Any(t => t.Identity == "walk"))
+        if (tasks.Any(t => t.Identity is "walk" or "park"))
         {
             if (useCache && IsShippedSequence(tasks) && LoadCachedDefaultPlan() is { } shipped)
             {
