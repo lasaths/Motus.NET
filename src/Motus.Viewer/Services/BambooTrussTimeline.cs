@@ -29,7 +29,7 @@ public static class BambooTrussTimeline
             {
                 // A walk block, split at its base swaps (each swap a thin block of its own).
                 var name = id.Contains('→') ? id[(id.IndexOf('→') + 1)..].Trim() : id;
-                var pretty = "Walk → " + PrettyTarget(name);
+                var pretty = id.StartsWith("walk (land)", StringComparison.Ordinal) ? "Walk for " + Pretty(name) : "Walk → " + PrettyTarget(name);
                 var start = c.FirstKey;
                 for (var k = c.FirstKey; k <= c.LastKey; k++)
                 {
