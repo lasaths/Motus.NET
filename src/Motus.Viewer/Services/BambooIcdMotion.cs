@@ -49,6 +49,8 @@ public static class BambooIcdMotion
         public List<PlaneEdit> Planes { get; set; } = new();
         /// <summary>/bamboo-truss walk blocks: the gait (see BambooWalk.Gaits); null = default.</summary>
         public string? Gait { get; set; }
+        /// <summary>/bamboo-truss park blocks: connector and direction, "NODE/DIR" (e.g. "M/z+").</summary>
+        public string? Via { get; set; }
     }
 
     public sealed class MotionKey

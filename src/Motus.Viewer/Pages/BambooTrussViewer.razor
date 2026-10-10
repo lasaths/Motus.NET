@@ -62,8 +62,8 @@
                 var canDelete = CanDelete(task);
                 <div class="task">
                     <div class="taskhead">
-                        <span>@(task.Identity == "walk" ? $"Walk → {task.Object}" : "Task")</span>
-                        <span class="used">@(task.Identity == "walk" ? $"walk · {BambooWalk.GaitNamed(task.Gait).Name}" : used ? "motion" : "")</span>
+                        <span>@(task.Identity == "walk" ? $"Walk → {task.Object}" : task.Identity == "park" ? $"Park {task.Object} → {task.Via}" : "Task")</span>
+                        <span class="used">@(task.Identity == "walk" ? (task.Gait == BambooTrussMotion.LandGait ? "walk · land" : $"walk · {BambooWalk.GaitNamed(task.Gait).Name}") : task.Identity == "park" ? "relay" : used ? "motion" : "")</span>
                     </div>
                     <div class="field">
                         <span>identity</span>
@@ -625,6 +625,7 @@
         // Every object-matched pick/place pair participates in the truss motion.
         var t = _tasks[index];
         if (t.Identity == "walk") return true;
+        if (t.Identity == "park") return _tasks.Any(o => o.Identity == "pick" && o.Object == t.Object);
         if (t.Identity is not ("pick" or "place")) return false;
         return _tasks.Any(o => o.Identity == (t.Identity == "pick" ? "place" : "pick") && o.Object == t.Object);
     }

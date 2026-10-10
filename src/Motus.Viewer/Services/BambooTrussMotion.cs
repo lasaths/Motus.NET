@@ -167,6 +167,14 @@ public static class BambooTrussMotion
         };
     }
 
+    /// <summary>Target parameter of a core walk task (node mode): its "target" frame projected on the cane, as for the edit block.</summary>
+    public static double WalkTargetF(Motus.Core.WalkTask w)
+    {
+        if (BambooTrussLayout.IsSupport(w.Target) || w.Mode == Motus.Core.WalkMode.Land || !w.Frames.TryGetValue("target", out var pl)) return 0;
+        var m = BambooTrussLayout.Members.First(x => "placed-" + x.Id == w.Target).Place; var u = m.Axis;
+        return Math.Round(((pl.X - m.X) * u.X + (pl.Y - m.Y) * u.Y + (pl.Z - m.Z) * u.Z) / BambooWalk.Half * 4) / 4;
+    }
+
     /// <summary>Target parameter of a walk block: its "target" plane projected on the cane, as a fraction of half − 3 cm.</summary>
     public static double WalkTargetF(BambooIcdMotion.TaskEdit t)
     {
@@ -206,16 +214,44 @@ public static class BambooTrussMotion
         // connector (pointing out of the plane, +z), the robot walks onto the top chord and re-grasps it there.
         var tasks = new List<BambooIcdMotion.TaskEdit>();
         foreach (var id in new[] { "AT1", "T1M", "AM" }) tasks.AddRange(Member(id));
-        foreach (var id in new[] { "MT2", "T1T2", "MD", ShippedRelay, "T2D" })
+        foreach (var id in new[] { "MT2", "T1T2", "MD" })
         {
             tasks.Add(LandTask(id));
-            tasks.AddRange(DefaultTasks(new[] { BambooTrussLayout.Def(id)! }));
+            tasks.AddRange(Member(id));
         }
+        // T2–D: land for the park, pick from the stock, park in M's connector; land, re-grasp from the connector, place.
+        var t2d = byId["T2D"];
+        tasks.Add(LandTask(ShippedRelay));
+        tasks.Add(DefaultTasks(new[] { t2d })[0]);
+        tasks.Add(ParkTask("T2D", "M", "z+"));
+        tasks.Add(LandTask("T2D"));
+        tasks.AddRange(RelayTasks(t2d, ShippedRelay));
         return tasks;
     }
 
     static string Signature(IEnumerable<BambooIcdMotion.TaskEdit> tasks) =>
-        string.Join(";", tasks.Select(t => t.Identity == "walk" ? $"walk:{t.Object}:{FingerprintNumber(WalkTargetF(t))}:{t.Gait}" : $"{t.Identity}:{t.Object}"));
+        string.Join(";", tasks.Select(t => t.Identity == "walk" ? $"walk:{t.Object}:{FingerprintNumber(WalkTargetF(t))}:{t.Gait}"
+            : t.Identity == "park" ? $"park:{t.Object}:{t.Via}" : $"{t.Identity}:{t.Object}"));
+
+    /// <summary>A <c>park</c> block: the held cane <paramref name="member"/> is set into <paramref name="node"/>'s connector, pointing <paramref name="dir"/>.</summary>
+    public static BambooIcdMotion.TaskEdit ParkTask(string member, string node, string dir)
+    {
+        var def = BambooTrussLayout.Def(BambooTrussLayout.RelayId(member, node, dir))!;
+        return new BambooIcdMotion.TaskEdit
+        {
+            Identity = "park", Object = member, Via = $"{node}/{dir}", JawMm = BambooTrussLayout.JawOpenMm,
+            Planes = [Plane("hold", def.Place, PlaceHoldDy), Plane("release", def.Place, 0)]
+        };
+    }
+
+    /// <summary>Re-grasp a parked cane from its connector (pick at the parked pose) and place it.</summary>
+    public static List<BambooIcdMotion.TaskEdit> RelayTasks(BambooTrussLayout.MemberDef member, string relayId)
+    {
+        var parked = BambooTrussLayout.Def(relayId)!.Place;
+        var t = DefaultTasks(new[] { member });
+        t[0].Planes = [Plane("approach", parked, StoreApproachDy), Plane("grasp", parked, 0)];
+        return t;
+    }
 
     /// <summary>True when <paramref name="tasks"/> is the shipped sequence (the build-time plan applies).</summary>
     public static bool IsShippedSequence(IReadOnlyList<BambooIcdMotion.TaskEdit> tasks) => Signature(tasks) == Signature(ShippedTasks());
@@ -253,30 +289,47 @@ public static class BambooTrussMotion
         var p = new BambooTrussPlanner(cell);
         var built = new List<string>();
         if (!p.Start()) return new TrussBuild { Error = p.Error, Tasks = tasks.ToList() };
-        BambooIcdMotion.TaskEdit? pick = null;
-        foreach (var t in tasks)
+        // The sequence runs on the core task types (pick / place / park / walk).
+        var core = BambooTaskModel.ToCore(tasks);
+        foreach (var pr in TaskSequenceRules.Validate(core)) notes.Add($"task rule: #{pr.Index} {pr.Message}");
+        PickTask? pick = null;
+        bool Build(BambooTrussLayout.MemberDef m, string what)
         {
-            if (t.Identity == "pick") { pick = t; continue; }
-            if (t.Identity == "place" && pick is not null && pick.Object == t.Object)
+            var fx = BambooTrussLayout.ExistingNodes(built);
+            if (!fx.Contains(m.NodeA) && !fx.Contains(m.NodeB)) { notes.Add($"{m.Id}: not built — neither end node exists yet"); return false; }
+            if (p.BuildMember(m)) { if (!BambooTrussLayout.IsRelay(m.Id)) built.Add(m.Id); log?.Invoke($"{m.Id}: {what}"); return true; }
+            notes.Add($"{m.Id}: not built — {p.Error}"); log?.Invoke($"{m.Id}: {p.Error}");
+            return false;
+        }
+        for (var ti = 0; ti < core.Count; ti++)
+        {
+            var c = core[ti];
+            if (CoreTasks.AsPick(c) is { } pk) { pick = pk; continue; }
+            if (CoreTasks.AsPlace(c) is { } pl && pick is not null && pick.Object == pl.Object)
             {
                 pick = null;
-                var m = BambooTrussLayout.Def(t.Object);
-                if (m is null) { notes.Add($"{t.Object}: not a truss member — skipped"); continue; }
-                var fx = BambooTrussLayout.ExistingNodes(built);
-                if (!fx.Contains(m.NodeA) && !fx.Contains(m.NodeB)) { notes.Add($"{m.Id}: not built — neither end node exists yet"); continue; }
-                if (p.BuildMember(m)) { if (!BambooTrussLayout.IsRelay(m.Id)) built.Add(m.Id); log?.Invoke($"{m.Id}: built"); }
-                else { notes.Add($"{m.Id}: not built — {p.Error}"); log?.Invoke($"{m.Id}: {p.Error}"); }
+                var m = BambooTrussLayout.Def(pl.Object);
+                if (m is null) { notes.Add($"{pl.Object}: not a truss member — skipped"); continue; }
+                Build(m, "built");
                 continue;
             }
-            if (t.Identity != "walk") continue;
-            if (t.Gait == LandGait)
+            if (CoreTasks.AsPark(c) is { } park && pick is not null && pick.Object == park.Object)
             {
-                notes.Add(Land(p, t.Object, log));
+                pick = null;
+                var m = BambooTrussLayout.Def(BambooTaskModel.RelayIdOf(park));
+                if (m is null) { notes.Add($"{park.Object}: cannot park at {park.Connector}/{park.Direction} — skipped"); continue; }
+                Build(m, $"parked at {park.Connector}/{park.Direction}");
+                continue;
+            }
+            if (CoreTasks.AsWalk(c) is not { } walk) continue;
+            if (walk.Mode == WalkMode.Land)
+            {
+                notes.Add(Land(p, walk.Target, log));
                 continue;
             }
             var sw = System.Diagnostics.Stopwatch.StartNew();
-            var gait = BambooWalk.GaitNamed(t.Gait);
-            var target = t.Object; var f = WalkTargetF(t);
+            var gait = BambooWalk.GaitNamed(walk.Gait);
+            var target = walk.Target; var f = WalkTargetF(walk);
             if (BambooTrussLayout.IsSupport(target) && BambooTrussLayout.IsSupport(p.LStake))
             {
                 if (p.LStake == target) continue;
