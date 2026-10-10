@@ -306,6 +306,8 @@ public static class BambooTrussMotion
             parts.AddRange(BambooTrussLayout.Pads.Select(p => $"{p.Name}:{F(p.X)},{F(p.Z)},{F(p.HalfX)},{F(p.HalfZ)}"));
             parts.AddRange(BambooTrussLayout.Posts.Select(p => $"{p.Name}:{F(p.X)},{F(p.Z)},{F(p.Top)},{F(p.Radius)}"));
             parts.AddRange(BambooTrussLayout.Racks.Select(r => $"{r.Name}:{F(r.X)},{F(r.Z)},{F(r.HalfX)},{F(r.HalfZ)},{F(r.Top)}"));
+            parts.AddRange(BambooTrussLayout.PitBoxes.Select(b => $"{b.Name}:{F(b.X)},{F(b.Y)},{F(b.Z)},{F(b.HalfX)},{F(b.HalfY)},{F(b.HalfZ)}"));
+            parts.Add($"hubs:{F(BambooTrussLayout.HubHalf)},gap:{F(BambooTrussLayout.NodeGap)}");
             return string.Join(";", parts);
         }
     }
