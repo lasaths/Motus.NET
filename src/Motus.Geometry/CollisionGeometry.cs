@@ -216,11 +216,97 @@ internal static class CollisionGeometry
             return LocalMeshIntersectsMesh(mesh, worldM, obstacle, obstacleBvh, scratch);
         }
 
-        // Primitive obstacles: sample transformed verts with small spheres
-        foreach (var v in mesh.MeshVertices)
+        // Primitive obstacles: exact per-triangle narrow phase (no vertex-sphere sampling).
+        return LocalMeshIntersectsPrimitive(mesh, worldM, obstacle);
+    }
+
+    private static bool LocalMeshIntersectsPrimitive(CollisionObject mesh, double[] worldM, CollisionObject obstacle)
+    {
+        var verts = mesh.MeshVertices!;
+        var idx = mesh.MeshIndices!;
+        switch (obstacle.Shape)
         {
-            Transforms.TransformPointInto(worldM, v[0], v[1], v[2], out var wx, out var wy, out var wz);
-            if (SphereIntersectsObject(new Frame(wx, wy, wz), 0.01, obstacle, bvhCache, scratch))
+            case CollisionShape.Plane:
+            {
+                // Polyhedron vs half-space: any vertex strictly on the occupied side.
+                var pm = Transforms.FromFrame(obstacle.Pose);
+                double nx = pm[0], ny = pm[4], nz = pm[8];
+                foreach (var v in verts)
+                {
+                    Transforms.TransformPointInto(worldM, v[0], v[1], v[2], out var wx, out var wy, out var wz);
+                    var signed = (wx - obstacle.Pose.X) * nx + (wy - obstacle.Pose.Y) * ny + (wz - obstacle.Pose.Z) * nz;
+                    if (signed < 0) return true;
+                }
+                return false;
+            }
+            case CollisionShape.Box:
+            {
+                var toBox = Transforms.Multiply(Transforms.Inverse(Transforms.FromFrame(obstacle.Pose)), worldM);
+                double hx = obstacle.ExtentX, hy = obstacle.ExtentY, hz = obstacle.ExtentZ;
+                for (var t = 0; t + 2 < idx.Count; t += 3)
+                {
+                    TransformVertex(toBox, verts, idx[t], out var ax, out var ay, out var az);
+                    TransformVertex(toBox, verts, idx[t + 1], out var bx, out var by, out var bz);
+                    TransformVertex(toBox, verts, idx[t + 2], out var cx, out var cy, out var cz);
+                    if (ExactNarrowPhase.TriangleAabbLocal(ax, ay, az, bx, by, bz, cx, cy, cz, hx, hy, hz))
+                        return true;
+                }
+                return false;
+            }
+            case CollisionShape.Sphere:
+                return MeshHitsSpheresLocal(verts, idx, worldM, new[] { (obstacle.Pose, obstacle.ExtentX) });
+            case CollisionShape.Capsule:
+                return MeshHitsSpheresLocal(verts, idx, worldM,
+                    SampleCapsule(obstacle, ExactNarrowPhase.DenseCapsuleSamples(obstacle.ExtentX, obstacle.ExtentY)));
+            default:
+                return false;
+        }
+    }
+
+    private static bool MeshHitsSpheresLocal(
+        List<double[]> verts, List<int> idx, double[] worldM, IEnumerable<(Frame center, double radius)> spheres)
+    {
+        var inv = Transforms.Inverse(worldM);
+        foreach (var (c, r) in spheres)
+        {
+            Transforms.TransformPointInto(inv, c.X, c.Y, c.Z, out var px, out var py, out var pz);
+            var r2 = r * r;
+            for (var t = 0; t + 2 < idx.Count; t += 3)
+            {
+                var a = verts[idx[t]]; var b = verts[idx[t + 1]]; var d = verts[idx[t + 2]];
+                if (ExactNarrowPhase.PointTriangleDistanceSq(px, py, pz, a[0], a[1], a[2], b[0], b[1], b[2], d[0], d[1], d[2]) <= r2)
+                    return true;
+            }
+        }
+        return false;
+    }
+
+    /// <summary>Box (world pose) vs triangle mesh obstacle: BVH cull then exact triangle–OBB SAT.</summary>
+    private static bool BoxMeshOverlap(
+        CollisionObject box, double[] boxM, CollisionObject mesh, Dictionary<int, BvhNode> bvhCache, CollisionQueryScratch? scratch)
+    {
+        if (mesh.MeshVertices is null || mesh.MeshIndices is null) return false;
+        if (!TryGetMeshBvh(bvhCache, mesh, out var bvh)) return false;
+        var meshM = Transforms.FromFrame(mesh.Pose);
+        var invMesh = Transforms.Inverse(meshM);
+        Transforms.TransformPointInto(invMesh, boxM[3], boxM[7], boxM[11], out var lx, out var ly, out var lz);
+        double hx = box.ExtentX, hy = box.ExtentY, hz = box.ExtentZ;
+        var rad = Math.Sqrt(hx * hx + hy * hy + hz * hz);
+        var local = new Frame(lx, ly, lz);
+        if (!bvh.OverlapsSphere(local, rad)) return false;
+        scratch ??= new CollisionQueryScratch();
+        bvh.GetPotentialTriangles(local, rad, scratch.TriangleHits);
+        var toBox = Transforms.Multiply(Transforms.Inverse(boxM), meshM);
+        var verts = mesh.MeshVertices;
+        var idx = mesh.MeshIndices;
+        foreach (var tri in scratch.TriangleHits)
+        {
+            var b = tri * 3;
+            if (b + 2 >= idx.Count) continue;
+            TransformVertex(toBox, verts, idx[b], out var ax, out var ay, out var az);
+            TransformVertex(toBox, verts, idx[b + 1], out var bx, out var by, out var bz);
+            TransformVertex(toBox, verts, idx[b + 2], out var cx, out var cy, out var cz);
+            if (ExactNarrowPhase.TriangleAabbLocal(ax, ay, az, bx, by, bz, cx, cy, cz, hx, hy, hz))
                 return true;
         }
         return false;
@@ -294,7 +380,7 @@ internal static class CollisionGeometry
     private static bool CapsuleIntersectsObject(
         CollisionObject capsule, CollisionObject obstacle, Dictionary<int, BvhNode> bvhCache, CollisionQueryScratch? scratch)
     {
-        foreach (var (center, radius) in SampleCapsule(capsule))
+        foreach (var (center, radius) in SampleCapsule(capsule, ExactNarrowPhase.DenseCapsuleSamples(capsule.ExtentX, capsule.ExtentY)))
             if (SphereIntersectsObject(center, radius, obstacle, bvhCache, scratch))
                 return true;
         return false;
@@ -346,20 +432,26 @@ internal static class CollisionGeometry
         if (obstacle.Shape == CollisionShape.Plane)
             return BoxPlaneOverlap(box, obstacle);
 
-        var hx = box.ExtentX; var hy = box.ExtentY; var hz = box.ExtentZ;
-        var offsets = new[]
+        // Exact narrow phase (previously a corner/centre sphere cloud that over-reported by up to the
+        // largest half-extent — a 7 cm tube "hit" things 3.6 cm away).
+        var boxM = Transforms.FromFrame(box.Pose);
+        switch (obstacle.Shape)
         {
-            (-hx, -hy, -hz), (hx, -hy, -hz), (-hx, hy, -hz), (hx, hy, -hz),
-            (-hx, -hy, hz), (hx, -hy, hz), (-hx, hy, hz), (hx, hy, hz)
-        };
-        foreach (var (ox, oy, oz) in offsets)
-        {
-            var local = Transforms.TransformPoint(Transforms.FromFrame(box.Pose), ox, oy, oz);
-            var pt = new Frame(local[0], local[1], local[2]);
-            if (SphereIntersectsObject(pt, 1e-3, obstacle, bvhCache, scratch)) return true;
-            if (SphereIntersectsObject(pt, Math.Max(hx, Math.Max(hy, hz)) * 0.5, obstacle, bvhCache, scratch)) return true;
+            case CollisionShape.Box:
+                return ExactNarrowPhase.ObbObb(
+                    boxM, box.ExtentX, box.ExtentY, box.ExtentZ,
+                    Transforms.FromFrame(obstacle.Pose), obstacle.ExtentX, obstacle.ExtentY, obstacle.ExtentZ);
+            case CollisionShape.Sphere:
+                return SphereBoxOverlap(obstacle.Pose, obstacle.ExtentX, box);
+            case CollisionShape.Capsule:
+                foreach (var (c, r) in SampleCapsule(obstacle, ExactNarrowPhase.DenseCapsuleSamples(obstacle.ExtentX, obstacle.ExtentY)))
+                    if (SphereBoxOverlap(c, r, box)) return true;
+                return false;
+            case CollisionShape.Mesh:
+                return BoxMeshOverlap(box, boxM, obstacle, bvhCache, scratch);
+            default:
+                return false;
         }
-        return SphereIntersectsObject(box.Pose, Math.Max(hx, Math.Max(hy, hz)), obstacle, bvhCache, scratch);
     }
 
     private static bool SphereMeshOverlap(

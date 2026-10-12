@@ -6,6 +6,7 @@
     <Project Path="src/Motus.OMPL.Native/Motus.OMPL.Native.csproj" />
     <Project Path="src/Motus.OMPL.NET/Motus.OMPL.NET.csproj" />
     <Project Path="src/Motus.Presets/Motus.Presets.csproj" />
+    <Project Path="src/Motus.Viewer/Motus.Viewer.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Motus.Core.Tests/Motus.Core.Tests.csproj" />
