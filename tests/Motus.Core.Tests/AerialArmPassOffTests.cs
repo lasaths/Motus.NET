@@ -287,8 +287,12 @@ public class AerialArmPassOffTests
     [Fact]
     public void GhExample11_HomeTcp_PickPlace_OneBrick_Ur10e()
     {
-        var path = "/Users/lasaths/Documents/GitHub/Motus.Grasshopper/resources/robots/ur10e_robotiq/ur10e_robotiq.urdf";
-        var urdf = UrdfRobotLoader.Load(path, new UrdfLoadOptions { BaseLink = "base_link", TipLink = "tool0", ModelName = "UR10e" });
+        var fixturePath = Path.GetFullPath(Path.Combine(
+            AppContext.BaseDirectory, "..", "..", "..", "..", "fixtures", "ur10e_robotiq", "ur10e_robotiq_minimal.urdf"));
+        Assert.True(File.Exists(fixturePath),
+            $"Expected test fixture at tests/fixtures/ur10e_robotiq/ur10e_robotiq_minimal.urdf (resolved: {fixturePath})");
+
+        var urdf = UrdfRobotLoader.Load(fixturePath, new UrdfLoadOptions { BaseLink = "base_link", TipLink = "tool0", ModelName = "UR10e" });
         var robot = urdf.ToModel();
         // Classic UR elbow-up home (reachable LIN neighborhood) — not the GH -77/-31/-77 wrist set.
         var home = new JointState(new[] { 0.0, -Math.PI / 2, Math.PI / 2, 0.0, Math.PI / 2, 0.0 });
@@ -323,13 +327,12 @@ public class AerialArmPassOffTests
     [Fact]
     public void FreeFlyerUrdf_Load_BaseEqualsTip_AxisCountZero()
     {
-        var path = Path.GetFullPath(Path.Combine(
-            AppContext.BaseDirectory, "..", "..", "..", "..", "..",
-            "Motus.NET", "tests", "fixtures", "aerial", "free_flyer_box.urdf"));
-        if (!File.Exists(path))
-            path = "/Users/lasaths/Documents/GitHub/Motus.NET/tests/fixtures/aerial/free_flyer_box.urdf";
-        Assert.True(File.Exists(path), path);
-        var urdf = UrdfRobotLoader.Load(path, new UrdfLoadOptions
+        var fixturePath = Path.GetFullPath(Path.Combine(
+            AppContext.BaseDirectory, "..", "..", "..", "..", "fixtures", "aerial", "free_flyer_box.urdf"));
+        Assert.True(File.Exists(fixturePath), 
+            $"Expected test fixture at tests/fixtures/aerial/free_flyer_box.urdf (resolved: {fixturePath})");
+
+        var urdf = UrdfRobotLoader.Load(fixturePath, new UrdfLoadOptions
         {
             BaseLink = "body",
             TipLink = "body",
