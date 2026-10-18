@@ -6,7 +6,11 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Motus.NET Bamboo Viewer</title>
     <base href="/" />
+    <link rel="stylesheet" href="css/andura/andura.css" />
+    <link rel="stylesheet" href="css/andura/andura-fonts.css" />
     <link rel="stylesheet" href="css/viewer.css" />
+    <script>/* ANDURA contract: ?scale= follows OS text size (text-scale.*) */
+        (function () { var s = parseFloat(new URLSearchParams(location.search).get('scale')); if (s > 0) document.documentElement.style.setProperty('--s', s); })();</script>
     <link rel="icon" type="image/png" href="favicon.png" />
     <link href="Motus.Viewer.styles.css" rel="stylesheet" />
 </head>

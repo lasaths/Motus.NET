@@ -62,25 +62,19 @@
         <aside class="controls col">
             <div class="cellsum">
                 <span class="label">TRUSS · 7 MEMBERS</span>
-                @if (HasAlarm)
-                {
-                    <div class="row alarm-only">
-                        @if (IsStop)
-                        {
-                            <svg class="glyph" viewBox="0 0 16 16" aria-hidden="true"><path d="M5 0h6l5 5v6l-5 5H5l-5-5V5z" style="fill:var(--andura-color-emergency)"/><path d="M7 3h2v6H7zM7 11h2v2H7z" style="fill:var(--andura-color-void)"/></svg>
-                            <span class="title trunc" title="P1 · Motus stop">P1 · Motus stop</span>
-                        }
-                        else
-                        {
-                            <svg class="glyph" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0l8 15H0z" style="fill:var(--andura-color-caution)"/><path d="M7 5h2v5H7zM7 11h2v2H7z" style="fill:var(--andura-color-void)"/></svg>
-                            <span class="title trunc" title="P2 · Plan issue">P2 · Plan issue</span>
-                        }
-                    </div>
-                }
-                else
-                {
-                    <div class="normal-only"><span class="title">@StatusTitle</span></div>
-                }
+                <div class="row alarm-only">
+                    @if (IsStop)
+                    {
+                        <svg class="glyph" viewBox="0 0 16 16" aria-hidden="true"><path d="M5 0h6l5 5v6l-5 5H5l-5-5V5z" style="fill:var(--andura-color-emergency)"/><path d="M7 3h2v6H7zM7 11h2v2H7z" style="fill:var(--andura-color-void)"/></svg>
+                        <span class="title trunc" title="P1 · Motus stop">P1 · Motus stop</span>
+                    }
+                    else
+                    {
+                        <svg class="glyph" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0l8 15H0z" style="fill:var(--andura-color-caution)"/><path d="M7 5h2v5H7zM7 11h2v2H7z" style="fill:var(--andura-color-void)"/></svg>
+                        <span class="title trunc" title="P2 · Plan issue">P2 · Plan issue</span>
+                    }
+                </div>
+                <div class="normal-only"><span class="title">@StatusTitle</span></div>
                 <p class="phase muted trunc @(!string.IsNullOrEmpty(_motionError) || _collision ? "err" : "")" data-motus="@_motusState" title="@_phase">@_phase</p>
             </div>
 
@@ -245,7 +239,7 @@
                 @foreach (var b in _blocks)
                 {
                     var blk = b;
-                    <div class="tl-block hit tl-@blk.Kind @(blk.T0 <= _t && _t < blk.T1 ? "on" : "")" title="@($"{blk.Label} · {blk.T0 * 1000:F0}–{blk.T1 * 1000:F0}")"
+                    <div class="tl-block tl-@blk.Kind @(blk.T0 <= _t && _t < blk.T1 ? "on" : "")" title="@($"{blk.Label} · {blk.T0 * 1000:F0}–{blk.T1 * 1000:F0}")"
                          style="left:@((blk.T0 * 100).ToString("F3", System.Globalization.CultureInfo.InvariantCulture))%;width:@(((blk.T1 - blk.T0) * 100).ToString("F3", System.Globalization.CultureInfo.InvariantCulture))%"
                          @onclick="() => JumpTo(blk.T0)">
                         <span>@blk.Label</span>

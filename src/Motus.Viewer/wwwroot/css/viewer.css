@@ -1,12 +1,11 @@
 /* Motus.Viewer · ANDURA skin (L1 "3D dominant"). Tokens only: every colour, size and duration is var(--andura-*)
    from css/andura/andura.css (ANDURA tokens/build, palette v2.2). Fonts: css/andura/andura-fonts.css (IBM Plex, OFL). */
-@import url("andura/andura.css");
-@import url("andura/andura-fonts.css");
+/* andura.css and andura-fonts.css are linked before this sheet in index.html. */
 
 :root { --s: var(--andura-text-scale-100);
   --m: var(--andura-size-margin-desktop); --top: var(--andura-size-topline-desktop); --row: var(--andura-size-alarm-row-desktop);
   --foot: var(--andura-size-footer-desktop); --btn: var(--andura-size-button-band); --col: var(--andura-size-column-desktop);
-  --gap: var(--andura-space-48); --list-row: var(--andura-size-row-desktop);
+  --gap: var(--andura-space-48); --list-row: var(--andura-size-row-desktop); --tgt: var(--andura-size-button-mouse);
   --body: var(--andura-type-body-desktop-fontSize); --body-lh: var(--andura-type-body-desktop-lineHeight);
   --label: var(--andura-type-label-desktop-fontSize); --label-lh: var(--andura-type-label-desktop-lineHeight);
   --h1: var(--andura-type-h1-desktop-fontSize); --title: var(--andura-type-title-desktop-fontSize);
@@ -14,7 +13,7 @@
 @media (max-width: 1279px) { /* tablet: below breakpoint.desktop */
   :root { --m: var(--andura-size-margin-tablet); --top: var(--andura-size-topline-tablet); --row: var(--andura-size-alarm-row-tablet);
     --foot: var(--andura-size-footer-tablet); --btn: var(--andura-size-touch-min); --col: var(--andura-size-column-desktop);
-    --gap: var(--andura-space-32); --list-row: var(--andura-size-row-tablet);
+    --gap: var(--andura-space-32); --list-row: var(--andura-size-row-tablet); --tgt: var(--andura-size-touch-min);
     --body: var(--andura-type-body-tablet-fontSize); --body-lh: var(--andura-type-body-tablet-lineHeight);
     --label: var(--andura-type-label-tablet-fontSize); --label-lh: var(--andura-type-label-tablet-lineHeight);
     --h1: var(--andura-type-h1-tablet-fontSize); --title: var(--andura-type-title-tablet-fontSize);
@@ -45,7 +44,7 @@ body { display: flex; overflow: hidden; font-family: var(--andura-font-family-sa
 .accent { color: var(--andura-color-ultramarine-text); }
 .em { color: var(--andura-color-emergency); }
 .unit { text-transform: none; }
-.h1 { font-weight: var(--andura-font-weight-medium); font-size: calc(var(--h1) * var(--s)); line-height: 1.2; color: var(--andura-color-muted); }
+.h1 { font-weight: var(--andura-font-weight-medium); font-size: calc(var(--h1) * var(--s)); line-height: calc(var(--h1) * var(--andura-type-h1-desktop-lineHeight) * var(--s)); color: var(--andura-color-muted); }
 .h1:focus { outline: none; }
 .title { font-weight: var(--andura-font-weight-medium); font-size: calc(var(--title) * var(--s)); }
 .vm { font-size: calc(var(--vm) * var(--s)); }
@@ -99,10 +98,10 @@ dialog .acts { display: flex; gap: var(--andura-space-8); justify-content: flex-
 .bar span { display: block; height: 100%; background: var(--andura-color-text); }
 
 .sect { border-top: 1px solid var(--andura-color-line); }
-.sect summary { list-style: none; cursor: pointer; display: flex; align-items: center; justify-content: space-between; min-height: calc(var(--andura-size-button-mouse) * var(--s)); }
+.sect summary { list-style: none; cursor: pointer; display: flex; align-items: center; justify-content: space-between; min-height: calc(var(--tgt) * var(--s)); }
 .sect summary::-webkit-details-marker { display: none; }
 .sect .chev { display: inline-block; }
-.sect[open] .chev { transform: rotate(90deg); }
+.sect[open] .chev { color: var(--andura-color-text); }
 .sect summary:hover { color: var(--andura-color-text); }
 
 #tasks { display: flex; flex-direction: column; }
@@ -114,7 +113,7 @@ dialog .acts { display: flex; gap: var(--andura-space-8); justify-content: flex-
 .used { color: var(--andura-color-muted); flex: none; }
 .field { display: flex; align-items: center; gap: var(--andura-space-8); margin: var(--andura-space-4) 0; }
 .field > span { flex: none; width: calc(var(--andura-space-48) * 2); font-family: var(--andura-font-family-mono); font-size: calc(var(--label) * var(--s)); color: var(--andura-color-muted); }
-.field input, .field select { flex: 1; min-width: 0; height: calc(var(--andura-size-button-mouse) * var(--s)); background: var(--andura-color-void); color: var(--andura-color-text);
+.field input, .field select { flex: 1; min-width: 0; height: calc(var(--tgt) * var(--s)); background: var(--andura-color-void); color: var(--andura-color-text);
   border: 1px solid var(--andura-color-line); font-size: calc(var(--label) * var(--s)); padding: 0 var(--andura-space-8); color-scheme: dark; }
 .field input:hover, .field select:hover { background: var(--andura-color-surface-hover); }
 .field em { flex: none; width: var(--andura-space-24); font-style: normal; font-family: var(--andura-font-family-mono); font-size: calc(var(--label) * var(--s)); color: var(--andura-color-muted); }
@@ -125,7 +124,7 @@ button, .btn { min-height: calc(var(--btn) * var(--s)); padding: 0 var(--andura-
 button:hover:not(:disabled) { background: var(--andura-color-surface-hover); }
 button.pri, .btn.pri, button.active { background: var(--andura-color-ultramarine); border-color: var(--andura-color-ultramarine); color: var(--andura-color-on-ultramarine); }
 button:disabled { opacity: var(--andura-opacity-dim); cursor: default; }
-button.mini { min-height: calc(var(--andura-size-button-mouse) * var(--s)); }
+button.mini { min-height: calc(var(--tgt) * var(--s)); }
 
 .row.jog { flex-direction: column; align-items: stretch; gap: var(--andura-space-4); margin: var(--andura-space-8) 0; }
 .row label { display: flex; justify-content: space-between; }
@@ -137,7 +136,7 @@ input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; width: var
 input[type="range"]::-moz-range-thumb { width: var(--andura-space-16); height: var(--andura-space-16); border-radius: 50%; background: var(--andura-color-text); border: none; }
 input[type="range"]:disabled { opacity: var(--andura-opacity-dim); }
 
-.check { display: flex; align-items: center; gap: var(--andura-space-8); cursor: pointer; }
+.check { display: flex; align-items: center; gap: var(--andura-space-8); cursor: pointer; min-height: calc(var(--tgt) * var(--s)); }
 .check input { width: var(--andura-space-16); height: var(--andura-space-16); accent-color: var(--andura-color-ultramarine); }
 .note { margin-top: var(--andura-space-8); color: var(--andura-color-muted); }
 .plan-notes { padding-left: var(--andura-space-16); }
@@ -169,8 +168,18 @@ input[type="range"]:disabled { opacity: var(--andura-opacity-dim); }
 .tl-track input.tl-scrub { position: absolute; left: 0; top: 0; width: 100%; height: var(--andura-space-16); }
 .estop { flex: none; }
 
-/* tablet / phone reflow: column under the viewport, timeline keeps its bar */
-@media (max-width: 1279px) { .estop { display: none; } }
+/* text scale: chrome that holds text grows with --s */
+.cellsum .row { min-height: calc(var(--andura-type-title-desktop-lineHeight) * var(--title) * var(--s)); }
+/* tablet / phone reflow: task blocks are a pointer-only shortcut (too narrow for 56 px targets); on touch the scrub
+   track is the target and fills the bar. Column stays beside the viewport on tablet, under it on phone. */
+@media (max-width: 1279px) {
+  .estop { display: none; }
+  .tl-blocks { display: none; }
+  .tl-body { justify-content: center; }
+  .tl-track, .tl-track input.tl-scrub { height: var(--andura-size-touch-min); }
+  .tl-track .tl-fill { top: calc(var(--andura-size-touch-min) / 2 - 1px); }
+  .row.jog input[type="range"] { height: var(--andura-size-touch-min); }
+}
 @media (max-width: 599px) {
   .main { flex-direction: column; gap: var(--andura-space-16); overflow: auto; }
   .viewport-wrap { flex: none; height: var(--andura-size-thumb-3d-phone); margin: 0 var(--m); }
@@ -183,3 +192,21 @@ input[type="range"]:disabled { opacity: var(--andura-opacity-dim); }
 #blazor-error-ui { display: none; position: fixed; bottom: 0; left: 0; width: 100%; z-index: 1000; padding: var(--andura-space-8) var(--andura-space-24);
   background: var(--andura-color-surface-lift); color: var(--andura-color-text); border-top: var(--andura-size-stroke-accent) solid var(--andura-color-caution); }
 #blazor-error-ui .dismiss { cursor: pointer; position: absolute; right: var(--andura-space-16); top: var(--andura-space-8); }
+/* cell summary: one of the two lines, driven by data-alarms (alarm shifts hierarchy, never layout) */
+.viewer-container:not([data-alarms]) .alarm-only, .viewer-container[data-alarms] .normal-only { display: none; }
+/* closed sections render nothing (no hidden targets) */
+.sect:not([open]) > :not(summary) { display: none; }
+.row.jog input[type="range"] { height: calc(var(--tgt) * var(--s)); }
+.tl-block { display: flex; align-items: center; }
+.tl-block span { line-height: calc(var(--label-lh) * var(--s)); }
+@media (max-width: 599px) { .top .facts > :not(#andura-clock) { display: none; } .top > .label { display: none; } }
+.tl-block span { flex: 1; min-width: 0; }
+/* scrub grows toward the touch minimum with OS text size (56 px at 200 %) */
+.tl-track, .tl-track input.tl-scrub { height: max(var(--andura-space-16), calc((var(--s) - 1) * var(--andura-size-touch-min))); }
+.tl-track .tl-fill { top: calc(max(var(--andura-space-16), calc((var(--s) - 1) * var(--andura-size-touch-min))) / 2 - 1px); }
+@media (max-width: 1279px) {
+  .tl-track, .tl-track input.tl-scrub { height: max(var(--andura-size-touch-min), calc((var(--s) - 1) * var(--andura-size-touch-min))); }
+  .tl-track .tl-fill { top: calc(var(--andura-size-touch-min) / 2 - 1px); }
+}
+.tl-block span { padding: 0 0 0 1px; text-indent: 0; }
+.tl-block { padding: 0; }
