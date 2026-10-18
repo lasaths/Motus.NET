@@ -112,8 +112,57 @@ public sealed class BambooReachMap
         }
     }
 
+    // ---------------- cache ----------------
+
+    static readonly System.Collections.Concurrent.ConcurrentDictionary<string, Reach> _cache = new();
+    const int CacheCap = 250_000;
+    static long _hits, _misses;
+
+    /// <summary>Cached reach queries so far (hits, misses). Query results are pure functions of the key.</summary>
+    public static (long Hits, long Misses, int Entries) CacheStats => (Interlocked.Read(ref _hits), Interlocked.Read(ref _misses), _cache.Count);
+
+    /// <summary>Drop every cached query (tests / benchmarks).</summary>
+    public static void ClearCache() { _cache.Clear(); Interlocked.Exchange(ref _hits, 0); Interlocked.Exchange(ref _misses, 0); }
+
+    /// <summary>Use the process-wide query cache (default on). Off for custom <see cref="Environment"/>s (not keyable).</summary>
+    public bool UseCache { get; init; } = true;
+
+    /// <summary>
+    /// Cache key: the layout fingerprint (covers the design environment and every scene setting), IK seeds, collision
+    /// flag, the clamp frame and the target line (pose, offsets, touch), all at the fingerprint's 6-decimal precision.
+    /// </summary>
+    string? Key(ClampSite site, TargetLine line, string fingerprint)
+    {
+        if (!UseCache || (Collision && Environment is not null)) return null;
+        var sb = new System.Text.StringBuilder(fingerprint.Length + 256);
+        sb.Append(fingerprint).Append('|').Append(IkSeeds).Append('|').Append(Collision ? 'c' : 'k').Append('|').Append(site.On).Append('|');
+        foreach (var v in site.BaseWorld) sb.Append(BambooTrussMotion.FingerprintNumber(v)).Append(',');
+        var p = line.Pose;
+        sb.Append('|').Append(line.Touch).Append('|');
+        foreach (var v in new[] { p.X, p.Y, p.Z, p.PitchDeg, p.YawDeg }) sb.Append(BambooTrussMotion.FingerprintNumber(v)).Append(',');
+        sb.Append('|');
+        foreach (var o in line.Offsets) sb.Append(BambooTrussMotion.FingerprintNumber(o)).Append(',');
+        return sb.ToString();
+    }
+
     /// <summary>Does the free gripper reach <paramref name="line"/> from <paramref name="site"/>? First reachable offset wins.</summary>
-    public Reach Query(ClampSite site, TargetLine line)
+    public Reach Query(ClampSite site, TargetLine line) => Query(site, line, BambooTrussMotion.LayoutFingerprint);
+
+    Reach Query(ClampSite site, TargetLine line, string fingerprint)
+    {
+        var key = Key(site, line, fingerprint);
+        if (key is not null && _cache.TryGetValue(key, out var hit)) { Interlocked.Increment(ref _hits); return hit; }
+        Interlocked.Increment(ref _misses);
+        var r = Compute(site, line);
+        if (key is not null)
+        {
+            if (_cache.Count >= CacheCap) _cache.Clear();
+            _cache[key] = r;
+        }
+        return r;
+    }
+
+    Reach Compute(ClampSite site, TargetLine line)
     {
         var o = site.Origin;
         foreach (var off in line.Offsets)
@@ -141,7 +190,8 @@ public sealed class BambooReachMap
         var m = new Reach[sites.Count, lines.Count];
         // Scene objects are built once, before the parallel queries (layout caches are not thread-safe).
         if (Collision && Environment is null) _designEnv ??= DesignEnvironment(Cell!);
-        Parallel.For(0, sites.Count * lines.Count, i => m[i / lines.Count, i % lines.Count] = Query(sites[i / lines.Count], lines[i % lines.Count]));
+        var fp = BambooTrussMotion.LayoutFingerprint; // once, not per query
+        Parallel.For(0, sites.Count * lines.Count, i => m[i / lines.Count, i % lines.Count] = Query(sites[i / lines.Count], lines[i % lines.Count], fp));
         return m;
     }
 

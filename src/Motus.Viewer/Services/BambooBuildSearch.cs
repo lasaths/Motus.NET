@@ -27,6 +27,39 @@ public static class BambooBuildSearch
         public IReadOnlyList<double> Rolls { get; init; } = Enumerable.Range(0, 8).Select(i => i * 45.0).ToArray();
         /// <summary>Stop after this many rejected planner confirmations (the search reports how far it got).</summary>
         public int MaxRejected { get; init; } = 40;
+        /// <summary>
+        /// Write the choices made so far (with the layout fingerprint) to this file after every confirmed choice and at
+        /// the end, so an interrupted search can resume (<see cref="LoadCheckpoint"/> → <see cref="ResumeAt"/>).
+        /// </summary>
+        public string? CheckpointPath { get; init; }
+        /// <summary>
+        /// Choices of an earlier (possibly interrupted) run: at each depth the recorded choice is tried first, so the
+        /// recorded prefix is re-confirmed without re-trying the alternatives that were rejected before it.
+        /// </summary>
+        public IReadOnlyList<Choice>? ResumeAt { get; init; }
+    }
+
+    /// <summary>A saved search state: the layout it belongs to and the confirmed choices in order.</summary>
+    public sealed record Checkpoint(string Fingerprint, List<Choice> Order, bool Complete);
+
+    /// <summary>Choices saved by <see cref="Options.CheckpointPath"/>, or null when missing, unreadable or for another layout.</summary>
+    public static List<Choice>? LoadCheckpoint(string path)
+    {
+        try
+        {
+            if (!File.Exists(path)) return null;
+            var c = System.Text.Json.JsonSerializer.Deserialize<Checkpoint>(File.ReadAllText(path));
+            return c is not null && c.Fingerprint == BambooTrussMotion.LayoutFingerprint ? c.Order : null;
+        }
+        catch (Exception e) when (e is System.Text.Json.JsonException or IOException) { return null; }
+    }
+
+    static void SaveCheckpoint(string? path, List<Choice> order, bool complete)
+    {
+        if (path is null) return;
+        var tmp = path + ".tmp";
+        File.WriteAllText(tmp, System.Text.Json.JsonSerializer.Serialize(new Checkpoint(BambooTrussMotion.LayoutFingerprint, order.ToList(), complete)));
+        File.Move(tmp, path, overwrite: true);
     }
 
     sealed class Grid
@@ -97,7 +130,8 @@ public static class BambooBuildSearch
                         options.Add((id, Mode.Relay, r, 20 - far));
                 }
             }
-            foreach (var (id, mode, relay, _) in options.OrderBy(x => x.Rank))
+            var resume = o.ResumeAt is { } ra && placed.Count < ra.Count ? ra[placed.Count] : null;
+            foreach (var (id, mode, relay, _) in options.OrderBy(x => resume is not null && x.Id == resume.MemberId && x.Mode == resume.Mode && x.Relay == resume.Relay ? 0 : 1).ThenBy(x => x.Rank))
             {
                 var cp = p.SaveDeep();
                 var choice = Confirm(p, id, mode, relay, Log);
@@ -107,6 +141,7 @@ public static class BambooBuildSearch
                 var nt = tasks.Count;
                 tasks.AddRange(TasksFor(choice));
                 Log($"{placed.Count}/{graph.Edges.Count} {choice.Note}");
+                SaveCheckpoint(o.CheckpointPath, order, placed.Count == graph.Edges.Count);
                 if (Dfs()) return true;
                 Log($"backtrack: {id} ({mode}) leads to a dead end");
                 placed.RemoveAt(placed.Count - 1); order.RemoveAt(order.Count - 1);

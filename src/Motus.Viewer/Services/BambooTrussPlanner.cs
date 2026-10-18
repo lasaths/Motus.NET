@@ -104,6 +104,13 @@ public sealed class BambooTrussPlanner
             for (var i = 0; i < position; i++) { if (_log[i] < 0) _r.NextDouble(); else _r.Next(_log[i]); }
             _log.RemoveRange(position, _log.Count - position);
         }
+        /// <summary>Become a copy of <paramref name="o"/> (same seed, same draws so far).</summary>
+        public void CopyFrom(ReplayRandom o)
+        {
+            _r = new Random(seed);
+            _log.Clear();
+            foreach (var x in o._log) { if (x < 0) NextDouble(); else Next(x); }
+        }
     }
 
     K.Gripper _base = K.Gripper.L;
@@ -1470,6 +1477,25 @@ public sealed class BambooTrussPlanner
 
     public DeepCheckpoint SaveDeep() => new(Snapshot(), Keys.ToList(), CycleKeys.ToList(), Grips.ToList(), Notes.ToList(),
         _placed.Select(p => (p.Name, p.World)).ToList(), _cycle, _rng.Position);
+
+    /// <summary>
+    /// An independent planner in exactly this state (keys, cycles, grips, notes, placed canes, random stream) on its own
+    /// <paramref name="cell"/> (a <see cref="BambooIcdCell.Clone"/>): a try on the fork computes what the same try on this
+    /// planner would, so parallel tries reproduce sequential results. <see cref="Checks"/> starts at 0 on the fork.
+    /// </summary>
+    public BambooTrussPlanner Fork(BambooIcdCell cell)
+    {
+        var f = new BambooTrussPlanner(cell, Constraints) { RrtAttempts = RrtAttempts, RrtIters = RrtIters };
+        f._rng.CopyFrom(_rng);
+        f.RollbackDeep(SaveDeep());
+        return f;
+    }
+
+    /// <summary>The cell this planner checks collisions with.</summary>
+    public BambooIcdCell Cell => _cell;
+
+    /// <summary>Add Motus checks done on a fork on this planner's behalf (keeps <see cref="Checks"/> as if sequential).</summary>
+    public void AddChecks(int n) => Checks += n;
 
     public void RollbackDeep(DeepCheckpoint c)
     {

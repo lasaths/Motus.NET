@@ -839,8 +839,22 @@ public class BambooTrussTests
     public void BuildSearch_DerivesTheShippedSequence_EveryChoicePlannerConfirmed()
     {
         BambooTrussMotion.UseCell(Cell);
-        var r = BambooBuildSearch.Run(Cell, null, _out.WriteLine);
+        var ckpt = Path.Combine(Path.GetTempPath(), $"bamboo-search-{Guid.NewGuid():N}.json");
+        try
+        {
+        var r = BambooBuildSearch.Run(Cell, new BambooBuildSearch.Options { CheckpointPath = ckpt }, _out.WriteLine);
         Assert.True(r.Complete, string.Join("\n", r.Log));
+        // Checkpoint / resume (P6): the saved choices are the result; resuming from them re-confirms the same sequence
+        // without re-trying any rejected alternative.
+        var saved = BambooBuildSearch.LoadCheckpoint(ckpt);
+        Assert.NotNull(saved);
+        Assert.Equal(r.Order, saved);
+        var resumed = BambooBuildSearch.Run(Cell, new BambooBuildSearch.Options { ResumeAt = saved }, _out.WriteLine);
+        Assert.True(resumed.Complete);
+        Assert.Equal(0, resumed.Rejected);
+        Assert.Equal(r.Order, resumed.Order);
+        Assert.Equal(System.Text.Json.JsonSerializer.Serialize(r.Tasks), System.Text.Json.JsonSerializer.Serialize(resumed.Tasks));
+        _out.WriteLine($"search {r.Seconds:F0} s ({r.Rejected} rejected), resumed {resumed.Seconds:F0} s");
         Assert.Equal(new[] { "AT1", "T1M", "AM", "T1T2", "MD", "MT2", "T2D" }, r.Order.Select(c => c.MemberId).ToArray());
         Assert.Equal(new[] { "Direct", "Direct", "Direct", "Land", "Land", "Direct", "Relay" }, r.Order.Select(c => c.Mode.ToString()).ToArray());
         var relay = r.Order[^1].Relay!;
@@ -850,6 +864,61 @@ public class BambooTrussTests
         Assert.Empty(TaskSequenceRules.Validate(BambooTaskModel.ToCore(r.Tasks)));
         Assert.True(BambooTrussMotion.IsShippedSequence(r.Tasks), "the search result is the shipped sequence");
         Assert.Equal(Build().Built, r.Order.Select(c => c.MemberId));
+        }
+        finally { File.Delete(ckpt); }
+    }
+
+    /// <summary>
+    /// P6 performance: reach queries are cached by layout fingerprint (a repeated scene check is all hits and returns the
+    /// same report), and parallel landing tries on forked planners give exactly the sequential result (note, keys, checks).
+    /// </summary>
+    [Fact]
+    public void Performance_ReachCache_AndParallelTries_AreTransparent()
+    {
+        BambooTrussMotion.UseCell(Cell);
+        BambooReachMap.ClearCache();
+        var t0 = System.Diagnostics.Stopwatch.StartNew();
+        var a = BambooSceneCheck.Run();
+        var cold = t0.Elapsed.TotalSeconds;
+        var (_, missesCold, _) = BambooReachMap.CacheStats;
+        t0.Restart();
+        var b = BambooSceneCheck.Run();
+        var warm = t0.Elapsed.TotalSeconds;
+        var (hits, misses, _) = BambooReachMap.CacheStats;
+        Assert.Equal(missesCold, misses); // the second run computed nothing
+        Assert.True(hits >= missesCold);
+        Assert.Equal(a.Details, b.Details);
+        Assert.True(warm < cold / 5, $"warm {warm:F2} s vs cold {cold:F2} s");
+        _out.WriteLine($"scene check cold {cold:F1} s, warm {warm:F2} s");
+
+        // Same landing, sequential vs parallel, from the shipped state after T1–T2.
+        (string Note, string Keys, int Checks) Land(int parallel)
+        {
+            var saved = BambooTrussMotion.ParallelTries;
+            BambooTrussMotion.ParallelTries = parallel;
+            try
+            {
+                var p = new BambooTrussPlanner(Cell);
+                Assert.True(p.Start());
+                foreach (var id in new[] { "AT1", "T1M", "AM" }) Assert.True(p.BuildMember(BambooTrussLayout.Def(id)!), p.Error);
+                Assert.True(BambooTrussMotion.LandStep(p, "T1T2", null).Walked);
+                Assert.True(p.BuildMember(BambooTrussLayout.Def("T1T2")!), p.Error);
+                var r = BambooTrussMotion.LandStep(p, "MD", null); // shipped: 3rd candidate wins
+                Assert.True(r.Ok && r.Walked, r.Note);
+                return (r.Note, System.Text.Json.JsonSerializer.Serialize(p.Keys), p.Checks);
+            }
+            finally { BambooTrussMotion.ParallelTries = saved; }
+        }
+        t0.Restart();
+        var seq = Land(1);
+        var tSeq = t0.Elapsed.TotalSeconds;
+        t0.Restart();
+        var par = Land(4);
+        var tPar = t0.Elapsed.TotalSeconds;
+        _out.WriteLine($"landing for MD: sequential {tSeq:F1} s, parallel {tPar:F1} s — {seq.Note}");
+        Assert.Equal(seq.Note, par.Note);
+        Assert.Equal(seq.Keys, par.Keys);
+        Assert.Equal(seq.Checks, par.Checks);
     }
 
     // ---------------- layout optimiser ----------------
