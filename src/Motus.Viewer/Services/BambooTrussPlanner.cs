@@ -209,26 +209,49 @@ public sealed class BambooTrussPlanner
         var dq = K.JointDist(qa, qb);
         var dg = Math.Max(Math.Abs(gRb - gRa), Math.Abs(gLb - gLa));
         var n = Math.Max(1, (int)Math.Ceiling(Math.Max(dq / step, dg / (step <= VerifyStepDeg ? Constraints.JawStepMm : Constraints.SearchJawStepMm))));
-        var q = new double[5];
-        for (var s = 1; s <= n; s++)
-        {
-            var u = s / (double)n;
-            for (var k = 0; k < 5; k++) q[k] = qa[k] + (qb[k] - qa[k]) * u;
-            if (!PoseOk(q, gRa + (gRb - gRa) * u, gLa + (gLb - gLa) * u, s == n ? holdB : holdA, lOn, rOn)) return false;
-        }
-        // The verifying pass also checks exactly the canonical samples BambooTrussScan takes on this segment
-        // (BambooTrussCollision.CanonicalCount), with the end key's hold, so whatever it accepts the scan accepts.
+        // One merged sample set: the pass's own grid (intermediate samples keep holdA, the end key holdB) plus, on the
+        // verifying pass, exactly the canonical samples BambooTrussScan takes on this segment
+        // (BambooTrussCollision.CanonicalCount, end key's hold), so whatever it accepts the scan accepts. Duplicates are
+        // checked once; the set is visited in bisection order so a colliding segment fails early. The verdict is the
+        // AND over the same set as before, so it is unchanged.
+        var samples = new List<(double U, int Hold)>(n + 8);
+        for (var s = 1; s <= n; s++) samples.Add((s / (double)n, s == n ? holdB : holdA));
         if (step <= VerifyStepDeg)
         {
             var ns = BambooTrussCollision.CanonicalCount(dq, dg, Constraints);
-            for (var s = 1; s < ns; s++)
-            {
-                var u = s / (double)ns;
-                for (var k = 0; k < 5; k++) q[k] = qa[k] + (qb[k] - qa[k]) * u;
-                if (!PoseOk(q, gRa + (gRb - gRa) * u, gLa + (gLb - gLa) * u, holdB, lOn, rOn)) return false;
-            }
+            for (var s = 1; s < ns; s++) samples.Add((s / (double)ns, holdB));
+            samples.Sort((x, y) => x.U != y.U ? x.U.CompareTo(y.U) : x.Hold.CompareTo(y.Hold));
+            var w = 0;
+            for (var i = 0; i < samples.Count; i++)
+                if (w == 0 || samples[i] != samples[w - 1]) samples[w++] = samples[i];
+            samples.RemoveRange(w, samples.Count - w);
+        }
+        var q = new double[5];
+        foreach (var i in BisectionOrder(samples.Count))
+        {
+            var (u, hold) = samples[i];
+            for (var k = 0; k < 5; k++) q[k] = qa[k] + (qb[k] - qa[k]) * u;
+            if (!PoseOk(q, gRa + (gRb - gRa) * u, gLa + (gLb - gLa) * u, hold, lOn, rOn)) return false;
         }
         return true;
+    }
+
+    /// <summary>Indices 0..m-1 with the last one first, then midpoints of ever finer halvings (each exactly once).</summary>
+    static IEnumerable<int> BisectionOrder(int m)
+    {
+        if (m <= 0) yield break;
+        yield return m - 1;
+        var queue = new Queue<(int Lo, int Hi)>(); // open interval (Lo, Hi) of unvisited indices
+        queue.Enqueue((-1, m - 1));
+        while (queue.Count > 0)
+        {
+            var (lo, hi) = queue.Dequeue();
+            if (hi - lo < 2) continue;
+            var mid = (lo + hi) / 2;
+            yield return mid;
+            queue.Enqueue((lo, mid));
+            queue.Enqueue((mid, hi));
+        }
     }
 
     /// <summary>Joint step of the playback / test scan — <see cref="MotionConstraints.ScanStepDeg"/>.</summary>

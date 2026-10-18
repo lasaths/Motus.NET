@@ -22,6 +22,7 @@ public sealed class RobotMeshCollisionChecker : ICollisionChecker, ICollisionCon
     private readonly double[] _baseM;
     private int _sceneFingerprint;
     private bool _sceneFingerprintValid;
+    private CollisionScene? _lastScene;
     private readonly List<(int index, LinkCollisionEntry entry, double[] linkMat, double[] worldM)> _posedScratch = new();
     private readonly List<double[]> _linkMatPool = new();
     private readonly List<double[]> _worldMatPool = new();
@@ -375,6 +376,10 @@ public sealed class RobotMeshCollisionChecker : ICollisionChecker, ICollisionCon
 
     private void EnsureBvhCache(CollisionScene scene)
     {
+        // Same scene instance as last time: nothing to refresh. (Exact either way: a cache miss falls back to the
+        // process-wide BVH cache keyed by geometry, so this cache only saves lookups.)
+        if (_sceneFingerprintValid && ReferenceEquals(scene, _lastScene) && !ReferencePath) return;
+        _lastScene = scene;
         var fp = SceneFingerprint(scene);
         if (_sceneFingerprintValid && fp == _sceneFingerprint)
             return;

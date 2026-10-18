@@ -519,17 +519,31 @@ public sealed class BambooIcdCell
         IReadOnlyList<double> qDeg, double gRmm, double gLmm, Frame? heldOffset,
         IReadOnlyList<CollisionObject> environment, IReadOnlyList<(string A, string B)> allowed, int maxContacts = 32)
     {
-        var objects = new List<CollisionObject>(environment.Count + 6);
-        objects.AddRange(environment);
-        objects.AddRange(MountObjects(gLmm));
-        var allow = new List<(string, string)>(allowed.Count + 2) { ("θ1", "base tube"), ("θ1", "L-grip body") };
-        foreach (var a in allowed) allow.Add((a.A, a.B));
-        var scene = new CollisionScene(objects, allow);
+        // The scene (environment + mount parts at the current mount pose and jaw, allowed pairs) is rebuilt only when one
+        // of those changes; with a static mount consecutive poses share it (same objects, so the same verdicts).
+        var key = new MountMemoKey(MountWorld, gLmm, environment, allowed, 0);
+        if (RobotMeshCollisionChecker.ReferencePath || _sceneKey is null || !_sceneKey.Equals(key))
+        {
+            var objects = new List<CollisionObject>(environment.Count + 6);
+            objects.AddRange(environment);
+            objects.AddRange(MountObjects(gLmm));
+            var allowList = new List<(string, string)>(allowed.Count + 2) { ("θ1", "base tube"), ("θ1", "L-grip body") };
+            foreach (var a in allowed) allowList.Add((a.A, a.B));
+            _scene = new CollisionScene(objects, allowList);
+            _sceneAllow = allowList;
+            _sceneKey = key;
+        }
+        var scene = _scene!;
+        var allow = _sceneAllow!;
         var contacts = new List<CollisionContact>(Checker(gRmm, heldOffset).FindContacts(new JointState(RadFromDeg(qDeg)), scene, maxContacts));
         if (contacts.Count < maxContacts)
             contacts.AddRange(MountEnvironmentContacts(gLmm, environment, allow));
         return contacts;
     }
+
+    MountMemoKey? _sceneKey;
+    CollisionScene? _scene;
+    List<(string, string)>? _sceneAllow;
 
     public bool PoseClear(IReadOnlyList<double> qDeg, double gRmm, double gLmm, Frame? heldOffset,
         IReadOnlyList<CollisionObject> environment, IReadOnlyList<(string A, string B)> allowed) =>
@@ -543,7 +557,7 @@ public sealed class BambooIcdCell
         public bool SegmentCollisionFree(JointState from, JointState to, CollisionScene scene, double configurationStep) => true;
     }
 
-    readonly Dictionary<(int gL, string part), BaseFrameAttachCollisionChecker> _mountPartCheckers = new();
+    readonly Dictionary<(long gL, string part), BaseFrameAttachCollisionChecker> _mountPartCheckers = new();
     readonly Dictionary<CollisionObject, (double X, double Y, double Z, double R)> _objSpheres = new(ReferenceEqualityComparer.Instance);
 
     (double X, double Y, double Z, double R) BoundingSphere(CollisionObject o)
@@ -622,7 +636,9 @@ public sealed class BambooIcdCell
         var baseFrame = new BaseFrame(Transforms.ToFrame(MountWorld));
         var mx = MountWorld[3]; var my = MountWorld[7]; var mz = MountWorld[11];
         const double mountRadius = 0.05; // every mount part lies within 5 cm of the mount origin
-        var gKey = (int)Math.Round(gLmm * 10);
+        // Keyed by the exact jaw value: the plates sit where gLmm puts them (as in MountObjects), independent of the
+        // order poses are checked in (a 0.1 mm bucket made the plate pose depend on the first value seen).
+        var gKey = BitConverter.DoubleToInt64Bits(gLmm);
         foreach (var g in _mountGeometry)
         {
             var local = g.LocalGeometry;
@@ -634,7 +650,7 @@ public sealed class BambooIcdCell
                 var body = new AttachedBody(local.Name, pose,
                     CollisionObject.Box(local.Name, Frame.Identity, local.ExtentX, local.ExtentY, local.ExtentZ));
                 chk = new BaseFrameAttachCollisionChecker(NoInnerCollision.Instance, new[] { body });
-                if (_mountPartCheckers.Count > 256) { _mountPartCheckers.Clear(); _mountCheckerGeneration++; }
+                if (_mountPartCheckers.Count > 8192) { _mountPartCheckers.Clear(); _mountCheckerGeneration++; }
                 _mountPartCheckers[(gKey, local.Name)] = chk;
             }
             foreach (var obj in environment)
