@@ -321,8 +321,8 @@ public class BambooTrussTests
         Assert.Equal(1, blocks[^1].T1, 9);
         Assert.Contains(blocks, b => b.Label == "A–T1 pick" && b.Kind == "pick");
         Assert.Contains(blocks, b => b.Label == "A–T1 place" && b.Kind == "place");
-        Assert.Contains(blocks, b => b.Label == "Walk for M–T2" && b.Kind == "walk");
-        Assert.Equal(10, blocks.Count(b => b.Kind == "swap"));
+        Assert.Contains(blocks, b => b.Label == "Walk for T1–T2" && b.Kind == "walk");
+        Assert.Equal(8, blocks.Count(b => b.Kind == "swap"));
         Assert.Contains(blocks, b => b.Kind == "park" && b.Label.EndsWith(" park", StringComparison.Ordinal));
         Assert.Contains(blocks, b => b.Label == "T2–D re-grasp" && b.Kind == "park");
     }
@@ -343,7 +343,7 @@ public class BambooTrussTests
             Assert.Contains("Open", built.Keys[i + 1].Label); // the old base opens on the next key
             n++;
         }
-        Assert.Equal(10, n); // five landing walks, two swaps each
+        Assert.Equal(8, n); // four landing walks, two swaps each
     }
 
     /// <summary>PTP: every placement leaves R a way out — the member cycle ends with R parked (Motus-clear).</summary>
@@ -775,7 +775,7 @@ public class BambooTrussTests
 
     /// <summary>
     /// The shipped sequence is a list of core tasks (pick / place / walk land / park): it passes the robot-independent
-    /// sequence rules, has exactly one park (T2–D in M's connector, +z), and the viewer blocks round-trip losslessly.
+    /// sequence rules, has exactly one park (T2–D in T1's connector, +z), and the viewer blocks round-trip losslessly.
     /// </summary>
     [Fact]
     public void ShippedTasks_AreCoreTasks_PassingTheSequenceRules_AndRoundTrip()
@@ -1091,7 +1091,7 @@ public class BambooTrussTests
             prev = placed;
         }
         // Walk on triangle 1: the next stock cane and the placed triangle are Motus obstacles.
-        var walk = built.Cycles.Single(c => c.MemberId == "walk (land) → MT2");
+        var walk = built.Cycles.Single(c => c.MemberId == "walk (land) → T1T2");
         var tw = built.Keys[walk.FirstKey + 1].T;
         Assert.Contains(scan.EnvironmentAt(tw, 0), o => o.Name == BambooIcdCell.Strut);
         foreach (var id in new[] { "AT1", "T1M", "AM" }) Assert.Contains(scan.EnvironmentAt(tw, 0), o => o.Name == "placed-" + id);
@@ -1102,7 +1102,7 @@ public class BambooTrussTests
     public void BaseSwaps_AreVisiblePausesInPlayback()
     {
         var built = Build();
-        foreach (var label in new[] { "walk (land) → MT2:swap base L→R", "walk (land) → MT2:swap base R→L" })
+        foreach (var label in new[] { "walk (land) → T1T2:swap base L→R", "walk (land) → T1T2:swap base R→L" })
         {
             var i = built.Keys.FindIndex(k => k.Label == label);
             Assert.True(i > 0, label);
@@ -1115,7 +1115,7 @@ public class BambooTrussTests
             var l = BambooTrussMotion.SampleState(built.Keys, play.Advance(0.016)).Label;
             frames[l] = frames.GetValueOrDefault(l) + 1;
         }
-        const string w = "walk (land) → MT2:";
+        const string w = "walk (land) → T1T2:";
         Assert.True(frames.GetValueOrDefault(w + "swap base L→R") >= 10, $"L→R shown {frames.GetValueOrDefault(w + "swap base L→R")} frames");
         Assert.True(frames.GetValueOrDefault(w + "swap base R→L") >= 10, $"R→L shown {frames.GetValueOrDefault(w + "swap base R→L")} frames");
     }
