@@ -849,8 +849,7 @@ public partial class BambooTrussTests
         var ckpt = Path.Combine(Path.GetTempPath(), $"bamboo-search-{Guid.NewGuid():N}.json");
         try
         {
-        var parallel = System.Environment.GetEnvironmentVariable("BAMBOO_SEARCH_SEQUENTIAL") != "1";
-        var r = BambooBuildSearch.Run(Cell, new BambooBuildSearch.Options { CheckpointPath = ckpt, CellFactory = parallel ? () => BambooTrussMotion.FixtureCell()! : null }, SearchLog);
+        var r = BambooBuildSearch.Run(Cell, new BambooBuildSearch.Options { CheckpointPath = ckpt }, SearchLog);
         Assert.True(r.Complete, string.Join("\n", r.Log));
         // Checkpoint / resume (P6): the saved choices are the result; resuming from them re-confirms the same sequence
         // without re-trying any rejected alternative.

@@ -37,13 +37,6 @@ public static class BambooBuildSearch
         /// recorded prefix is re-confirmed without re-trying the alternatives that were rejected before it.
         /// </summary>
         public IReadOnlyList<Choice>? ResumeAt { get; init; }
-        /// <summary>
-        /// Equivalent fresh cells for worker planners. When set (and <see cref="Workers"/> &gt; 1) the options of a search
-        /// level are confirmed speculatively in parallel, each from the same planner state and random stream, and taken
-        /// in the sequential order: the first confirmed option wins, so the result equals the sequential search.
-        /// </summary>
-        public Func<BambooIcdCell>? CellFactory { get; init; }
-        public int Workers { get; init; } = Environment.ProcessorCount;
     }
 
     /// <summary>A saved search state: the layout it belongs to and the confirmed choices in order.</summary>
@@ -138,21 +131,10 @@ public static class BambooBuildSearch
                 }
             }
             var resume = o.ResumeAt is { } ra && placed.Count < ra.Count ? ra[placed.Count] : null;
-            var ordered = options.OrderBy(x => resume is not null && x.Id == resume.MemberId && x.Mode == resume.Mode && x.Relay == resume.Relay ? 0 : 1).ThenBy(x => x.Rank).ToList();
-            var spec = Speculate(ordered.Select(x => (x.Id, x.Mode, x.Relay)).ToList());
-            for (var oi = 0; oi < ordered.Count; oi++)
+            foreach (var (id, mode, relay, _) in options.OrderBy(x => resume is not null && x.Id == resume.MemberId && x.Mode == resume.Mode && x.Relay == resume.Relay ? 0 : 1).ThenBy(x => x.Rank))
             {
-                var (id, mode, relay, _) = ordered[oi];
                 var cp = p.SaveDeep();
-                Choice? choice;
-                if (spec is not null && spec[oi].Logs is not null) // null = cancelled speculation: confirm it now
-                {
-                    var (c, logs, post) = spec[oi];
-                    foreach (var l in logs) Log(l);
-                    choice = c;
-                    if (choice is not null) p.Adopt(post!);
-                }
-                else choice = Confirm(p, id, mode, relay, Log);
+                var choice = Confirm(p, id, mode, relay, Log);
                 if (choice is null) { rejected++; p.RollbackDeep(cp); if (rejected >= o.MaxRejected) break; continue; }
                 confirmed++;
                 placed.Add(id); order.Add(choice);
@@ -168,38 +150,6 @@ public static class BambooBuildSearch
             }
             failed.Add(key);
             return false;
-        }
-
-        // Parallel speculation: every option of a level is confirmed on a worker planner (own cell, so no shared mutable
-        // collision caches) starting from the main planner's exact state and random stream. Pure function of that
-        // start state ⇒ the same outcome as confirming it sequentially.
-        var pool = new System.Collections.Concurrent.ConcurrentBag<BambooTrussPlanner>();
-        List<(Choice? Choice, List<string> Logs, BambooTrussPlanner.Transfer? Post)>? Speculate(List<(string Id, Mode Mode, string? Relay)> opts)
-        {
-            if (o.CellFactory is null || o.Workers <= 1 || opts.Count <= 1) return null;
-            var start = p.SaveTransfer();
-            var res = new (Choice?, List<string>, BambooTrussPlanner.Transfer?)[opts.Count];
-            var cts = opts.Select(_ => new CancellationTokenSource()).ToArray();
-            var gate = new object();
-            Parallel.For(0, opts.Count, new ParallelOptions { MaxDegreeOfParallelism = o.Workers }, i =>
-            {
-                if (cts[i].IsCancellationRequested) return;
-                if (!pool.TryTake(out var w)) w = new BambooTrussPlanner(o.CellFactory());
-                try
-                {
-                    w.Adopt(start);
-                    w.Cancel = cts[i].Token;
-                    var logs = new List<string>();
-                    var c = Confirm(w, opts[i].Id, opts[i].Mode, opts[i].Relay, logs.Add);
-                    res[i] = (c, logs, c is null ? null : w.SaveTransfer());
-                    // Options after a confirmed one can never be chosen first: stop them.
-                    if (c is not null) lock (gate) for (var j = i + 1; j < opts.Count; j++) cts[j].Cancel();
-                }
-                catch (OperationCanceledException) { }
-                finally { w.Cancel = default; pool.Add(w); }
-            });
-            // Only options after the first confirmed one can be cancelled; those are never read.
-            return res.ToList();
         }
 
         var complete = Dfs();

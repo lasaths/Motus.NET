@@ -120,25 +120,6 @@ public sealed class BambooTrussPlanner
             for (var i = 0; i < position; i++) { if (_log[i] < 0) _r.NextDouble(); else _r.Next(_log[i]); }
             _log.RemoveRange(position, _log.Count - position);
         }
-        public int[] Log() => _log.ToArray();
-        /// <summary>Become the stream that made exactly these calls (moves a branch between planner instances).</summary>
-        public void Adopt(int[] log)
-        {
-            _r = new Random(seed);
-            _log.Clear();
-            foreach (var m in log) { if (m < 0) _r.NextDouble(); else _r.Next(m); _log.Add(m); }
-        }
-    }
-
-    /// <summary>Planner state plus random stream, transferable to another planner on an equivalent cell (parallel search).</summary>
-    public sealed record Transfer(DeepCheckpoint State, int[] Rng);
-
-    public Transfer SaveTransfer() => new(SaveDeep(), _rng.Log());
-
-    public void Adopt(Transfer t)
-    {
-        _rng.Adopt(t.Rng);
-        RollbackDeep(t.State);
     }
 
     K.Gripper _base = K.Gripper.L;
@@ -206,12 +187,8 @@ public sealed class BambooTrussPlanner
 
     /// <summary>When set, every pose check is appended (tests only; off in production).</summary>
     public List<PoseVerdict>? VerdictLog { get; set; }
-    /// <summary>Parallel search: a speculative branch that can no longer be chosen is abandoned at its next pose check.</summary>
-    public CancellationToken Cancel { get; set; }
-
     bool PoseOk(double[] q, double gR, double gL, int hold, string? lOn, string? rOn)
     {
-        Cancel.ThrowIfCancellationRequested();
         Checks++;
         PoseWatch.Start();
         var ok = BambooTrussCollision.Contacts(_cell, BaseName, _baseWorld, q, gR, gL, hold == 1 ? _held : null, Env(hold), lOn, rOn, 1, Constraints.ClearanceMarginM).Count == 0;

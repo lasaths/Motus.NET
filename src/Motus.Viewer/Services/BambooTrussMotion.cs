@@ -61,28 +61,22 @@ public static class BambooTrussMotion
         lock (CellGate)
         {
             if (MotusCell is not null) return MotusCell;
-            MotusCell = FixtureCell(); // null on WASM / missing fixture: caller must UseCell.
-            return MotusCell;
-        }
-    }
-
-    /// <summary>A fresh, configured cell from the repo's bamboo fixture, or null when it is not available.</summary>
-    public static BambooIcdCell? FixtureCell()
-    {
-        try
-        {
-            var urdf = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..",
-                "tests", "fixtures", "bamboo_icd", "bamboo_icd.urdf"));
-            if (!File.Exists(urdf))
-                urdf = Path.GetFullPath(Path.Combine("tests", "fixtures", "bamboo_icd", "bamboo_icd.urdf"));
-            if (!File.Exists(urdf)) return null;
-            var cell = BambooIcdCell.LoadFile(urdf, BambooTrussLayout.StrutLength);
-            BambooTrussLayout.Configure(cell);
-            return cell;
-        }
-        catch
-        {
-            return null;
+            try
+            {
+                var urdf = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..",
+                    "tests", "fixtures", "bamboo_icd", "bamboo_icd.urdf"));
+                if (!File.Exists(urdf))
+                    urdf = Path.GetFullPath(Path.Combine("tests", "fixtures", "bamboo_icd", "bamboo_icd.urdf"));
+                if (!File.Exists(urdf)) return null;
+                var cell = BambooIcdCell.LoadFile(urdf, BambooTrussLayout.StrutLength);
+                BambooTrussLayout.Configure(cell);
+                MotusCell = cell;
+                return MotusCell;
+            }
+            catch
+            {
+                return null; // WASM / missing fixture: caller must UseCell.
+            }
         }
     }
 
@@ -231,10 +225,8 @@ public static class BambooTrussMotion
             {
                 // Optional checkpoint file (offline regeneration): resume an interrupted search, save progress.
                 var ckpt = Environment.GetEnvironmentVariable("BAMBOO_SEARCH_CHECKPOINT");
-                Func<BambooIcdCell>? factory = FixtureCell() is null || OperatingSystem.IsBrowser() ? null : () => FixtureCell()!;
-                var r = BambooBuildSearch.Run(cell, string.IsNullOrEmpty(ckpt)
-                    ? new BambooBuildSearch.Options { CellFactory = factory }
-                    : new BambooBuildSearch.Options { CheckpointPath = ckpt, ResumeAt = BambooBuildSearch.LoadCheckpoint(ckpt), CellFactory = factory },
+                var r = BambooBuildSearch.Run(cell, string.IsNullOrEmpty(ckpt) ? null
+                    : new BambooBuildSearch.Options { CheckpointPath = ckpt, ResumeAt = BambooBuildSearch.LoadCheckpoint(ckpt) },
                     string.IsNullOrEmpty(ckpt) ? null : s => File.AppendAllText(ckpt + ".log", s + "\n"));
                 source = r.Complete ? "build search" : "graph order (search incomplete)";
                 tasks = r.Complete ? r.Tasks : null;
