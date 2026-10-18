@@ -1,7 +1,7 @@
 # Motus.Viewer — Blazor WebAssembly Bamboo Arm Viewer
 
 **This is the sole Motus bamboo viewer.** The standalone HTML preview under
-`/workspace/bamboo-viewer` (and any sibling Grasshopper PR HTML assets) is
+`bamboo-viewer` folder (a sibling of this repo, and any Grasshopper PR HTML assets) is
 **retired as a product viewer** — kept only as a visual/UX reference. Do not
 treat that folder as the shipping UI.
 
@@ -197,8 +197,21 @@ click or drag the track to scrub, click a block to jump to its start; Play/Pause
 
 ## References
 
-- Retired visual reference: `/workspace/bamboo-viewer/next.html`
+- Retired visual reference: `bamboo-viewer/next.html` (sibling folder, not in this repo)
 - Motus.NET, Three.js r128, Blazor WebAssembly
+
+### Performance, recoverability, housekeeping (P6–P7)
+
+- Reach queries are cached process-wide, keyed by `LayoutFingerprint` + query (`BambooReachMap.CacheStats`,
+  `ClearCache`); a repeated scene check costs ~0.01 s instead of ~9 s.
+- `BambooBuildSearch.Options.CheckpointPath` saves the confirmed choices after every step; resume an interrupted search
+  with `ResumeAt = BambooBuildSearch.LoadCheckpoint(path)` (re-confirms the prefix without re-trying rejected options).
+- Parallel landing tries were tried and dropped: forking the planner replays its whole random stream and clones the
+  collision cell, which cost more than it saved.
+- Bamboo geometry (jaw openings incl. the opened L grip, connector cube, anchor column radius, stock peg inset, slide
+  clearance) lives in `BambooTrussLayout.SceneDescription` (`Scene`, `UseScene`) instead of code constants.
+- `LayoutFingerprint` also covers the site extras, the scene description, `MotionConstraints.Current` and the planner
+  search tunables, so changing any of them invalidates the shipped plan.
 
 ### Layout optimiser (P5)
 

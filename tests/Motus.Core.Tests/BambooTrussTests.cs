@@ -46,7 +46,7 @@ public class BambooTrussTests
     private static BambooTrussScan Scan(BambooTrussMotion.TrussBuild built) =>
         new(Cell, built.Keys, built.Cycles, BambooTrussLayout.Members, BambooTrussLayout.JawClosedMm);
 
-    private const double Closed = BambooTrussLayout.JawClosedMm + 1e-9;
+    private static readonly double Closed = BambooTrussLayout.JawClosedMm + 1e-9;
 
     // ---------------- layout ----------------
 
@@ -890,6 +890,28 @@ public class BambooTrussTests
         Assert.Equal(a.Details, b.Details);
         Assert.True(warm < cold / 5, $"warm {warm:F2} s vs cold {cold:F2} s");
         _out.WriteLine($"scene check cold {cold:F1} s, warm {warm:F2} s");
+    }
+
+    /// <summary>The shipped-plan fingerprint covers every planner input: scene description and motion constraints too.</summary>
+    [Fact]
+    public void Fingerprint_CoversSceneDescription_AndMotionConstraints()
+    {
+        var fp = BambooTrussMotion.LayoutFingerprint;
+        var scene = BambooTrussLayout.Scene;
+        try
+        {
+            BambooTrussLayout.UseScene(scene with { RackPegInset = scene.RackPegInset + 0.001 });
+            Assert.NotEqual(fp, BambooTrussMotion.LayoutFingerprint);
+        }
+        finally { BambooTrussLayout.UseScene(scene); }
+        var mc = MotionConstraints.Current;
+        try
+        {
+            MotionConstraints.Current = mc with { VerifyStepDeg = mc.VerifyStepDeg / 2 };
+            Assert.NotEqual(fp, BambooTrussMotion.LayoutFingerprint);
+        }
+        finally { MotionConstraints.Current = mc; }
+        Assert.Equal(fp, BambooTrussMotion.LayoutFingerprint);
     }
 
     // ---------------- layout optimiser ----------------

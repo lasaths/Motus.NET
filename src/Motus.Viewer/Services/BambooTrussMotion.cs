@@ -469,6 +469,16 @@ public static class BambooTrussMotion
             parts.AddRange(BambooTrussLayout.Racks.Select(r => $"{r.Name}:{F(r.X)},{F(r.Z)},{F(r.HalfX)},{F(r.HalfZ)},{F(r.Top)}"));
             parts.AddRange(BambooTrussLayout.PitBoxes.Select(b => $"{b.Name}:{F(b.X)},{F(b.Y)},{F(b.Z)},{F(b.HalfX)},{F(b.HalfY)},{F(b.HalfZ)}"));
             parts.Add($"hubs:{F(BambooTrussLayout.HubHalf)},gap:{F(BambooTrussLayout.NodeGap)}");
+            // Every remaining input of the planner: site extras, scene description, motion constraints, search tunables.
+            var site = BambooTrussLayout.Current;
+            parts.Add($"site:{F(site.NodeY)},{F(site.PitDepth)},{F(site.FeedYawDeg)},{F(site.FeedTop)}");
+            var sc = BambooTrussLayout.Scene;
+            parts.Add($"scene:{F(sc.AnchorPostRadius)},{F(sc.RackPegInset)},{F(sc.StakeSlideClear)}");
+            var mc = MotionConstraints.Current;
+            parts.Add($"motion:{mc.PointToPointOnly},{mc.OneClampedBase},{mc.SwapAtRest},{mc.FixedMemberRule},{mc.ParkAfterPlace},{F(mc.ClearanceMarginM)}," +
+                $"{F(mc.SearchStepDeg)},{F(mc.VerifyStepDeg)},{F(mc.ScanStepDeg)},{F(mc.ScanOversample)},{F(mc.JawStepMm)},{F(mc.SearchJawStepMm)}");
+            parts.Add($"tune:{BambooTrussPlanner.LandTries},{string.Join("/", BambooTrussPlanner.LandOffsets.Select(F))},{string.Join("/", BambooTrussPlanner.BrachiateOffsets.Select(F))}," +
+                $"{BambooTrussPlanner.GraspSolutionsPerOffset},{BrachiateLSolutions},{K.SeedScale}");
             return string.Join(";", parts);
         }
     }
