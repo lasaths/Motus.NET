@@ -1232,38 +1232,44 @@ public sealed class BambooTrussPlanner
         if (pk.Name is not null) store = BambooTrussLayout.Def(pk.Name["placed-".Length..])!.Place;
         var stockT = BambooTrussLayout.StockGraspOffsets.Select(o => K.OnStrut(store, o, "s")).ToList();
         var placeT = BambooTrussLayout.StockGraspOffsets.Select(o => new K.GripTarget(d.X + o * u.X, d.Y + o * u.Y, d.Z + o * u.Z, u.X, u.Y, u.Z, "p")).ToList();
-        int nR = 0, nL = 0, nS = 0;
-        foreach (var rc in fixedIds)
+        // Pure IK over (R cane, R offset) outer cases, run in parallel; per-case lists are concatenated in the sequential
+        // order, so the candidate list (and its stable score sort) is identical.
+        var outer = (from rc in fixedIds from fr in new[] { -1.0, -0.5, 0.0, 0.5, 1.0 } select (rc, fr)).ToList();
+        var parts = new (List<Landing> Res, int R, int L, int S)[outer.Count];
+        var q0 = _q.ToArray(); var baseWorld = _baseWorld;
+        Parallel.For(0, outer.Count, new ParallelOptions { MaxDegreeOfParallelism = Math.Max(1, VerifyWorkers) }, oi =>
         {
+            var (rc, fr) = outer[oi];
+            var part = new List<Landing>(); int pR = 0, pL = 0, pS = 0;
             var rl = PlacedPlacement(BambooTrussLayout.Members.First(x => x.Id == rc));
-            foreach (var fr in new[] { -1.0, -0.5, 0.0, 0.5, 1.0 })
+            var g = K.OnStrut(rl, fr * (half - 0.04), "placed-" + rc);
+            foreach (var q1 in Distinct(K.SolveGrip(K.Gripper.L, baseWorld, g, new[] { q0 }, 16)))
             {
-                var g = K.OnStrut(rl, fr * (half - 0.04), "placed-" + rc);
-                foreach (var q1 in Distinct(K.SolveGrip(K.Gripper.L, _baseWorld, g, new[] { _q }, 16)))
+                var G = K.Free(K.Gripper.L, baseWorld, q1); pR++;
+                foreach (var lc in fixedIds)
                 {
-                    var G = K.Free(K.Gripper.L, _baseWorld, q1); nR++;
-                    foreach (var lc in fixedIds)
+                    var ll = PlacedPlacement(BambooTrussLayout.Members.First(x => x.Id == lc));
+                    foreach (var fl in LandOffsets)
                     {
-                        var ll = PlacedPlacement(BambooTrussLayout.Members.First(x => x.Id == lc));
-                        foreach (var fl in LandOffsets)
+                        var t = K.OnStrut(ll, fl * (half - 0.03), "placed-" + lc);
+                        if ("placed-" + lc == rc) continue;
+                        foreach (var q2 in Distinct(K.SolveGrip(K.Gripper.R, G, t, new[] { q1 }, 12)))
                         {
-                            var t = K.OnStrut(ll, fl * (half - 0.03), "placed-" + lc);
-                            if ("placed-" + lc == rc) continue;
-                            foreach (var q2 in Distinct(K.SolveGrip(K.Gripper.R, G, t, new[] { q1 }, 12)))
-                            {
-                                var W = K.Free(K.Gripper.R, G, q2); nL++;
-                                var ns = stockT.Count(x => K.SolveGrip(K.Gripper.L, W, x, null, 6).Count > 0);
-                                if (ns == 0) continue;
-                                nS++;
-                                var np = placeT.Count(x => K.SolveGrip(K.Gripper.L, W, x, null, 6).Count > 0);
-                                if (np == 0) continue;
-                                res.Add(new Landing(rc, fr * (half - 0.04), G, lc, fl * (half - 0.03), W, ns + np));
-                            }
+                            var W = K.Free(K.Gripper.R, G, q2); pL++;
+                            var ns = stockT.Count(x => K.SolveGrip(K.Gripper.L, W, x, null, 6).Count > 0);
+                            if (ns == 0) continue;
+                            pS++;
+                            var np = placeT.Count(x => K.SolveGrip(K.Gripper.L, W, x, null, 6).Count > 0);
+                            if (np == 0) continue;
+                            part.Add(new Landing(rc, fr * (half - 0.04), G, lc, fl * (half - 0.03), W, ns + np));
                         }
                     }
                 }
             }
-        }
+            parts[oi] = (part, pR, pL, pS);
+        });
+        foreach (var pt in parts) res.AddRange(pt.Res);
+        int nR = parts.Sum(x => x.R), nL = parts.Sum(x => x.L), nS = parts.Sum(x => x.S);
         Diag.Add($"landing {member.Id}: R grasps {nR}, L landings {nL}, with stock IK {nS}, with stock+place IK {res.Count}");
         return res.OrderByDescending(x => x.Score).ToList();
     }
