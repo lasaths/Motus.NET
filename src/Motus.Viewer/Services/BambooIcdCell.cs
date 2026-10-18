@@ -138,7 +138,7 @@ public sealed class BambooIcdCell
     {
         var doc = XDocument.Parse(urdfXml);
         var urdf = UrdfRobotLoader.Load(doc, new UrdfLoadOptions { BaseLink = "base_link", TipLink = "tool0" });
-        return new BambooIcdCell(urdf, doc.Root!, strutLength);
+        return new BambooIcdCell(urdf, doc.Root!, strutLength) { _urdfXml = urdfXml };
     }
 
     public static BambooIcdCell LoadFile(string path, double strutLength = StrutLength) =>
@@ -541,6 +541,15 @@ public sealed class BambooIcdCell
             contacts.AddRange(MountEnvironmentContacts(gLmm, environment, allow));
         return contacts;
     }
+
+    string? _urdfXml;
+
+    /// <summary>
+    /// An independent cell with the same robot, mount and strut (own collision caches), for checking poses on another
+    /// thread with <see cref="BambooTrussCollision.Contacts"/>: the environment is passed in, so the answers are
+    /// identical. Null when this cell was not loaded from URDF text.
+    /// </summary>
+    public BambooIcdCell? CollisionTwin() => _urdfXml is null ? null : Load(_urdfXml, StrutLen);
 
     MountMemoKey? _sceneKey;
     CollisionScene? _scene;

@@ -226,6 +226,8 @@ public sealed class BambooTrussPlanner
                 if (w == 0 || samples[i] != samples[w - 1]) samples[w++] = samples[i];
             samples.RemoveRange(w, samples.Count - w);
         }
+        if (VerdictLog is null && VerifyWorkers > 1 && samples.Count >= ParallelMinSamples && Twins() is { } twins)
+            return SamplesOkParallel(samples, twins, qa, qb, gRa, gRb, gLa, gLb, holdA, holdB, lOn, rOn);
         var q = new double[5];
         foreach (var i in BisectionOrder(samples.Count))
         {
@@ -234,6 +236,62 @@ public sealed class BambooTrussPlanner
             if (!PoseOk(q, gRa + (gRb - gRa) * u, gLa + (gLb - gLa) * u, hold, lOn, rOn)) return false;
         }
         return true;
+    }
+
+    /// <summary>Threads for the samples of one segment (1 = sequential). Verdicts and <see cref="Checks"/> are identical.</summary>
+    public int VerifyWorkers { get; set; } = Environment.ProcessorCount;
+    const int ParallelMinSamples = 16;
+    BambooIcdCell[]? _twins;
+    bool _noTwins;
+
+    BambooIcdCell[]? Twins()
+    {
+        if (_twins is not null || _noTwins) return _twins;
+        var list = new BambooIcdCell[VerifyWorkers];
+        for (var i = 0; i < list.Length; i++)
+        {
+            if (_cell.CollisionTwin() is not { } t) { _noTwins = true; return null; }
+            list[i] = t;
+        }
+        return _twins = list;
+    }
+
+    /// <summary>
+    /// The samples of one segment checked on several threads (one twin cell each, environment shared, immutable),
+    /// taking positions of the bisection order in increasing order. A failure at position k stops positions after k;
+    /// every position before k is still finished, so the verdict and the count of checks equal the sequential loop.
+    /// </summary>
+    bool SamplesOkParallel(List<(double U, int Hold)> samples, BambooIcdCell[] twins, double[] qa, double[] qb,
+        double gRa, double gRb, double gLa, double gLb, int holdA, int holdB, string? lOn, string? rOn)
+    {
+        var order = BisectionOrder(samples.Count).ToArray();
+        var envA = Env(holdA); var envB = holdB == holdA ? envA : Env(holdB);
+        var baseName = BaseName; var baseWorld = _baseWorld; var held = _held; var margin = Constraints.ClearanceMarginM;
+        var next = -1; var firstFail = int.MaxValue;
+        var workers = Math.Min(twins.Length, Math.Max(1, samples.Count / 4));
+        PoseWatch.Start();
+        Parallel.For(0, workers, new ParallelOptions { MaxDegreeOfParallelism = workers }, w =>
+        {
+            var cell = twins[w];
+            var q = new double[5];
+            while (true)
+            {
+                var k = Interlocked.Increment(ref next);
+                if (k >= order.Length || k > Volatile.Read(ref firstFail)) break;
+                var (u, hold) = samples[order[k]];
+                for (var j = 0; j < 5; j++) q[j] = qa[j] + (qb[j] - qa[j]) * u;
+                var env = hold == holdA ? envA : hold == holdB ? envB : null;
+                if (env is null) { lock (twins) env = Env(hold); }
+                var ok = BambooTrussCollision.Contacts(cell, baseName, baseWorld, q, gRa + (gRb - gRa) * u, gLa + (gLb - gLa) * u,
+                    hold == 1 ? held : null, env, lOn, rOn, 1, margin).Count == 0;
+                if (ok) continue;
+                int seen;
+                while (k < (seen = Volatile.Read(ref firstFail)) && Interlocked.CompareExchange(ref firstFail, k, seen) != seen) { }
+            }
+        });
+        PoseWatch.Stop();
+        Checks += firstFail == int.MaxValue ? order.Length : firstFail + 1;
+        return firstFail == int.MaxValue;
     }
 
     /// <summary>Indices 0..m-1 with the last one first, then midpoints of ever finer halvings (each exactly once).</summary>

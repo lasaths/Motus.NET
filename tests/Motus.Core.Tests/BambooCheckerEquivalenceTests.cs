@@ -77,4 +77,31 @@ public class BambooCheckerEquivalenceTests
         }
         Assert.Empty(mismatches);
     }
+
+    /// <summary>Parallel segment checking gives the same plan and the same number of checks as the sequential loop.</summary>
+    [Fact]
+    public void ShortCase_ParallelSegmentChecks_IdenticalToSequential()
+    {
+        (string Keys, int Checks, double Secs) Run(int workers)
+        {
+            var p = new BambooTrussPlanner(NewCell()) { VerifyWorkers = workers };
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            Assert.True(p.Start());
+            var built = 0;
+            foreach (var m in BambooTrussLayout.Members)
+            {
+                if (built >= 2) break;
+                var cp = p.SaveDeep();
+                if (p.BuildMember(m)) built++; else p.RollbackDeep(cp);
+            }
+            return (System.Text.Json.JsonSerializer.Serialize(p.Keys), p.Checks, sw.Elapsed.TotalSeconds);
+        }
+        var seq = Run(1);
+        var par = Run(System.Environment.ProcessorCount);
+        _out.WriteLine($"sequential {seq.Secs:F1} s, parallel {par.Secs:F1} s, checks {seq.Checks}/{par.Checks}");
+        if (System.Environment.GetEnvironmentVariable("MOTUS_PERF_OUT") is { Length: > 0 } dir)
+            File.WriteAllText(Path.Combine(dir, "short-parallel.txt"), $"sequential {seq.Secs:F1} s, parallel {par.Secs:F1} s, checks {seq.Checks}/{par.Checks}\n");
+        Assert.Equal(seq.Checks, par.Checks);
+        Assert.Equal(seq.Keys, par.Keys);
+    }
 }
