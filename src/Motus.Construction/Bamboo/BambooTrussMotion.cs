@@ -55,6 +55,9 @@ public static class BambooTrussMotion
         cell.SetMountViewer(BambooTrussLayout.StartBase);
     }
 
+    /// <summary>The bound Motus cell, or the fixture URDF cell when none is bound (null if unavailable).</summary>
+    internal static BambooIcdCell? CurrentCell => TryCell();
+
     static BambooIcdCell? TryCell()
     {
         if (MotusCell is not null) return MotusCell;

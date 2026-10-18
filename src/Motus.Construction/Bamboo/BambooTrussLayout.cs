@@ -48,7 +48,53 @@ public static class BambooTrussLayout
         string StartStake,
         double FeedX, double FeedZ, double FeedYawDeg, double FeedTop,
         string WalkRAnchor, string WalkLTarget,
-        IReadOnlyDictionary<string, string> Unreachable);
+        IReadOnlyDictionary<string, string> Unreachable,
+        StructureDefinition? Structure = null,
+        IReadOnlyList<CollisionObject>? Obstacles = null);
+
+    /// <summary>A structure node (viewer coordinates, metres, Y-up).</summary>
+    public sealed record StructureNode(string Name, double X, double Y, double Z);
+
+    /// <summary>A structure member (one cane) between two nodes.</summary>
+    public sealed record StructureMember(string Id, string Label, string Glyph, string NodeA, string NodeB);
+
+    /// <summary>
+    /// The structure to assemble: nodes and members, members listed in the default build order. Supports are the nodes
+    /// with an anchor column (<see cref="Stake"/> named "anchor-&lt;node&gt;" in the <see cref="Site"/>).
+    /// <see cref="Site.Structure"/> null means the Warren truss (<see cref="WarrenTruss"/>) sized from the site.
+    /// </summary>
+    public sealed record StructureDefinition(IReadOnlyList<StructureNode> Nodes, IReadOnlyList<StructureMember> Members);
+
+    /// <summary>The example structure: the three-triangle Warren truss A–M–D / T1–T2 with panel <paramref name="panel"/>.</summary>
+    public static StructureDefinition WarrenTruss(double panel, double nodeY, double planeZ = PlaneZ)
+    {
+        var h = panel * Math.Sqrt(3) / 2;
+        return new StructureDefinition(
+            [
+                new("A", -panel, nodeY, planeZ),
+                new("M", 0, nodeY, planeZ),
+                new("D", panel, nodeY, planeZ),
+                new("T1", -panel / 2, nodeY + h, planeZ),
+                new("T2", panel / 2, nodeY + h, planeZ)
+            ],
+            [
+                new("AM", "bottom chord A–M", "_", "A", "M"),
+                new("AT1", "diagonal A–T1", "/", "A", "T1"),
+                new("T1M", "diagonal T1–M", "\\", "T1", "M"),
+                new("MT2", "diagonal M–T2", "/", "M", "T2"),
+                new("T1T2", "top chord T1–T2", "‾", "T1", "T2"),
+                new("MD", "bottom chord M–D", "_", "M", "D"),
+                new("T2D", "diagonal T2–D", "\\", "T2", "D")
+            ]);
+    }
+
+    /// <summary>The structure being assembled: <see cref="Site.Structure"/>, or the Warren truss sized from the site.</summary>
+    public static StructureDefinition Structure => Current.Structure ?? WarrenTruss(Panel, FootY0);
+
+    /// <summary>Support nodes: nodes carrying an anchor column ("anchor-X" ⇒ node X).</summary>
+    public static IReadOnlyList<string> SupportNodes =>
+        Stakes.Where(s => s.Name.StartsWith("anchor-", StringComparison.Ordinal)).Select(s => s.Name["anchor-".Length..])
+            .Where(n => Structure.Nodes.Any(x => x.Name == n)).ToList();
 
     public static Site Default { get; } = SiteDefaults.Chosen;
 
@@ -207,7 +253,8 @@ public static class BambooTrussLayout
         _fixtures ??= Posts.Select(p => BambooIcdCell.PostAt(p.Name, p.X, p.Z, 0, p.Top, p.Radius))
             .Concat(Racks.Select(r => BambooIcdCell.BoxAt(r.Name, r.X, r.Top / 2, r.Z, r.HalfX, r.Top / 2, r.HalfZ)))
             .Concat(PitBoxes.Select(b => BambooIcdCell.BoxAt(b.Name, b.X, b.Y, b.Z, b.HalfX, b.HalfY, b.HalfZ)))
-            .Concat(new[] { "A", "D" }.Select(HubObject))
+            .Concat(SupportNodes.Select(HubObject))
+            .Concat(Current.Obstacles ?? [])
             .ToList();
 
     static CollisionObject HubObject(string node)
@@ -234,7 +281,7 @@ public static class BambooTrussLayout
     {
         var ids = placedIds.ToHashSet(StringComparer.Ordinal);
         return Members.Where(m => ids.Contains(m.Id)).SelectMany(m => new[] { m.NodeA, m.NodeB })
-            .Where(n => n is not "A" and not "D").Distinct().OrderBy(n => n, StringComparer.Ordinal).ToList();
+            .Where(n => !SupportNodes.Contains(n)).Distinct().OrderBy(n => n, StringComparer.Ordinal).ToList();
     }
 
     /// <summary>Configure a cell for /bamboo-truss: no hang rod, the two ground surfaces as pads.</summary>
@@ -260,13 +307,7 @@ public static class BambooTrussLayout
 
     /// <summary>Truss nodes: A / M / D at support level, apexes T1 / T2; all at z = <see cref="PlaneZ"/>.</summary>
     public static (string Name, double X, double Y, double Z)[] FootNodes =>
-    [
-        ("A", -Panel, FootY0, PlaneZ),
-        ("M", 0, FootY0, PlaneZ),
-        ("D", Panel, FootY0, PlaneZ),
-        ("T1", -Panel / 2, FootY0 + Height, PlaneZ),
-        ("T2", Panel / 2, FootY0 + Height, PlaneZ)
-    ];
+        Structure.Nodes.Select(n => (n.Name, n.X, n.Y, n.Z)).ToArray();
 
     static IReadOnlyList<MemberDef>? _members;
     /// <summary>The seven members (Ids name their end nodes), in the default build order.</summary>
@@ -279,16 +320,7 @@ public static class BambooTrussLayout
             var n = FootNodes.First(f => f.Name == node);
             return (n.X, n.Y, n.Z);
         }
-        var edges = new (string Id, string Label, string Glyph, string P, string Q)[]
-        {
-            ("AM", "bottom chord A–M", "_", "A", "M"),
-            ("AT1", "diagonal A–T1", "/", "A", "T1"),
-            ("T1M", "diagonal T1–M", "\\", "T1", "M"),
-            ("MT2", "diagonal M–T2", "/", "M", "T2"),
-            ("T1T2", "top chord T1–T2", "‾", "T1", "T2"),
-            ("MD", "bottom chord M–D", "_", "M", "D"),
-            ("T2D", "diagonal T2–D", "\\", "T2", "D")
-        };
+        var edges = Structure.Members.Select(m => (m.Id, m.Label, m.Glyph, P: m.NodeA, Q: m.NodeB));
         return edges.Select(e => new MemberDef(e.Id, e.Label, e.Glyph, Store, AlongEdge(At(e.P), At(e.Q)), At(e.P), At(e.Q), e.P, e.Q)).ToList();
     }
 
