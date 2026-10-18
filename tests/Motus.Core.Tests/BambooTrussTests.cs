@@ -1128,16 +1128,31 @@ public partial class BambooTrussTests
         if (Environment.GetEnvironmentVariable("BAMBOO_TRUSS_WRITE_PLAN") == "1")
             File.WriteAllText(PlanCachePath, json);
         Assert.True(File.Exists(PlanCachePath), "shipped plan missing — run with BAMBOO_TRUSS_WRITE_PLAN=1");
-        Assert.Equal(json, File.ReadAllText(PlanCachePath));
+        // Structural comparison: identical structure, strings and discrete values (labels, order, modes, grasp
+        // sites, swaps, holders); numbers (joint degrees, times, poses, residuals) within 1e-6 absolute, so last-ulp
+        // libm differences between Linux / Windows / macOS do not fail it while any different decision does.
+        var diffs = PlanDiff.Compare(File.ReadAllText(PlanCachePath), json);
+        if (diffs.Count > 0)
+        {
+            var dump = Path.Combine(Path.GetTempPath(), "BambooTrussLivePlan.json");
+            File.WriteAllText(dump, json);
+            _out.WriteLine($"live plan written to {dump}");
+            _out.WriteLine(PlanDiff.LabelSummary(File.ReadAllText(PlanCachePath), json));
+        }
+        Assert.True(diffs.Count == 0, $"live plan differs from shipped plan ({diffs.Count} differences, shipped vs live):\n"
+            + string.Join("\n", diffs.Take(40)) + "\n" + PlanDiff.LabelSummary(File.ReadAllText(PlanCachePath), json));
         var cached = BambooTrussMotion.LoadCachedDefaultPlan();
         Assert.NotNull(cached);
         Assert.Equal(built.Keys.Count, cached!.Keys.Count);
         for (var i = 0; i < built.Keys.Count; i++)
         {
             Assert.Equal(built.Keys[i].Label, cached.Keys[i].Label);
-            Assert.Equal(built.Keys[i].Q, cached.Keys[i].Q);
-            Assert.Equal(built.Keys[i].BaseWorld, cached.Keys[i].BaseWorld);
-            Assert.Equal(built.Keys[i].T, cached.Keys[i].T);
+            Assert.Equal(built.Keys[i].Q.Length, cached.Keys[i].Q.Length);
+            for (var k = 0; k < built.Keys[i].Q.Length; k++) Assert.Equal(built.Keys[i].Q[k], cached.Keys[i].Q[k], PlanDiff.Tol);
+            Assert.Equal(built.Keys[i].BaseWorld is null, cached.Keys[i].BaseWorld is null);
+            if (built.Keys[i].BaseWorld is { } bw)
+                for (var k = 0; k < bw.Length; k++) Assert.Equal(bw[k], cached.Keys[i].BaseWorld![k], PlanDiff.Tol);
+            Assert.Equal(built.Keys[i].T, cached.Keys[i].T, PlanDiff.Tol);
         }
         // The page path (useCache) returns the shipped plan for the default tasks.
         BambooTrussMotion.UseCell(Cell);
