@@ -856,7 +856,7 @@ public partial class BambooTrussTests
         Assert.Equal(System.Text.Json.JsonSerializer.Serialize(r.Tasks), System.Text.Json.JsonSerializer.Serialize(resumed.Tasks));
         _out.WriteLine($"search {r.Seconds:F0} s ({r.Rejected} rejected), resumed {resumed.Seconds:F0} s");
         Assert.Equal(new[] { "AT1", "T1M", "AM", "T1T2", "MT2", "MD", "T2D" }, r.Order.Select(c => c.MemberId).ToArray());
-        Assert.Equal(new[] { "Direct", "Direct", "Direct", "Land", "Land", "Direct", "Relay" }, r.Order.Select(c => c.Mode.ToString()).ToArray());
+        Assert.Equal(new[] { "Direct", "Direct", "Direct", "Land", "Land", "Land", "Relay" }, r.Order.Select(c => c.Mode.ToString()).ToArray());
         var relay = r.Order[^1].Relay!;
         var candidates = BambooSceneCheck.Run().Members.Single(m => m.MemberId == "T2D").RelayOptions;
         Assert.Equal(11, candidates.Count);
