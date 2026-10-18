@@ -226,13 +226,13 @@ public partial class BambooTrussTests
         var built = Build();
         // Order from the build search (P4): triangle 1 from the A column (A–T1, T1–M, A–M), T1–T2 and M–D after
         // targeted landings, M–T2 from where M–D left the robot, and T2–D through one relay in T1's connector.
-        Assert.Equal(new[] { "AT1", "T1M", "AM", "T1T2", "MD", "MT2", "T2D" }, built.Built.ToArray());
+        Assert.Equal(new[] { "AT1", "T1M", "AM", "T1T2", "MT2", "MD", "T2D" }, built.Built.ToArray());
         Assert.DoesNotContain(built.Notes, n => n.Contains("not built", StringComparison.Ordinal) || n.Contains("no landing found", StringComparison.Ordinal));
         Assert.Equal(BambooTrussLayout.Members.Select(m => m.Id).OrderBy(x => x), BambooTrussLayout.FixedBothEnds(built.Built).OrderBy(x => x));
         var relay = BambooTrussMotion.ShippedRelay;
-        Assert.Equal(BambooTrussLayout.RelayId("T2D", "T1", "z+"), relay);
-        Assert.Equal(new[] { "start", "AT1", "T1M", "AM", "walk (land) → T1T2", "T1T2", "walk (land) → MD", "MD",
-                "MT2", "walk (land) → " + relay, relay, "walk (land) → T2D", "T2D" },
+        Assert.Equal(BambooTrussLayout.RelayId("T2D", "A", "z+"), relay);
+        Assert.Equal(new[] { "start", "AT1", "T1M", "AM", "walk (land) → T1T2", "T1T2", "walk (land) → MT2", "MT2",
+                "walk (land) → MD", "MD", "walk (land) → " + relay, relay, "walk (land) → T2D", "T2D" },
             built.Cycles.Select(c => c.MemberId).ToArray());
         Assert.Equal(0, built.Cycles[0].T0, 9);
         Assert.Equal(1, built.Cycles[^1].T1, 9);
@@ -256,7 +256,7 @@ public partial class BambooTrussTests
                 }
             if (built.Built.Contains(c.MemberId)) placedSoFar.Add(c.MemberId);
         }
-        Assert.Equal(8, swaps);
+        Assert.Equal(10, swaps);
         // The L clamp leaves the A column sideways (connector above, no free top).
         Assert.Contains(built.Keys, k => k.Label == "walk (land) → T1T2:L:PTP off anchor-A");
         Assert.DoesNotContain(built.Keys, k => k.BaseOn is { } on && !on.StartsWith("anchor-", StringComparison.Ordinal) && !on.StartsWith("placed-", StringComparison.Ordinal));
@@ -322,7 +322,7 @@ public partial class BambooTrussTests
         Assert.Contains(blocks, b => b.Label == "A–T1 pick" && b.Kind == "pick");
         Assert.Contains(blocks, b => b.Label == "A–T1 place" && b.Kind == "place");
         Assert.Contains(blocks, b => b.Label == "Walk for T1–T2" && b.Kind == "walk");
-        Assert.Equal(8, blocks.Count(b => b.Kind == "swap"));
+        Assert.Equal(10, blocks.Count(b => b.Kind == "swap"));
         Assert.Contains(blocks, b => b.Kind == "park" && b.Label.EndsWith(" park", StringComparison.Ordinal));
         Assert.Contains(blocks, b => b.Label == "T2–D re-grasp" && b.Kind == "park");
     }
@@ -343,7 +343,7 @@ public partial class BambooTrussTests
             Assert.Contains("Open", built.Keys[i + 1].Label); // the old base opens on the next key
             n++;
         }
-        Assert.Equal(8, n); // four landing walks, two swaps each
+        Assert.Equal(10, n); // five landing walks, two swaps each
     }
 
     /// <summary>PTP: every placement leaves R a way out — the member cycle ends with R parked (Motus-clear).</summary>
@@ -785,9 +785,9 @@ public partial class BambooTrussTests
         Assert.All(core, c => Assert.Contains(c.Identity, TaskIdentities.All));
         Assert.Empty(TaskSequenceRules.Validate(core));
         var park = Assert.Single(core.Select(CoreTasks.AsPark).Where(x => x is not null));
-        Assert.Equal(("T2D", "T1", "z+"), (park!.Object, park.Connector, park.Direction));
+        Assert.Equal(("T2D", "A", "z+"), (park!.Object, park.Connector, park.Direction));
         Assert.Equal(BambooTrussMotion.ShippedRelay, BambooTaskModel.RelayIdOf(park));
-        Assert.Equal(4, core.Count(c => CoreTasks.AsWalk(c) is { Mode: WalkMode.Land }));
+        Assert.Equal(5, core.Count(c => CoreTasks.AsWalk(c) is { Mode: WalkMode.Land }));
         Assert.Equal(7, core.Count(c => c.Identity == TaskIdentities.Place));
         Assert.Equal(8, core.Count(c => c.Identity == TaskIdentities.Pick)); // T2–D is picked twice (stock, connector)
         for (var i = 0; i < edits.Count; i++)
@@ -855,7 +855,7 @@ public partial class BambooTrussTests
         Assert.Equal(r.Order, resumed.Order);
         Assert.Equal(System.Text.Json.JsonSerializer.Serialize(r.Tasks), System.Text.Json.JsonSerializer.Serialize(resumed.Tasks));
         _out.WriteLine($"search {r.Seconds:F0} s ({r.Rejected} rejected), resumed {resumed.Seconds:F0} s");
-        Assert.Equal(new[] { "AT1", "T1M", "AM", "T1T2", "MD", "MT2", "T2D" }, r.Order.Select(c => c.MemberId).ToArray());
+        Assert.Equal(new[] { "AT1", "T1M", "AM", "T1T2", "MT2", "MD", "T2D" }, r.Order.Select(c => c.MemberId).ToArray());
         Assert.Equal(new[] { "Direct", "Direct", "Direct", "Land", "Land", "Direct", "Relay" }, r.Order.Select(c => c.Mode.ToString()).ToArray());
         var relay = r.Order[^1].Relay!;
         var candidates = BambooSceneCheck.Run().Members.Single(m => m.MemberId == "T2D").RelayOptions;
