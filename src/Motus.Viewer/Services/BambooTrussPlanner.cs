@@ -299,7 +299,9 @@ public sealed class BambooTrussPlanner
     {
         var ta = new List<double[]> { qa }; var pa = new List<int> { -1 };
         var tb = new List<double[]> { qb }; var pb = new List<int> { -1 };
-        bool Edge(double[] a, double[] b) => MoveOk(a, b, SearchStepDeg);
+        // Tree edges are verified at the fine step too: a coarse-only edge that grazes the margin would let the trees
+        // connect, then fail the shortcut's verify pass (return null) and loop until RrtIters.
+        bool Edge(double[] a, double[] b) => MoveOk(a, b, SearchStepDeg) && MoveOk(a, b, VerifyStepDeg);
         double[] Steer(double[] from, double[] to, double step)
         {
             var d = K.JointDist(from, to);
