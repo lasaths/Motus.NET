@@ -223,7 +223,11 @@ public static class BambooTrussMotion
             var tasks = LoadCachedTasks(fp);
             if (tasks is null && TryCell() is { } cell)
             {
-                var r = BambooBuildSearch.Run(cell);
+                // Optional checkpoint file (offline regeneration): resume an interrupted search, save progress.
+                var ckpt = Environment.GetEnvironmentVariable("BAMBOO_SEARCH_CHECKPOINT");
+                var r = BambooBuildSearch.Run(cell, string.IsNullOrEmpty(ckpt) ? null
+                    : new BambooBuildSearch.Options { CheckpointPath = ckpt, ResumeAt = BambooBuildSearch.LoadCheckpoint(ckpt) },
+                    string.IsNullOrEmpty(ckpt) ? null : s => File.AppendAllText(ckpt + ".log", s + "\n"));
                 source = r.Complete ? "build search" : "graph order (search incomplete)";
                 tasks = r.Complete ? r.Tasks : null;
             }

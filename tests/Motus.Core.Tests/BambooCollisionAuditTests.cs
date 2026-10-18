@@ -10,13 +10,14 @@ namespace Motus.Core.Tests;
 /// every key, so every swap / grasp / release pose), and each sample is checked with Motus collision: robot links and
 /// self-collision, both grippers, mount parts and the carried cane vs ground pads, pit, anchor columns, connectors,
 /// placed / parked canes and the stock. Clearance to the environment is estimated by re-checking with every obstacle
-/// inflated by δ (1, 2, 5, 10 mm): the reported minimum is the largest δ still clear (a lower bound within one level).
+/// inflated by δ (2, 3, 5, 10 mm) with the shared check's exemptions: the reported minimum is the largest δ still clear
+/// (a lower bound within one level). Hits are checked with the configured margin (2 mm) already applied.
 /// Designed touches (each gripper's jaw plates on what it clamps) are the only allowed contacts; objects being clamped
 /// are excluded from the clearance estimate (not from the hit check). Self-collision is checked as hit / no hit only.
 /// </summary>
 public partial class BambooTrussTests
 {
-    static readonly double[] AuditLevelsMm = { 10, 5, 2, 1 };
+    static readonly double[] AuditLevelsMm = { 10, 5, 3, 2 };
 
     sealed record AuditResult(int Segments, int Samples, int Hits, string? FirstHit, double MinClearMm, string MinWhere,
         int BelowMargin, double Seconds, Dictionary<double, int> SamplesBelow);
@@ -52,7 +53,7 @@ public partial class BambooTrussTests
                 var ci = ContactsInflated(scan, built, t, s, env, lvl / 1000);
                 if (ci.Count == 0) { clear = lvl; break; }
                 belowCount[lvl]++;
-                if (lvl == 1)
+                if (lvl == AuditLevelsMm[^1])
                 {
                     var pair = BambooIcdCell.Describe(ci.Take(1).ToList()) + " @ " + s.Label.Split(':').Last();
                     near[pair] = near.GetValueOrDefault(pair) + 1;
@@ -62,20 +63,21 @@ public partial class BambooTrussTests
             if (clear < minClear)
             {
                 minClear = clear;
-                where = $"t={t:F6} {s.Label}" + (clear < 10 ? $" (closest at +{(clear == 0 ? 1 : NextLevel(clear))} mm: {BambooIcdCell.Describe(ContactsInflated(scan, built, t, s, env, (clear == 0 ? 1 : NextLevel(clear)) / 1000))})" : "");
+                where = $"t={t:F6} {s.Label}" + (clear < 10 ? $" (closest at +{NextLevel(clear)} mm: {BambooIcdCell.Describe(ContactsInflated(scan, built, t, s, env, NextLevel(clear) / 1000))})" : "");
             }
         }
         var r = new AuditResult(built.Keys.Count - 1, scan.SampleCount, hits, first, minClear, where, below, clock.Elapsed.TotalSeconds, belowCount);
         _out.WriteLine($"{name}: {r.Segments} segments, {r.Samples} samples (canonical {canonical.SampleCount}), {r.Hits} hits, " +
-            $"min clearance ≥ {r.MinClearMm} mm at {r.MinWhere}; samples below 10/5/2/1 mm: {string.Join("/", AuditLevelsMm.Select(l => belowCount[l]))}; " +
+            $"min clearance ≥ {r.MinClearMm} mm at {r.MinWhere}; samples below 10/5/3/2 mm: {string.Join("/", AuditLevelsMm.Select(l => belowCount[l]))}; " +
             $"below margin ({marginMm} mm): {below}; {r.Seconds:F0} s");
         if (first is not null) _out.WriteLine("first hit: " + first);
-        foreach (var (pair, n) in near.OrderByDescending(x => x.Value).Take(12)) _out.WriteLine($"  < 1 mm: {n,6} × {pair}");
+        foreach (var (pair, n) in near.OrderByDescending(x => x.Value).Take(12)) _out.WriteLine($"  < {AuditLevelsMm[^1]} mm: {n,6} × {pair}");
         return r;
 
-        static double NextLevel(double clear) => AuditLevelsMm.Where(l => l > clear).DefaultIfEmpty(10).Min();
+        static double NextLevel(double clear) => AuditLevelsMm.Where(l => l > clear).DefaultIfEmpty(AuditLevelsMm[^1]).Min();
     }
 
+    /// <summary>Contacts with every non-exempt obstacle grown by <paramref name="delta"/> — the shared check's margin logic.</summary>
     static IReadOnlyList<CollisionContact> ContactsInflated(BambooTrussScan scan, BambooTrussMotion.TrussBuild built, double t,
         BambooTrussMotion.State s, List<CollisionObject> env, double delta)
     {
@@ -83,45 +85,7 @@ public partial class BambooTrussTests
         var (g, w, _) = scan.BaseAt(t);
         var world = scan.World[BambooTrussMotion.CycleIndexAt(built.Keys, built.Cycles, t)];
         var held = s.Hold == 1 ? world.HeldOffset : null;
-        // Objects a gripper clamps are hugged by design (jaw plates allowed to touch, the gripper body millimetres off):
-        // they are not inflated, so the clearance is to everything else.
-        var clamped = $"{k.LOn}|{k.ROn}".Split('|', StringSplitOptions.RemoveEmptyEntries).ToHashSet(StringComparer.Ordinal);
-        return BambooTrussCollision.Contacts(Cell, g, w, s.Q, s.GR, s.GL, held, env.Select(o => clamped.Contains(o.Name) ? o : Inflate(o, delta)).ToList(), k.LOn, k.ROn, 4);
-    }
-
-    /// <summary>Obstacle grown by δ: primitives exactly; meshes by moving each vertex δ along its (area-weighted) normal.</summary>
-    static CollisionObject Inflate(CollisionObject o, double d)
-    {
-        switch (o.Shape)
-        {
-            case CollisionShape.Sphere: return CollisionObject.Sphere(o.Name, o.Pose, o.ExtentX + d);
-            case CollisionShape.Box: return CollisionObject.Box(o.Name, o.Pose, o.ExtentX + d, o.ExtentY + d, o.ExtentZ + d);
-            case CollisionShape.Capsule: return CollisionObject.Capsule(o.Name, o.Pose, o.ExtentX + d, o.ExtentY);
-            case CollisionShape.Plane:
-            {
-                var m = Transforms.FromFrame(o.Pose); // free side = local +X
-                return CollisionObject.Plane(o.Name, new Frame(o.Pose.X + m[0] * d, o.Pose.Y + m[4] * d, o.Pose.Z + m[8] * d, o.Pose.Qw, o.Pose.Qx, o.Pose.Qy, o.Pose.Qz));
-            }
-            default:
-            {
-                var v = o.MeshVertices!; var idx = o.MeshIndices!;
-                var n = v.Select(_ => new double[3]).ToList();
-                for (var i = 0; i + 2 < idx.Count; i += 3)
-                {
-                    var a = v[idx[i]]; var b = v[idx[i + 1]]; var c = v[idx[i + 2]];
-                    var u = new[] { b[0] - a[0], b[1] - a[1], b[2] - a[2] }; var w = new[] { c[0] - a[0], c[1] - a[1], c[2] - a[2] };
-                    var f = new[] { u[1] * w[2] - u[2] * w[1], u[2] * w[0] - u[0] * w[2], u[0] * w[1] - u[1] * w[0] };
-                    foreach (var j in new[] { idx[i], idx[i + 1], idx[i + 2] }) for (var k = 0; k < 3; k++) n[j][k] += f[k];
-                }
-                var nv = new List<double[]>(v.Count);
-                for (var i = 0; i < v.Count; i++)
-                {
-                    var l = Math.Sqrt(n[i][0] * n[i][0] + n[i][1] * n[i][1] + n[i][2] * n[i][2]);
-                    nv.Add(l < 1e-15 ? v[i].ToArray() : new[] { v[i][0] + n[i][0] / l * d, v[i][1] + n[i][1] / l * d, v[i][2] + n[i][2] / l * d });
-                }
-                return CollisionObject.Mesh(o.Name, o.Pose, nv, idx);
-            }
-        }
+        return BambooTrussCollision.Contacts(Cell, g, w, s.Q, s.GR, s.GL, held, env, k.LOn, k.ROn, 4, delta);
     }
 
     /// <summary>

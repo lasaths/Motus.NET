@@ -178,7 +178,7 @@ public sealed class BambooReachMap
             lock (Cell!)
                 foreach (var q in sols)
                     if (BambooTrussCollision.Contacts(Cell, "L", site.BaseWorld, q, BambooTrussLayout.JawOpenMm, BambooTrussLayout.JawClosedMm,
-                            null, env, site.On, line.Touch, 1).Count == 0) clear++;
+                            null, env, site.On, line.Touch, 1, Constraints.ClearanceMarginM).Count == 0) clear++;
             if (clear > 0) return new Reach(true, true, off, clear);
         }
         return default;

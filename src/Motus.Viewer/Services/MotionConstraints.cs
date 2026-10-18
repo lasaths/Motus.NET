@@ -22,8 +22,9 @@ public sealed record MotionConstraints
     public bool FixedMemberRule { get; init; } = true;
     /// <summary>After every placement the free gripper parks before anything else happens.</summary>
     public bool ParkAfterPlace { get; init; } = true;
-    /// <summary>Extra clearance to obstacles (metres). Only 0 (exact contact) is supported.</summary>
-    public double ClearanceMarginM { get; init; }
+    /// <summary>Clearance to obstacles (metres), enforced by the shared check (obstacles grown by it; clamped objects and
+    /// the held cane on its stock pegs exempt). Lassie: 2 mm.</summary>
+    public double ClearanceMarginM { get; init; } = 0.002;
     /// <summary>Joint step of the coarse (search) segment check, degrees.</summary>
     public double SearchStepDeg { get; init; } = 2.0;
     /// <summary>Joint step every accepted segment is verified at, degrees.</summary>
@@ -47,7 +48,7 @@ public sealed record MotionConstraints
     {
         if (!OneClampedBase) throw new NotSupportedException("The planner always keeps one gripper clamped as the IK base.");
         if (!SwapAtRest) throw new NotSupportedException("The planner only swaps the base at rest.");
-        if (ClearanceMarginM != 0) throw new NotSupportedException("Clearance margins need distance queries; Motus collision checks are exact-contact.");
+        if (ClearanceMarginM < 0 || ClearanceMarginM > 0.02) throw new ArgumentException("Clearance margin must be in [0, 20 mm].");
         if (SearchStepDeg <= 0 || VerifyStepDeg <= 0 || ScanStepDeg <= 0 || ScanOversample < 1 || JawStepMm <= 0 || SearchJawStepMm <= 0)
             throw new ArgumentException("Sample resolutions must be positive (oversample ≥ 1).");
         return this;

@@ -668,13 +668,13 @@ public partial class BambooTrussTests
         var c = MotionConstraints.Current;
         Assert.Same(MotionConstraints.Bamboo, c);
         Assert.True(c.PointToPointOnly && c.OneClampedBase && c.SwapAtRest && c.FixedMemberRule && c.ParkAfterPlace);
-        Assert.Equal(0, c.ClearanceMarginM);
+        Assert.Equal(0.002, c.ClearanceMarginM);
         var p = new BambooTrussPlanner(Cell);
         Assert.Same(c, p.Constraints);
         Assert.Equal(c.VerifyStepDeg, p.VerifyStepDeg);
         var built = Build();
         Assert.Equal(c.ScanStepDeg, Scan(built).Constraints.ScanStepDeg);
-        Assert.Throws<NotSupportedException>(() => new BambooTrussPlanner(Cell, c with { ClearanceMarginM = 0.002 }));
+        Assert.Throws<ArgumentException>(() => new BambooTrussPlanner(Cell, c with { ClearanceMarginM = -0.001 }));
         Assert.Throws<NotSupportedException>(() => new BambooTrussPlanner(Cell, c with { SwapAtRest = false }));
         Assert.Throws<NotSupportedException>(() => new BambooTrussPlanner(Cell, c with { OneClampedBase = false }));
         // Swaps at rest: every key whose base differs from the previous key's has the same joints.

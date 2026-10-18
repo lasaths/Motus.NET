@@ -168,14 +168,14 @@ public sealed class BambooTrussPlanner
     {
         Checks++;
         PoseWatch.Start();
-        var ok = BambooTrussCollision.Contacts(_cell, BaseName, _baseWorld, q, gR, gL, hold == 1 ? _held : null, Env(hold), lOn, rOn, 1).Count == 0;
+        var ok = BambooTrussCollision.Contacts(_cell, BaseName, _baseWorld, q, gR, gL, hold == 1 ? _held : null, Env(hold), lOn, rOn, 1, Constraints.ClearanceMarginM).Count == 0;
         PoseWatch.Stop();
         return ok;
     }
 
     public IReadOnlyList<CollisionContact> ContactsNow(double[] q, double gR, double gL, int hold, string? lOn, string? rOn)
     {
-        return BambooTrussCollision.Contacts(_cell, BaseName, _baseWorld, q, gR, gL, hold == 1 ? _held : null, Env(hold), lOn, rOn, 8);
+        return BambooTrussCollision.Contacts(_cell, BaseName, _baseWorld, q, gR, gL, hold == 1 ? _held : null, Env(hold), lOn, rOn, 8, Constraints.ClearanceMarginM);
     }
 
     /// <summary>Segment from the current state to (qb, gRb, gLb): intermediate samples keep the current hold.</summary>
