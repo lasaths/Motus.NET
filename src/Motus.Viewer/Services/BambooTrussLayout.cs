@@ -79,7 +79,9 @@ public static class BambooTrussLayout
         double JawClosedMm = 14, double JawOpenMm = 40, double LJawOpenMm = 45,
         double HubHalf = 0.015, double AnchorPostRadius = 0.007, double RackPegInset = 0.085, double StakeSlideClear = 0.018);
 
-    public static SceneDescription Scene { get; private set; } = new();
+    static SceneDescription? _scene;
+    // Lazy: the static site defaults (initialised first) already read the scene geometry.
+    public static SceneDescription Scene { get => _scene ??= new(); private set => _scene = value; }
 
     /// <summary>Switch the robot / scene description (clears derived caches like <see cref="Use"/>).</summary>
     public static void UseScene(SceneDescription scene)
