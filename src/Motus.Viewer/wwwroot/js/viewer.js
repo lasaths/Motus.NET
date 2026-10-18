@@ -169,8 +169,8 @@
     c.width = 512; c.height = 128;
     var g = c.getContext('2d');
     g.clearRect(0, 0, 512, 128);
-    g.font = '600 54px sans-serif';
-    g.fillStyle = '#f2efe6';
+    g.font = '500 54px "IBM Plex Mono", monospace';
+    g.fillStyle = '#DADADD'; // ANDURA color.text
     g.textAlign = 'center';
     g.textBaseline = 'middle';
     var tw = g.measureText(text).width;
@@ -189,7 +189,7 @@
     return spr;
   }
 
-  var HIT_COLOR = 0xff3b30;
+  var HIT_COLOR = 0xF45536; // ANDURA color.emergency (Motus hit = P1)
   function clearTints() {
     Object.keys(colliderByName).forEach(function (name) {
       var meshes = colliderByName[name];
@@ -271,7 +271,7 @@
 
     renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
-    renderer.setClearColor(0x000000, 1);
+    renderer.setClearColor(0x090A0C, 1); // ANDURA color.surface (3D viewport)
     view.appendChild(renderer.domElement);
 
     scene = new THREE.Scene();
@@ -315,7 +315,7 @@
       groundMesh = ground;
     }
 
-    var grid = new THREE.GridHelper(1.4, 14, 0x3a3a3a, 0x242424);
+    var grid = new THREE.GridHelper(1.4, 14, 0x3C3D41, 0x202125) // ANDURA color.line / color.3d.element;
     grid.position.y = 0.0006;
     scene.add(grid);
 
@@ -389,7 +389,7 @@
     anchorMarkers = [];
     for (var ai = 0; ai < 2; ai++) {
       var ring = new THREE.Mesh(new THREE.TorusGeometry(0.034, 0.0035, 10, 48),
-        new THREE.MeshBasicMaterial({ color: 0xffb020, depthTest: false, transparent: true, opacity: 0.9 }));
+        new THREE.MeshBasicMaterial({ color: 0xDADADD, depthTest: false, transparent: true, opacity: 0.9 }));
       ring.renderOrder = 4;
       ring.visible = false;
       anchorGroup.add(ring);
@@ -531,7 +531,8 @@
         // Torus lies in its XY plane: turn its normal (+Z) onto the clamped slot axis.
         var ax = new THREE.Vector3(a.axis[0], a.axis[1], a.axis[2]).normalize();
         m.ring.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), ax);
-        m.ring.material.color.setHex(a.held ? 0x40c0ff : 0xffb020);
+        // ANDURA: clamped = color.text (normal state, no hue); cane in hand = color.ultramarine (selection/commanded).
+        m.ring.material.color.setHex(a.held ? 0x3A3CFF : 0xDADADD);
         var text = a.held ? a.gripper + ' holds cane' : a.gripper + ' clamped on ' + a.on + (a.isBase ? ' (base)' : '');
         if (text !== m.text) {
           if (m.label) scene.remove(m.label);
@@ -656,5 +657,22 @@
   window.fetchFile = async function (path) {
     var response = await fetch(path);
     return await response.text();
+  };
+
+  // ---- ANDURA chrome (presentation only): top-line clock and the P1 acknowledge confirm (hard rule 8). ----
+  function tickClock() {
+    var el = document.getElementById('andura-clock');
+    if (el) el.textContent = new Date().toTimeString().slice(0, 8);
+  }
+  setInterval(tickClock, 1000);
+  window.anduraConfirmAck = function () {
+    var d = document.getElementById('ack');
+    if (d && d.showModal) d.showModal();
+  };
+  window.anduraAcked = function () {
+    var d = document.getElementById('ack');
+    if (d) d.close();
+    document.body.classList.add('acked');
+    document.querySelectorAll('.band .ack-word').forEach(function (e) { e.textContent = 'ACKED'; });
   };
 })();
