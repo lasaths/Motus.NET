@@ -71,10 +71,29 @@ public static class BambooTrussLayout
     /// <summary>Truss height: P·√3/2.</summary>
     public static double Height => Panel * Math.Sqrt(3) / 2;
 
-    public const double JawClosedMm = 14;
-    public const double JawOpenMm = 40;
+    /// <summary>
+    /// Bamboo-specific robot / scene geometry (jaw openings incl. the opened L grip, node connectors, anchor columns, stock
+    /// pegs) as data instead of code constants. Switch with <see cref="UseScene"/>; part of the layout fingerprint.
+    /// </summary>
+    public sealed record SceneDescription(
+        double JawClosedMm = 14, double JawOpenMm = 40, double LJawOpenMm = 45,
+        double HubHalf = 0.015, double AnchorPostRadius = 0.007, double RackPegInset = 0.085, double StakeSlideClear = 0.018);
+
+    static SceneDescription? _scene;
+    // Lazy: the static site defaults (initialised first) already read the scene geometry.
+    public static SceneDescription Scene { get => _scene ??= new(); private set => _scene = value; }
+
+    /// <summary>Switch the robot / scene description (clears derived caches like <see cref="Use"/>).</summary>
+    public static void UseScene(SceneDescription scene)
+    {
+        Scene = scene;
+        _fixtures = null; _members = null; _hubs.Clear();
+    }
+
+    public static double JawClosedMm => Scene.JawClosedMm;
+    public static double JawOpenMm => Scene.JawOpenMm;
     /// <summary>L-grip fully open (jaw plates 15 mm off a 14 mm cane / column).</summary>
-    public const double LJawOpenMm = 45;
+    public static double LJawOpenMm => Scene.LJawOpenMm;
 
     /// <summary>The one vertical plane of every member axis (viewer Z).</summary>
     public const double PlaneZ = 0.11;
@@ -83,18 +102,18 @@ public static class BambooTrussLayout
     /// <summary>|x| of A and D (= one panel).</summary>
     public static double HalfSpan => Panel;
     /// <summary>Node connector cube half-size.</summary>
-    public const double HubHalf = 0.015;
+    public static double HubHalf => Scene.HubHalf;
     /// <summary>Anchor (pin / roller support) column radius: 14 mm, the L clamp's closed width.</summary>
-    public const double AnchorPostRadius = 0.007;
+    public static double AnchorPostRadius => Scene.AnchorPostRadius;
     /// <summary>Pit edge: the pit starts this far inboard of the A / D column axis (the column stands on the ground).</summary>
     public const double PitEdgeInset = 0.012;
     /// <summary>Ground slabs outside the pit: how far they reach outboard of the pit edge and either side of the plane.</summary>
     public const double GroundReach = 0.55, GroundHalfZ = 0.45;
     public const double EarthWall = 0.03;
 
-    public const double StakeRadius = AnchorPostRadius;
+    public static double StakeRadius => AnchorPostRadius;
     /// <summary>How far above a support's free top an L clamp clears (not used by the anchor columns: hub above).</summary>
-    public const double StakeSlideClear = 0.018;
+    public static double StakeSlideClear => Scene.StakeSlideClear;
     public const double StakeTopAbove = 0.02;
     public const double StakePadHalf = 0.0;
 
@@ -113,7 +132,7 @@ public static class BambooTrussLayout
     public static double RackTop => Current.FeedTop;
     public const double RackHalfAlong = 0.015;
     public const double RackHalfAcross = 0.004;
-    public static double RackPegOffset => StrutLength / 2 - 0.085;
+    public static double RackPegOffset => StrutLength / 2 - Scene.RackPegInset;
     public static double[] StockGraspOffsets
     {
         get
@@ -197,7 +216,7 @@ public static class BambooTrussLayout
         return BambooIcdCell.BoxAt("hub-" + node, n.X, n.Y, n.Z, HubHalf, HubHalf, HubHalf);
     }
 
-    static readonly Dictionary<string, IReadOnlyList<CollisionObject>> _hubs = new();
+    static readonly System.Collections.Concurrent.ConcurrentDictionary<string, IReadOnlyList<CollisionObject>> _hubs = new();
     /// <summary>
     /// Connectors at the inner nodes (M, T1, T2) that exist once a placed member reaches them (A / D are part of the
     /// supports, in <see cref="FixtureObjects"/>). Motus obstacles; the cached list is per node set.
