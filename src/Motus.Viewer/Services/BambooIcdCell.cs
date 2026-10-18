@@ -138,28 +138,8 @@ public sealed class BambooIcdCell
     {
         var doc = XDocument.Parse(urdfXml);
         var urdf = UrdfRobotLoader.Load(doc, new UrdfLoadOptions { BaseLink = "base_link", TipLink = "tool0" });
-        return new BambooIcdCell(urdf, doc.Root!, strutLength) { _urdfXml = urdfXml };
+        return new BambooIcdCell(urdf, doc.Root!, strutLength);
     }
-
-    string? _urdfXml;
-
-    /// <summary>
-    /// An independent cell with the same robot, strut, pole and ground pads (scene and checker caches are per cell and
-    /// not thread-safe, so parallel planner tries each get their own clone). The mount pose is set per collision query.
-    /// </summary>
-    public BambooIcdCell Clone()
-    {
-        if (_urdfXml is null) throw new InvalidOperationException("cell was not created by Load: cannot clone");
-        var c = Load(_urdfXml, StrutLen);
-        c.IncludePole = IncludePole;
-        if (Pads.Count > 0) c.SetGroundPads(Pads);
-        else if (AnchorPads.Count > 0) c.SetAnchorPads(AnchorPads);
-        c.SetMountViewer(MountViewer);
-        return c;
-    }
-
-    /// <summary>True when <see cref="Clone"/> is available.</summary>
-    public bool CanClone => _urdfXml is not null;
 
     public static BambooIcdCell LoadFile(string path, double strutLength = StrutLength) =>
         Load(File.ReadAllText(path), strutLength);

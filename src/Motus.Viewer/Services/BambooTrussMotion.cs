@@ -418,17 +418,8 @@ public static class BambooTrussMotion
         if (p.BuildMember(m)) { p.RollbackDeep(cp); return (true, false, $"walk (land) → {id}: not needed (buildable from {p.LStake})"); }
         p.RollbackDeep(cp);
         var cands = p.LandingCandidates(m);
-        var unique = cands.GroupBy(c => (c.RCane, c.ROff, c.LCane, c.LOff)).Select(g => g.First()).Take(BambooTrussPlanner.LandTries).ToList();
         var tried = 0;
-        // Parallel tries (P6): each candidate is tried on a fork in the checkpointed state; the first success in candidate
-        // order wins and is replayed on p — the same result, checks and random stream as the sequential loop below.
-        if (ParallelTries > 1 && unique.Count > 1 && p.Cell.CanClone)
-        {
-            var first = FirstLanding(p, m, id, unique);
-            if (first < 0) { tried = unique.Count; unique.Clear(); }
-            else { tried = first; unique = new List<BambooTrussPlanner.Landing> { unique[first] }; }
-        }
-        foreach (var c in unique)
+        foreach (var c in cands.GroupBy(c => (c.RCane, c.ROff, c.LCane, c.LOff)).Select(g => g.First()))
         {
             if (tried++ >= BambooTrussPlanner.LandTries) break;
             p.RollbackDeep(cp);
@@ -442,53 +433,6 @@ public static class BambooTrussMotion
         }
         p.RollbackDeep(cp);
         return (false, false, $"walk (land) → {id}: no landing found ({cands.Count} IK candidates, {Math.Min(tried, BambooTrussPlanner.LandTries)} tried)");
-    }
-
-    /// <summary>
-    /// Landing candidates tried at once on forked planners (P6). 1 = sequential. Output is identical either way (the
-    /// first success in candidate order wins; forks' Motus checks for the earlier failures are added to the planner).
-    /// </summary>
-    public static int ParallelTries { get; set; } = Math.Clamp(Environment.ProcessorCount, 1, 4);
-
-    sealed class ForkPool
-    {
-        public readonly System.Collections.Concurrent.ConcurrentBag<BambooIcdCell> Cells = new();
-    }
-    static readonly System.Runtime.CompilerServices.ConditionalWeakTable<BambooIcdCell, ForkPool> _pools = new();
-
-    /// <summary>
-    /// Try <paramref name="cands"/> in batches of <see cref="ParallelTries"/> on forks of <paramref name="p"/>; return the
-    /// index of the first candidate whose walk step and trial build succeed (−1: none). Checks of the failed candidates
-    /// before it are added to <paramref name="p"/>; p itself is not moved.
-    /// </summary>
-    static int FirstLanding(BambooTrussPlanner p, BambooTrussLayout.MemberDef m, string id, List<BambooTrussPlanner.Landing> cands)
-    {
-        var pool = _pools.GetValue(p.Cell, _ => new ForkPool());
-        for (var b0 = 0; b0 < cands.Count; b0 += ParallelTries)
-        {
-            var n = Math.Min(ParallelTries, cands.Count - b0);
-            var ok = new bool[n];
-            var checks = new int[n];
-            var forks = new BambooTrussPlanner[n];
-            for (var i = 0; i < n; i++)
-            {
-                if (!pool.Cells.TryTake(out var cell)) cell = p.Cell.Clone();
-                forks[i] = p.Fork(cell);
-            }
-            Parallel.For(0, n, new ParallelOptions { MaxDegreeOfParallelism = n }, i =>
-            {
-                var f = forks[i]; var c = cands[b0 + i];
-                ok[i] = f.WalkStep(c.RCane, c.ROff, c.RFrame, c.LCane, c.LOff, c.LFrame, $"walk (land) → {id}") && f.BuildMember(m);
-                checks[i] = f.Checks;
-            });
-            foreach (var f in forks) pool.Cells.Add(f.Cell);
-            for (var i = 0; i < n; i++)
-            {
-                if (ok[i]) return b0 + i;
-                p.AddChecks(checks[i]);
-            }
-        }
-        return -1;
     }
 
     public static TrussBuild Build(IReadOnlyList<BambooIcdMotion.TaskEdit>? tasks = null, bool useCache = false) =>

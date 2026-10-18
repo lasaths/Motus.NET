@@ -870,10 +870,10 @@ public class BambooTrussTests
 
     /// <summary>
     /// P6 performance: reach queries are cached by layout fingerprint (a repeated scene check is all hits and returns the
-    /// same report), and parallel landing tries on forked planners give exactly the sequential result (note, keys, checks).
+    /// same report).
     /// </summary>
     [Fact]
-    public void Performance_ReachCache_AndParallelTries_AreTransparent()
+    public void Performance_ReachCache_IsTransparent()
     {
         BambooTrussMotion.UseCell(Cell);
         BambooReachMap.ClearCache();
@@ -890,35 +890,6 @@ public class BambooTrussTests
         Assert.Equal(a.Details, b.Details);
         Assert.True(warm < cold / 5, $"warm {warm:F2} s vs cold {cold:F2} s");
         _out.WriteLine($"scene check cold {cold:F1} s, warm {warm:F2} s");
-
-        // Same landing, sequential vs parallel, from the shipped state after T1–T2.
-        (string Note, string Keys, int Checks) Land(int parallel)
-        {
-            var saved = BambooTrussMotion.ParallelTries;
-            BambooTrussMotion.ParallelTries = parallel;
-            try
-            {
-                var p = new BambooTrussPlanner(Cell);
-                Assert.True(p.Start());
-                foreach (var id in new[] { "AT1", "T1M", "AM" }) Assert.True(p.BuildMember(BambooTrussLayout.Def(id)!), p.Error);
-                Assert.True(BambooTrussMotion.LandStep(p, "T1T2", null).Walked);
-                Assert.True(p.BuildMember(BambooTrussLayout.Def("T1T2")!), p.Error);
-                var r = BambooTrussMotion.LandStep(p, "MD", null); // shipped: 3rd candidate wins
-                Assert.True(r.Ok && r.Walked, r.Note);
-                return (r.Note, System.Text.Json.JsonSerializer.Serialize(p.Keys), p.Checks);
-            }
-            finally { BambooTrussMotion.ParallelTries = saved; }
-        }
-        t0.Restart();
-        var seq = Land(1);
-        var tSeq = t0.Elapsed.TotalSeconds;
-        t0.Restart();
-        var par = Land(4);
-        var tPar = t0.Elapsed.TotalSeconds;
-        _out.WriteLine($"landing for MD: sequential {tSeq:F1} s, parallel {tPar:F1} s — {seq.Note}");
-        Assert.Equal(seq.Note, par.Note);
-        Assert.Equal(seq.Keys, par.Keys);
-        Assert.Equal(seq.Checks, par.Checks);
     }
 
     // ---------------- layout optimiser ----------------
