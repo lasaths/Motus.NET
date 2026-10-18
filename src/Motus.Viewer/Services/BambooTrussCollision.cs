@@ -104,7 +104,8 @@ public static class BambooTrussCollision
     }
 
     static bool IsRPart(string n) => n == "neck" || n.StartsWith("R-grip", StringComparison.Ordinal);
-    static bool IsLPart(string n) => n.StartsWith("L-grip", StringComparison.Ordinal);
+    // The base tube is rigid with the L-grip body (fixed mount parts) and sits beside the object the L-grip clamps.
+    static bool IsLPart(string n) => n == "base tube" || n.StartsWith("L-grip", StringComparison.Ordinal);
 
     static bool InZone(string part, string obj, HashSet<string> zoneL, HashSet<string> zoneR) =>
         (IsLPart(part) && zoneL.Contains(obj)) || (IsRPart(part) && zoneR.Contains(obj));

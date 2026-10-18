@@ -61,7 +61,23 @@ public sealed class BambooTrussPlanner
             pv.Add(qv);
             return pv;
         }
-        return TransitPath(_q, qg);
+        var direct = TransitPath(_q, qg);
+        if (direct is null) Diag.Add($"    PTP path blocked: direct {FirstHit(_q, qg)}");
+        return direct;
+    }
+
+    /// <summary>Diagnostics: contacts at the first sample of qa→qb that fails (verify step), or "clear".</summary>
+    string FirstHit(double[] qa, double[] qb)
+    {
+        var n = Math.Max(1, (int)Math.Ceiling(K.JointDist(qa, qb) / VerifyStepDeg));
+        for (var i = 0; i <= n; i++)
+        {
+            var q = new double[5];
+            for (var k = 0; k < 5; k++) q[k] = qa[k] + (qb[k] - qa[k]) * i / n;
+            var c = ContactsNow(q, _gR, _gL, _hold, _lOn, _rOn);
+            if (c.Count > 0) return $"at {i}/{n}: {BambooIcdCell.Describe(c)}";
+        }
+        return "clear";
     }
 
     /// <summary>Optional PTP departure from a released object: one joint segment to the pose backed off 4 / 2 cm, if
