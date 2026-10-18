@@ -852,6 +852,46 @@ public class BambooTrussTests
         Assert.Equal(Build().Built, r.Order.Select(c => c.MemberId));
     }
 
+    // ---------------- layout optimiser ----------------
+
+    /// <summary>
+    /// Small case: the shipped layout, a stock moved out of reach and a stock pulled in. The out-of-reach stock is
+    /// infeasible (scene check fails), the ranking puts feasible layouts first, and the current site is restored.
+    /// </summary>
+    [Fact]
+    public void LayoutOptimiser_SmallCase_RejectsAnOutOfReachStock_AndRestoresTheSite()
+    {
+        var before = BambooTrussMotion.LayoutFingerprint;
+        var r = BambooLayoutOptimiser.Run(new BambooLayoutOptimiser.Options { FeedDx = new[] { -0.06, -0.60 } }, null, _out.WriteLine);
+        Assert.Equal(before, BambooTrussMotion.LayoutFingerprint);
+        Assert.Equal(2, r.Ranked.Count);
+        Assert.Equal(BambooLayoutOptimiser.Candidate.Of(BambooTrussLayout.Default), r.Baseline!.Layout);
+        Assert.True(r.Baseline.Feasible, r.Baseline.Summary);
+        var far = r.Ranked.Single(s => Math.Abs(s.Layout.FeedDx + 0.60) < 1e-9);
+        Assert.False(far.Feasible, far.Summary);
+        Assert.Same(r.Baseline, r.Best);
+        Assert.True(r.BaselineIsBest);
+        foreach (var l in r.Lines) _out.WriteLine(l);
+    }
+
+    /// <summary>
+    /// Warren layout, stock offset from the A column: the shipped site (−6 cm) is feasible with one relay (T2–D); with the
+    /// stock 2 cm outboard of A the scene check finds a direct site for every member, so the optimiser ranks it first.
+    /// (Scene check = necessary condition only: the build search rejects that layout — the first carry/place from the A
+    /// column is no longer Motus-clear — so the shipped layout stays.)
+    /// </summary>
+    [Fact]
+    public void LayoutOptimiser_Warren_ShippedLayoutFeasibleWithOneRelay_CloserStockRanksFirst()
+    {
+        var r = BambooLayoutOptimiser.Run(new BambooLayoutOptimiser.Options { FeedDx = new[] { -0.06, -0.02 } }, null, _out.WriteLine);
+        foreach (var l in r.Lines) _out.WriteLine(l);
+        Assert.True(r.Baseline!.Feasible);
+        Assert.Equal(1, r.Baseline.Relays);
+        Assert.Equal(-0.02, r.Best!.Layout.FeedDx, 9);
+        Assert.Equal(0, r.Best.Relays);
+        Assert.False(r.BaselineIsBest);
+    }
+
     // ---------------- reach map + scene check ----------------
 
     /// <summary>Reach map from the A column (configured clamp): the stock and triangle 1 by IK, not the far members.</summary>

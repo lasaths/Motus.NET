@@ -200,6 +200,18 @@ click or drag the track to scrub, click a block to jump to its start; Play/Pause
 - Retired visual reference: `/workspace/bamboo-viewer/next.html`
 - Motus.NET, Three.js r128, Blazor WebAssembly
 
+### Layout optimiser (P5)
+
+- `BambooLayoutOptimiser.Run(options)`: grid over stock offset from the A column / distance off the truss plane / yaw,
+  (cane, node gap) pairs and anchor clamp height around the current site (`SiteDefaults.Make` arguments), each scored
+  with the fail-fast scene check: feasible (every member reachable) first, then fewest relays, then the weakest
+  member's direct-site count, then the total. The site is restored afterwards. `Options.Coarse` is ≈ 3× faster but
+  under-counts sites; use the default (planner) resolution for decisions.
+- Warren sweep (stock dx −0.10/−0.06/−0.02 × z 0.28/0.32/0.36 × clamp 0.07/0.09/0.11 m, 27 layouts, ≈ 8.5 s each):
+  every layout feasible; dx −0.02 removes the T2–D relay by the scene check, but the build search then cannot place
+  the first member (carry/place from the A column not Motus-clear). The shipped layout (dx −0.06, z 0.32, clamp 0.09)
+  is kept: feasible with one relay, weakest direct member 5 sites.
+
 ### Structure graph and build search (P4)
 
 - `BambooStructureGraph`: nodes (with connectors), members as edges, anchors (nodes with a clamp column). `ExistingNodes`,
