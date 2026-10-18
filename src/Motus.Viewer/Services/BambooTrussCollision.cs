@@ -83,16 +83,61 @@ public static class BambooTrussCollision
         if (marginM <= 0) return cell.PoseContacts(qDeg, gR, gL, held, env, allowed, max);
         var clamped = $"{lOn}|{rOn}".Split('|', StringSplitOptions.RemoveEmptyEntries);
         var grown = env.Select(o => clamped.Contains(o.Name) ? o : Inflate(o, marginM)).ToList();
-        if (held is null) return cell.PoseContacts(qDeg, gR, gL, held, grown, allowed, max);
-        var all = cell.PoseContacts(qDeg, gR, gL, held, grown, allowed, max + 8);
-        var kept = all.Where(c => !IsPegRest(c)).ToList();
+        // Grasp zone: a gripper whose slot axis lies on an object's axis (within the margin) is grasping / releasing /
+        // sliding on it — its own parts may be closer than the margin to that object (still never in exact contact).
+        var (lw, rw) = BambooGripKinematics.Grippers(baseGripper == "R" ? BambooGripKinematics.Gripper.R : BambooGripKinematics.Gripper.L, baseWorld, qDeg);
+        var zoneL = GraspZone(BambooTrussPlanner.ToMotus(lw), env, marginM);
+        var zoneR = GraspZone(BambooTrussPlanner.ToMotus(rw), env, marginM);
+        bool Exempt(CollisionContact c) => IsPegRest(c) && held is not null || InZone(c.BodyA, c.BodyB, zoneL, zoneR) || InZone(c.BodyB, c.BodyA, zoneL, zoneR);
+        if (zoneL.Count == 0 && zoneR.Count == 0 && held is null) return cell.PoseContacts(qDeg, gR, gL, held, grown, allowed, max);
+        var all = cell.PoseContacts(qDeg, gR, gL, held, grown, allowed, max + 16);
+        var kept = all.Where(c => !Exempt(c)).ToList();
         if (kept.Count < all.Count && kept.Count < max)
         {
-            // The resting contact is exempt from the margin only: the held cane must still not touch a peg exactly.
-            var pegs = env.Where(o => o.Name.StartsWith(PegPrefix, StringComparison.Ordinal)).ToList();
-            kept.AddRange(cell.PoseContacts(qDeg, gR, gL, held, pegs, allowed, max).Where(IsPegRest));
+            // Exempt from the margin only: those objects must still not be touched exactly.
+            var names = all.Where(Exempt).SelectMany(c => new[] { c.BodyA, c.BodyB }).ToHashSet(StringComparer.Ordinal);
+            var exact = env.Where(o => names.Contains(o.Name)).ToList();
+            kept.AddRange(cell.PoseContacts(qDeg, gR, gL, held, exact, allowed, max));
         }
         return kept.Take(max).ToList();
+    }
+
+    static bool IsRPart(string n) => n == "neck" || n.StartsWith("R-grip", StringComparison.Ordinal);
+    static bool IsLPart(string n) => n.StartsWith("L-grip", StringComparison.Ordinal);
+
+    static bool InZone(string part, string obj, HashSet<string> zoneL, HashSet<string> zoneR) =>
+        (IsLPart(part) && zoneL.Contains(obj)) || (IsRPart(part) && zoneR.Contains(obj));
+
+    /// <summary>Objects (cane / column meshes) whose axis the gripper's slot axis (local Z of <paramref name="g"/>, Motus) lies on.</summary>
+    static HashSet<string> GraspZone(double[] g, IReadOnlyList<CollisionObject> env, double marginM)
+    {
+        var set = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var o in env)
+        {
+            if (o.Shape != CollisionShape.Mesh || o.MeshAabbMin is null) continue;
+            var (c, u, h) = AxisOf(o);
+            double dx = g[3] - c[0], dy = g[7] - c[1], dz = g[11] - c[2];
+            var along = dx * u[0] + dy * u[1] + dz * u[2];
+            if (Math.Abs(along) > h + 0.005) continue;
+            double px = dx - along * u[0], py = dy - along * u[1], pz = dz - along * u[2];
+            if (Math.Sqrt(px * px + py * py + pz * pz) > marginM + 0.001) continue;
+            if (Math.Abs(g[2] * u[0] + g[6] * u[1] + g[10] * u[2]) < Math.Cos(10 * Math.PI / 180)) continue;
+            set.Add(o.Name);
+        }
+        return set;
+    }
+
+    /// <summary>Long axis of a mesh (local AABB, longest extent): centre, unit direction and half length, world (Motus).</summary>
+    static (double[] C, double[] U, double H) AxisOf(CollisionObject o)
+    {
+        var mn = o.MeshAabbMin!; var mx = o.MeshAabbMax!;
+        var k = 0;
+        for (var i = 1; i < 3; i++) if (mx[i] - mn[i] > mx[k] - mn[k]) k = i;
+        var m = Transforms.FromFrame(o.Pose);
+        var lc = new[] { (mn[0] + mx[0]) / 2, (mn[1] + mx[1]) / 2, (mn[2] + mx[2]) / 2 };
+        var c = new[] { m[0] * lc[0] + m[1] * lc[1] + m[2] * lc[2] + m[3], m[4] * lc[0] + m[5] * lc[1] + m[6] * lc[2] + m[7], m[8] * lc[0] + m[9] * lc[1] + m[10] * lc[2] + m[11] };
+        var u = new[] { m[k], m[4 + k], m[8 + k] };
+        return (c, u, (mx[k] - mn[k]) / 2);
     }
 
     const string PegPrefix = "store-peg-";
