@@ -838,19 +838,26 @@ public partial class BambooTrussTests
     [Fact]
     public void BuildSearch_DerivesTheShippedSequence_EveryChoicePlannerConfirmed()
     {
+        var logFile = System.Environment.GetEnvironmentVariable("BAMBOO_SEARCH_LOGFILE");
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        void SearchLog(string s)
+        {
+            _out.WriteLine(s);
+            if (!string.IsNullOrEmpty(logFile)) File.AppendAllText(logFile, $"{clock.Elapsed.TotalSeconds,7:F0}s {s}\n");
+        }
         BambooTrussMotion.UseCell(Cell);
         var ckpt = Path.Combine(Path.GetTempPath(), $"bamboo-search-{Guid.NewGuid():N}.json");
         try
         {
         var parallel = System.Environment.GetEnvironmentVariable("BAMBOO_SEARCH_SEQUENTIAL") != "1";
-        var r = BambooBuildSearch.Run(Cell, new BambooBuildSearch.Options { CheckpointPath = ckpt, CellFactory = parallel ? () => BambooTrussMotion.FixtureCell()! : null }, _out.WriteLine);
+        var r = BambooBuildSearch.Run(Cell, new BambooBuildSearch.Options { CheckpointPath = ckpt, CellFactory = parallel ? () => BambooTrussMotion.FixtureCell()! : null }, SearchLog);
         Assert.True(r.Complete, string.Join("\n", r.Log));
         // Checkpoint / resume (P6): the saved choices are the result; resuming from them re-confirms the same sequence
         // without re-trying any rejected alternative.
         var saved = BambooBuildSearch.LoadCheckpoint(ckpt);
         Assert.NotNull(saved);
         Assert.Equal(r.Order, saved);
-        var resumed = BambooBuildSearch.Run(Cell, new BambooBuildSearch.Options { ResumeAt = saved }, _out.WriteLine);
+        var resumed = BambooBuildSearch.Run(Cell, new BambooBuildSearch.Options { ResumeAt = saved }, SearchLog);
         Assert.True(resumed.Complete);
         Assert.Equal(0, resumed.Rejected);
         Assert.Equal(r.Order, resumed.Order);
