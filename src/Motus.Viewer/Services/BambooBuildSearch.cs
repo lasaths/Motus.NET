@@ -145,7 +145,7 @@ public static class BambooBuildSearch
                 var (id, mode, relay, _) = ordered[oi];
                 var cp = p.SaveDeep();
                 Choice? choice;
-                if (spec is not null)
+                if (spec is not null && spec[oi].Logs is not null) // null = cancelled speculation: confirm it now
                 {
                     var (c, logs, post) = spec[oi];
                     foreach (var l in logs) Log(l);
@@ -179,18 +179,26 @@ public static class BambooBuildSearch
             if (o.CellFactory is null || o.Workers <= 1 || opts.Count <= 1) return null;
             var start = p.SaveTransfer();
             var res = new (Choice?, List<string>, BambooTrussPlanner.Transfer?)[opts.Count];
+            var cts = opts.Select(_ => new CancellationTokenSource()).ToArray();
+            var gate = new object();
             Parallel.For(0, opts.Count, new ParallelOptions { MaxDegreeOfParallelism = o.Workers }, i =>
             {
+                if (cts[i].IsCancellationRequested) return;
                 if (!pool.TryTake(out var w)) w = new BambooTrussPlanner(o.CellFactory());
                 try
                 {
                     w.Adopt(start);
+                    w.Cancel = cts[i].Token;
                     var logs = new List<string>();
                     var c = Confirm(w, opts[i].Id, opts[i].Mode, opts[i].Relay, logs.Add);
                     res[i] = (c, logs, c is null ? null : w.SaveTransfer());
+                    // Options after a confirmed one can never be chosen first: stop them.
+                    if (c is not null) lock (gate) for (var j = i + 1; j < opts.Count; j++) cts[j].Cancel();
                 }
-                finally { pool.Add(w); }
+                catch (OperationCanceledException) { }
+                finally { w.Cancel = default; pool.Add(w); }
             });
+            // Only options after the first confirmed one can be cancelled; those are never read.
             return res.ToList();
         }
 

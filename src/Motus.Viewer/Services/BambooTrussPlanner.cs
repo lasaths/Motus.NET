@@ -206,8 +206,12 @@ public sealed class BambooTrussPlanner
 
     /// <summary>When set, every pose check is appended (tests only; off in production).</summary>
     public List<PoseVerdict>? VerdictLog { get; set; }
+    /// <summary>Parallel search: a speculative branch that can no longer be chosen is abandoned at its next pose check.</summary>
+    public CancellationToken Cancel { get; set; }
+
     bool PoseOk(double[] q, double gR, double gL, int hold, string? lOn, string? rOn)
     {
+        Cancel.ThrowIfCancellationRequested();
         Checks++;
         PoseWatch.Start();
         var ok = BambooTrussCollision.Contacts(_cell, BaseName, _baseWorld, q, gR, gL, hold == 1 ? _held : null, Env(hold), lOn, rOn, 1, Constraints.ClearanceMarginM).Count == 0;
