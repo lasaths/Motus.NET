@@ -84,7 +84,27 @@ public sealed class BambooTrussPlanner
     public sealed record GripRecord(string Label, string Gripper, string On, double PosM, double AxisDeg);
 
     readonly BambooIcdCell _cell;
-    readonly Random _rng = new(11);
+    readonly ReplayRandom _rng = new(11);
+
+    /// <summary>
+    /// Seeded random stream whose position is part of a deep checkpoint: rolling back also rewinds the stream, so a
+    /// branch that was tried and abandoned leaves no trace and a re-run of the same calls is bit-identical.
+    /// </summary>
+    sealed class ReplayRandom(int seed)
+    {
+        Random _r = new(seed);
+        readonly List<int> _log = new(); // -1 = NextDouble, otherwise Next(max)
+        public int Position => _log.Count;
+        public double NextDouble() { _log.Add(-1); return _r.NextDouble(); }
+        public int Next(int max) { _log.Add(max); return _r.Next(max); }
+        public void Rewind(int position)
+        {
+            if (position >= _log.Count) return;
+            _r = new Random(seed);
+            for (var i = 0; i < position; i++) { if (_log[i] < 0) _r.NextDouble(); else _r.Next(_log[i]); }
+            _log.RemoveRange(position, _log.Count - position);
+        }
+    }
 
     K.Gripper _base = K.Gripper.L;
     double[] _baseWorld = BambooTrussLayout.StartBase;
@@ -641,6 +661,10 @@ public sealed class BambooTrussPlanner
                 foreach (var qp in sols)
                 {
                     if (!PoseOk(qp, _gR, _gL, 1, _lOn, _rOn)) { Diag.Add($"    place pose collides: {BambooIcdCell.Describe(ContactsNow(qp, _gR, _gL, 1, _lOn, _rOn))}"); continue; }
+                    // The cane lands where jaw FK ∘ held offset puts it — grasp and place residuals add up, so the
+                    // released pose itself must be within the grip tolerance of its design pose.
+                    var (offM, offDeg) = OffDesign(Transforms.Multiply(ToMotus(K.Free(_base, _baseWorld, qp)), H), designM);
+                    if (offM > K.GripPosTolM || offDeg > K.GripAxisTolDeg) { Diag.Add($"    released cane {offM * 1000:F3} mm / {offDeg:F3}° off design"); continue; }
                     // Bring the cane in along the jaw's own −Y onto its design line (pre-place backed off 4 cm).
                     List<double[]> down;
                     if (Ptp) down = new List<double[]> { qp }; // PTP carry straight to the place configuration
@@ -685,7 +709,7 @@ public sealed class BambooTrussPlanner
                     _activeReleased = Transforms.Multiply(ToMotus(rFrame), H);
                     var openROn = $"{BambooIcdCell.Strut}|placed-{member.Id}";
                     if (!SegOk(qp, qp, _gR, BambooTrussLayout.JawOpenMm, _gL, _gL, 1, 2, _lOn, openROn, VerifyStepDeg))
-                    { _activeReleased = null; continue; }
+                    { _activeReleased = null; Restore(placeSnap, placeKeys); _rOn = placeROn; continue; }
                     RecordGrip("Lower", "R", target, rFrame);
                     RecordPlacement(member, designM);
                     _rOn = openROn;
@@ -719,10 +743,16 @@ public sealed class BambooTrussPlanner
 
     void RecordPlacement(BambooTrussLayout.MemberDef member, double[] designM)
     {
-        var r = _activeReleased!;
+        var (m, deg) = OffDesign(_activeReleased!, designM);
+        Grips.Add(new GripRecord($"{_cycle}:Placed", "cane", member.Id, m, deg));
+    }
+
+    /// <summary>Position (m) and cane-axis (°) offset of a released cane pose from its design pose (4×4 row-major).</summary>
+    static (double M, double Deg) OffDesign(double[] r, double[] designM)
+    {
         var dx = r[3] - designM[3]; var dy = r[7] - designM[7]; var dz = r[11] - designM[11];
         var dot = Math.Abs(r[2] * designM[2] + r[6] * designM[6] + r[10] * designM[10]);
-        Grips.Add(new GripRecord($"{_cycle}:Placed", "cane", member.Id, Math.Sqrt(dx * dx + dy * dy + dz * dz), Math.Acos(Math.Min(1, dot)) * 180 / Math.PI));
+        return (Math.Sqrt(dx * dx + dy * dy + dz * dz), Math.Acos(Math.Min(1, dot)) * 180 / Math.PI);
     }
 
     /// <summary>
@@ -1425,8 +1455,9 @@ public sealed class BambooTrussPlanner
     public sealed class DeepCheckpoint
     {
         internal DeepCheckpoint(object state, List<BambooIcdMotion.MotionKey> keys, List<(string, int, int)> cycles,
-            List<GripRecord> grips, List<string> notes, List<(string, double[])> placed, string cycle)
-        { State = state; Keys = keys; Cycles = cycles; Grips = grips; Notes = notes; Placed = placed; Cycle = cycle; }
+            List<GripRecord> grips, List<string> notes, List<(string, double[])> placed, string cycle, int rng)
+        { State = state; Keys = keys; Cycles = cycles; Grips = grips; Notes = notes; Placed = placed; Cycle = cycle; Rng = rng; }
+        internal int Rng { get; }
         internal object State { get; }
         internal List<BambooIcdMotion.MotionKey> Keys { get; }
         internal List<(string, int, int)> Cycles { get; }
@@ -1438,7 +1469,7 @@ public sealed class BambooTrussPlanner
     }
 
     public DeepCheckpoint SaveDeep() => new(Snapshot(), Keys.ToList(), CycleKeys.ToList(), Grips.ToList(), Notes.ToList(),
-        _placed.Select(p => (p.Name, p.World)).ToList(), _cycle);
+        _placed.Select(p => (p.Name, p.World)).ToList(), _cycle, _rng.Position);
 
     public void RollbackDeep(DeepCheckpoint c)
     {
@@ -1448,6 +1479,7 @@ public sealed class BambooTrussPlanner
         Notes.Clear(); Notes.AddRange(c.Notes);
         _placed.Clear(); _placed.AddRange(c.Placed);
         _cycle = c.Cycle;
+        _rng.Rewind(c.Rng);
         Restore((State)c.State, c.Keys.Count);
         Error = "";
     }

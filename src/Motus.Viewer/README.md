@@ -199,3 +199,21 @@ click or drag the track to scrub, click a block to jump to its start; Play/Pause
 
 - Retired visual reference: `/workspace/bamboo-viewer/next.html`
 - Motus.NET, Three.js r128, Blazor WebAssembly
+
+### Structure graph and build search (P4)
+
+- `BambooStructureGraph`: nodes (with connectors), members as edges, anchors (nodes with a clamp column). `ExistingNodes`,
+  `Frontier` (members that can be started), `AnchoredRigidGroups`, `FixedNodes`, `Fixed` (walkable members: both ends in
+  one rigid group that reaches an anchor). `BambooTrussLayout.FixedBothEnds` & co. delegate to it.
+- `BambooBuildSearch.Run(cell)`: depth-first over build states. At each state the frontier members are ranked by the
+  cheapest mode the reach map allows with the *real* fixed set of that state — direct from where the arm stands, one
+  targeted-landing walk, or one relay (candidates: the scene check's single-park options, 11 for T2–D) — far members
+  first. Every choice is confirmed with the real planner (Motus-clear, PTP) and rolled back, random stream included,
+  if it or anything after it fails. The default task list (`BambooTrussMotion.ShippedTasks`) is the search result:
+  the build-time plan carries it (`PlanCache.Tasks`); on a layout change the search runs live.
+- Planner: a deep checkpoint now also rewinds the RRT random stream, so a tried-and-abandoned branch leaves no trace
+  and re-planning the searched sequence is identical. A placement is also rejected when the released cane itself
+  (jaw FK ∘ held offset — grasp and place residuals add) is off its design pose by more than 0.5 mm / 0.5°.
+- Shipped (`warren-pit-3-search`): AT1 → T1M → AM → land → T1T2 → land → MD → MT2 → land → park T2D in T1/z+ →
+  land → re-grasp → T2D. 7/7, 4 walks, 8 base swaps, one relay.
+
