@@ -842,7 +842,8 @@ public partial class BambooTrussTests
         var ckpt = Path.Combine(Path.GetTempPath(), $"bamboo-search-{Guid.NewGuid():N}.json");
         try
         {
-        var r = BambooBuildSearch.Run(Cell, new BambooBuildSearch.Options { CheckpointPath = ckpt }, _out.WriteLine);
+        var parallel = System.Environment.GetEnvironmentVariable("BAMBOO_SEARCH_SEQUENTIAL") != "1";
+        var r = BambooBuildSearch.Run(Cell, new BambooBuildSearch.Options { CheckpointPath = ckpt, CellFactory = parallel ? () => BambooTrussMotion.FixtureCell()! : null }, _out.WriteLine);
         Assert.True(r.Complete, string.Join("\n", r.Log));
         // Checkpoint / resume (P6): the saved choices are the result; resuming from them re-confirms the same sequence
         // without re-trying any rejected alternative.
@@ -855,6 +856,8 @@ public partial class BambooTrussTests
         Assert.Equal(r.Order, resumed.Order);
         Assert.Equal(System.Text.Json.JsonSerializer.Serialize(r.Tasks), System.Text.Json.JsonSerializer.Serialize(resumed.Tasks));
         _out.WriteLine($"search {r.Seconds:F0} s ({r.Rejected} rejected), resumed {resumed.Seconds:F0} s");
+        // The search (parallel or sequential) derives exactly the tasks the shipped plan was built from.
+        Assert.Equal(System.Text.Json.JsonSerializer.Serialize(BambooTrussMotion.ShippedTasks()), System.Text.Json.JsonSerializer.Serialize(r.Tasks));
         Assert.Equal(new[] { "AT1", "T1M", "AM", "T1T2", "MT2", "MD", "T2D" }, r.Order.Select(c => c.MemberId).ToArray());
         Assert.Equal(new[] { "Direct", "Direct", "Direct", "Land", "Land", "Land", "Relay" }, r.Order.Select(c => c.Mode.ToString()).ToArray());
         var relay = r.Order[^1].Relay!;

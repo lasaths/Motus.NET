@@ -120,6 +120,25 @@ public sealed class BambooTrussPlanner
             for (var i = 0; i < position; i++) { if (_log[i] < 0) _r.NextDouble(); else _r.Next(_log[i]); }
             _log.RemoveRange(position, _log.Count - position);
         }
+        public int[] Log() => _log.ToArray();
+        /// <summary>Become the stream that made exactly these calls (moves a branch between planner instances).</summary>
+        public void Adopt(int[] log)
+        {
+            _r = new Random(seed);
+            _log.Clear();
+            foreach (var m in log) { if (m < 0) _r.NextDouble(); else _r.Next(m); _log.Add(m); }
+        }
+    }
+
+    /// <summary>Planner state plus random stream, transferable to another planner on an equivalent cell (parallel search).</summary>
+    public sealed record Transfer(DeepCheckpoint State, int[] Rng);
+
+    public Transfer SaveTransfer() => new(SaveDeep(), _rng.Log());
+
+    public void Adopt(Transfer t)
+    {
+        _rng.Adopt(t.Rng);
+        RollbackDeep(t.State);
     }
 
     K.Gripper _base = K.Gripper.L;
@@ -1530,6 +1549,7 @@ public sealed class BambooTrussPlanner
         _cycle = c.Cycle;
         _rng.Rewind(c.Rng);
         Restore((State)c.State, c.Keys.Count);
+        _envKey = int.MinValue; // the env cache key (hold, placed count, active) cannot tell two placed sets apart
         Error = "";
     }
 
