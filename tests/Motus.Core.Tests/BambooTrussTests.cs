@@ -10,7 +10,7 @@ namespace Motus.Core.Tests;
 /// re-derives every claim from the keys alone: one gripper always clamped on a real fixed object as the IK base,
 /// no rigid moves of the whole robot, FK-exact grips, and a Motus-clear full path.
 /// </summary>
-public class BambooTrussTests
+public partial class BambooTrussTests
 {
     private readonly Xunit.Abstractions.ITestOutputHelper _out;
     public BambooTrussTests(Xunit.Abstractions.ITestOutputHelper output) { _out = output; }

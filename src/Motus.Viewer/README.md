@@ -213,6 +213,15 @@ click or drag the track to scrub, click a block to jump to its start; Play/Pause
 - `LayoutFingerprint` also covers the site extras, the scene description, `MotionConstraints.Current` and the planner
   search tunables, so changing any of them invalidates the shipped plan.
 
+### Dense collision audit
+
+- `CollisionAudit_Dense_ShippedAndFreshPlans_NoHit` (tests, `Category=Slow`, ≈ 5 min): runs the viewer's hit-stop scan
+  over the shipped and the freshly planned Warren plan, then re-checks every key segment 4× finer than the planner
+  (joint and jaw step ÷ 4; keys = swaps / grasps / releases included) with Motus collision: robot links, self, both
+  grippers, mount, carried cane vs ground, pit, columns, connectors, placed / parked canes, stock. Fails on any hit or
+  a clearance below `MotionConstraints.ClearanceMarginM`. Clearance is estimated by inflating every obstacle that is
+  not being clamped by 1/2/5/10 mm. Skip it in quick runs with `--filter "Category!=Slow"`.
+
 ### Layout optimiser (P5)
 
 - `BambooLayoutOptimiser.Run(options)`: grid over stock offset from the A column / distance off the truss plane / yaw,
