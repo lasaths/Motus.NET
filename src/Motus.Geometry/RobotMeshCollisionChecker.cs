@@ -156,15 +156,42 @@ public sealed class RobotMeshCollisionChecker : ICollisionChecker, ICollisionCon
         if (!ToolSceneCollisionFree(state, scene, sink, max)) { clear = false; if (Full(sink, max)) return false; }
         if (_attached.Count > 0 && !AttachedBodiesCollisionFree(state, scene, linkMats, sink, max)) { clear = false; if (Full(sink, max)) return false; }
 
+        // Per-pose link envelope spheres (world centre + radius), computed once instead of once per (object, link).
+        if (_pc.Length < _links.Count * 4) _pc = new double[_links.Count * 4];
+        for (var li = 0; li < _links.Count; li++)
+        {
+            var en = _links[li];
+            if (en.LinkIndex < 0 || en.LinkIndex >= linkMats.Length) { _pc[li * 4 + 3] = -1; continue; }
+            ComposeWorldInto(_worldScratch, _baseM, linkMats[en.LinkIndex], en.Geometry.Pose);
+            EnvelopeCenter(en, _worldScratch, out _pc[li * 4], out _pc[li * 4 + 1], out _pc[li * 4 + 2]);
+            _pc[li * 4 + 3] = en.EnvelopeRadius;
+        }
         foreach (var obj in scene.Objects)
         {
-            foreach (var entry in _links)
+            // Conservative prefilter: EnvelopeMayHit is "envelope sphere meets the object", and the object lies inside its
+            // (outward-padded) world AABB, so a sphere that misses the AABB cannot hit — the pair is skipped exactly.
+            var box = ReferencePath ? null : WorldAabb(obj);
+            var objAllowed = ReferencePath || scene.MayHaveAllowedPair(obj.Name);
+            for (var li = 0; li < _links.Count; li++)
             {
+                var entry = _links[li];
                 if (entry.LinkIndex < 0 || entry.LinkIndex >= linkMats.Length) continue;
-                if (scene.IsPairAllowed(CollisionBodies.RobotLink(entry.LinkIndex), obj.Name))
-                    continue;
-                if (scene.IsPairAllowed(entry.Geometry.Name, obj.Name))
-                    continue;
+                if (box is not null)
+                {
+                    var r = _pc[li * 4 + 3] + AabbPad;
+                    double cx = _pc[li * 4], cy = _pc[li * 4 + 1], cz = _pc[li * 4 + 2];
+                    var ddx = Math.Max(Math.Max(box[0] - cx, cx - box[3]), 0);
+                    var ddy = Math.Max(Math.Max(box[1] - cy, cy - box[4]), 0);
+                    var ddz = Math.Max(Math.Max(box[2] - cz, cz - box[5]), 0);
+                    if (ddx * ddx + ddy * ddy + ddz * ddz > r * r) continue;
+                }
+                if (objAllowed)
+                {
+                    if (scene.IsPairAllowed(CollisionBodies.RobotLink(entry.LinkIndex), obj.Name))
+                        continue;
+                    if (scene.IsPairAllowed(entry.Geometry.Name, obj.Name))
+                        continue;
+                }
                 ComposeWorldInto(_worldScratch, _baseM, linkMats[entry.LinkIndex], entry.Geometry.Pose);
                 if (!CollisionGeometry.EnvelopeMayHit(entry.Geometry, _worldScratch, entry.EnvelopeRadius, obj, _meshBvhCache, _scratch))
                     continue;
@@ -178,6 +205,49 @@ public sealed class RobotMeshCollisionChecker : ICollisionChecker, ICollisionCon
             }
         }
         return clear;
+    }
+
+    private const double AabbPad = 1e-9;
+
+    /// <summary>
+    /// Tests only: run the pre-speedup reference path on this thread (no broadphase prefilter, no allowed-name shortcut,
+    /// no memo). Used by the checker-equivalence test to prove verdicts are unchanged.
+    /// </summary>
+    [ThreadStatic] public static bool ReferencePath;
+    private double[] _pc = Array.Empty<double>();
+    private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<CollisionObject, double[]?[]> Aabbs = new();
+
+    /// <summary>
+    /// World AABB of an obstacle (min xyz, max xyz), padded outward by <see cref="AabbPad"/>; null = unbounded (plane)
+    /// or unknown, i.e. no prefilter. Objects are immutable, so the box is cached per instance.
+    /// </summary>
+    internal static double[]? WorldAabb(CollisionObject o)
+    {
+        if (Aabbs.TryGetValue(o, out var c)) return c[0];
+        double[]? r = null;
+        var m = Transforms.FromFrame(o.Pose);
+        void Corners(double ax, double ay, double az, double bx, double by, double bz, double pad)
+        {
+            r = new[] { double.MaxValue, double.MaxValue, double.MaxValue, double.MinValue, double.MinValue, double.MinValue };
+            for (var i = 0; i < 8; i++)
+            {
+                double x = (i & 1) == 0 ? ax : bx, y = (i & 2) == 0 ? ay : by, z = (i & 4) == 0 ? az : bz;
+                Transforms.TransformPointInto(m, x, y, z, out var wx, out var wy, out var wz);
+                r[0] = Math.Min(r[0], wx); r[1] = Math.Min(r[1], wy); r[2] = Math.Min(r[2], wz);
+                r[3] = Math.Max(r[3], wx); r[4] = Math.Max(r[4], wy); r[5] = Math.Max(r[5], wz);
+            }
+            for (var k = 0; k < 3; k++) { r[k] -= pad + AabbPad; r[k + 3] += pad + AabbPad; }
+        }
+        switch (o.Shape)
+        {
+            case CollisionShape.Mesh when o.MeshAabbMin is not null && o.MeshAabbMax is not null:
+                Corners(o.MeshAabbMin[0], o.MeshAabbMin[1], o.MeshAabbMin[2], o.MeshAabbMax[0], o.MeshAabbMax[1], o.MeshAabbMax[2], 0); break;
+            case CollisionShape.Box: Corners(-o.ExtentX, -o.ExtentY, -o.ExtentZ, o.ExtentX, o.ExtentY, o.ExtentZ, 0); break;
+            case CollisionShape.Sphere: Corners(0, 0, 0, 0, 0, 0, o.ExtentX); break;
+            case CollisionShape.Capsule: Corners(0, 0, -o.ExtentY, 0, 0, o.ExtentY, o.ExtentX); break;
+        }
+        Aabbs.AddOrUpdate(o, new[] { r });
+        return r;
     }
 
     private static bool Full(List<CollisionContact>? sink, int max) => sink is null || sink.Count >= max;

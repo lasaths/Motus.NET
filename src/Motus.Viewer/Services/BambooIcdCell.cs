@@ -565,6 +565,58 @@ public sealed class BambooIcdCell
     public IReadOnlyList<CollisionContact> MountEnvironmentContacts(double gLmm, IReadOnlyList<CollisionObject> environment,
         IReadOnlyList<(string A, string B)> allowed)
     {
+        // Exact memo: the answer is a pure function of the mount pose (bitwise), the jaw value (bitwise), the obstacle
+        // instances (immutable, by reference), the allowed pairs and the part checkers in use (generation). While the
+        // L-grip is the clamped base the mount does not move, so almost every pose reuses the previous answer.
+        if (RobotMeshCollisionChecker.ReferencePath) return MountEnvironmentContactsCore(gLmm, environment, allowed);
+        var key = new MountMemoKey(MountWorld, gLmm, environment, allowed, _mountCheckerGeneration);
+        if (_mountMemo.TryGetValue(key, out var memo)) return memo;
+        var res = MountEnvironmentContactsCore(gLmm, environment, allowed).ToArray();
+        if (_mountMemo.Count > 4096) _mountMemo.Clear();
+        _mountMemo[key] = res;
+        return res;
+    }
+
+    readonly Dictionary<MountMemoKey, CollisionContact[]> _mountMemo = new();
+    int _mountCheckerGeneration;
+
+    sealed class MountMemoKey : IEquatable<MountMemoKey>
+    {
+        readonly long[] _pose = new long[16];
+        readonly long _g;
+        readonly CollisionObject[] _env;
+        readonly (string A, string B)[] _allowed;
+        readonly int _gen, _hash;
+
+        public MountMemoKey(double[] mount, double gLmm, IReadOnlyList<CollisionObject> env, IReadOnlyList<(string A, string B)> allowed, int gen)
+        {
+            var h = new HashCode();
+            for (var i = 0; i < 16; i++) { _pose[i] = BitConverter.DoubleToInt64Bits(mount[i]); h.Add(_pose[i]); }
+            _g = BitConverter.DoubleToInt64Bits(gLmm); h.Add(_g);
+            _env = env.ToArray();
+            foreach (var o in _env) h.Add(System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(o));
+            _allowed = allowed.ToArray();
+            foreach (var a in _allowed) { h.Add(a.A); h.Add(a.B); }
+            _gen = gen; h.Add(gen);
+            _hash = h.ToHashCode();
+        }
+
+        public override int GetHashCode() => _hash;
+        public override bool Equals(object? obj) => obj is MountMemoKey k && Equals(k);
+        public bool Equals(MountMemoKey? k)
+        {
+            if (k is null || k._hash != _hash || k._g != _g || k._gen != _gen || k._env.Length != _env.Length || k._allowed.Length != _allowed.Length) return false;
+            if (!k._pose.AsSpan().SequenceEqual(_pose)) return false;
+            for (var i = 0; i < _env.Length; i++) if (!ReferenceEquals(k._env[i], _env[i])) return false;
+            for (var i = 0; i < _allowed.Length; i++)
+                if (!string.Equals(k._allowed[i].A, _allowed[i].A, StringComparison.Ordinal) || !string.Equals(k._allowed[i].B, _allowed[i].B, StringComparison.Ordinal)) return false;
+            return true;
+        }
+    }
+
+    List<CollisionContact> MountEnvironmentContactsCore(double gLmm, IReadOnlyList<CollisionObject> environment,
+        IReadOnlyList<(string A, string B)> allowed)
+    {
         var result = new List<CollisionContact>();
         if (environment.Count == 0) return result;
         var baseFrame = new BaseFrame(Transforms.ToFrame(MountWorld));
@@ -582,7 +634,7 @@ public sealed class BambooIcdCell
                 var body = new AttachedBody(local.Name, pose,
                     CollisionObject.Box(local.Name, Frame.Identity, local.ExtentX, local.ExtentY, local.ExtentZ));
                 chk = new BaseFrameAttachCollisionChecker(NoInnerCollision.Instance, new[] { body });
-                if (_mountPartCheckers.Count > 256) _mountPartCheckers.Clear();
+                if (_mountPartCheckers.Count > 256) { _mountPartCheckers.Clear(); _mountCheckerGeneration++; }
                 _mountPartCheckers[(gKey, local.Name)] = chk;
             }
             foreach (var obj in environment)

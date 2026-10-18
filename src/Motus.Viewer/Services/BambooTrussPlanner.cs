@@ -180,12 +180,20 @@ public sealed class BambooTrussPlanner
     double[] LNow(IReadOnlyList<double> q) => LWorld(BaseName, _baseWorld, q);
 
     public readonly System.Diagnostics.Stopwatch PoseWatch = new();
+
+    /// <summary>One pose check with everything needed to replay it (tests: checker equivalence).</summary>
+    public sealed record PoseVerdict(double[] Q, double GR, double GL, int Hold, string? LOn, string? ROn, string Base,
+        double[] BaseWorld, CollisionObject[] Env, Frame? Held, bool Ok);
+
+    /// <summary>When set, every pose check is appended (tests only; off in production).</summary>
+    public List<PoseVerdict>? VerdictLog { get; set; }
     bool PoseOk(double[] q, double gR, double gL, int hold, string? lOn, string? rOn)
     {
         Checks++;
         PoseWatch.Start();
         var ok = BambooTrussCollision.Contacts(_cell, BaseName, _baseWorld, q, gR, gL, hold == 1 ? _held : null, Env(hold), lOn, rOn, 1, Constraints.ClearanceMarginM).Count == 0;
         PoseWatch.Stop();
+        VerdictLog?.Add(new PoseVerdict(q.ToArray(), gR, gL, hold, lOn, rOn, BaseName, _baseWorld.ToArray(), Env(hold).ToArray(), hold == 1 ? _held : null, ok));
         return ok;
     }
 
