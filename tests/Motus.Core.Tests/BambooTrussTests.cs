@@ -1117,8 +1117,19 @@ public partial class BambooTrussTests
         AppContext.BaseDirectory, "..", "..", "..", "..", "..", "src", "Motus.Viewer", "Services", "BambooTrussDefaultPlan.json"));
 
     /// <summary>
+    /// Platform that generated the shipped plan (CI ubuntu-latest / dev boxes: Linux x64). The planner is a sampling
+    /// search over dense collision checks: last-ulp differences in libm Sin/Cos/Atan2 between glibc, the Windows CRT and
+    /// Apple libm (arm64) are amplified (IK stopping point → via search → a collision verdict at the 2 mm boundary),
+    /// so the live plan on macOS/Windows is a different — equally valid — plan (at 106ebec macOS planned two extra PTP
+    /// vias at T2D). Exact plan identity is therefore asserted only here; every platform validates the shipped plan
+    /// itself (<see cref="ShippedDefaultPlan_ReplaysCleanly_OnEveryPlatform"/>) and its own live plan (the other tests).
+    /// </summary>
+    private static bool IsPlanReferencePlatform => OperatingSystem.IsLinux() && System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture == System.Runtime.InteropServices.Architecture.X64;
+
+    /// <summary>
     /// The page loads the default plan from an embedded build-time copy (live planning takes minutes in WASM).
-    /// It must be exactly what the planner produces now. Regenerate with BAMBOO_TRUSS_WRITE_PLAN=1.
+    /// On the reference platform it must be what the planner produces now (structurally identical, numbers within
+    /// 1e-6). Regenerate with BAMBOO_TRUSS_WRITE_PLAN=1 on Linux x64.
     /// </summary>
     [Fact]
     public void ShippedDefaultPlan_IsIdenticalToLivePlanning()
@@ -1126,38 +1137,71 @@ public partial class BambooTrussTests
         var built = Build();
         var json = BambooTrussMotion.SerializePlan(built);
         if (Environment.GetEnvironmentVariable("BAMBOO_TRUSS_WRITE_PLAN") == "1")
+        {
+            Assert.True(IsPlanReferencePlatform, "regenerate the shipped plan on Linux x64 (the reference platform)");
             File.WriteAllText(PlanCachePath, json);
+        }
         Assert.True(File.Exists(PlanCachePath), "shipped plan missing — run with BAMBOO_TRUSS_WRITE_PLAN=1");
-        // Structural comparison: identical structure, strings and discrete values (labels, order, modes, grasp
-        // sites, swaps, holders); numbers (joint degrees, times, poses, residuals) within 1e-6 absolute, so last-ulp
-        // libm differences between Linux / Windows / macOS do not fail it while any different decision does.
-        var diffs = PlanDiff.Compare(File.ReadAllText(PlanCachePath), json);
+        var shipped = File.ReadAllText(PlanCachePath);
+        var diffs = PlanDiff.Compare(shipped, json);
         if (diffs.Count > 0)
         {
             var dump = Path.Combine(Path.GetTempPath(), "BambooTrussLivePlan.json");
             File.WriteAllText(dump, json);
             _out.WriteLine($"live plan written to {dump}");
-            _out.WriteLine(PlanDiff.LabelSummary(File.ReadAllText(PlanCachePath), json));
         }
-        Assert.True(diffs.Count == 0, $"live plan differs from shipped plan ({diffs.Count} differences, shipped vs live):\n"
-            + string.Join("\n", diffs.Take(40)) + "\n" + PlanDiff.LabelSummary(File.ReadAllText(PlanCachePath), json));
-        var cached = BambooTrussMotion.LoadCachedDefaultPlan();
-        Assert.NotNull(cached);
-        Assert.Equal(built.Keys.Count, cached!.Keys.Count);
-        for (var i = 0; i < built.Keys.Count; i++)
+        var report = $"live plan differs from shipped plan ({diffs.Count} differences, shipped vs live):\n"
+            + string.Join("\n", diffs.Take(40)) + "\n" + PlanDiff.LabelSummary(shipped, json);
+        if (!IsPlanReferencePlatform)
         {
-            Assert.Equal(built.Keys[i].Label, cached.Keys[i].Label);
-            Assert.Equal(built.Keys[i].Q.Length, cached.Keys[i].Q.Length);
-            for (var k = 0; k < built.Keys[i].Q.Length; k++) Assert.Equal(built.Keys[i].Q[k], cached.Keys[i].Q[k], PlanDiff.Tol);
-            Assert.Equal(built.Keys[i].BaseWorld is null, cached.Keys[i].BaseWorld is null);
-            if (built.Keys[i].BaseWorld is { } bw)
-                for (var k = 0; k < bw.Length; k++) Assert.Equal(bw[k], cached.Keys[i].BaseWorld![k], PlanDiff.Tol);
-            Assert.Equal(built.Keys[i].T, cached.Keys[i].T, PlanDiff.Tol);
+            // Not the reference platform: report, do not require identity (see IsPlanReferencePlatform).
+            _out.WriteLine(diffs.Count == 0 ? "live plan identical to shipped plan" : report);
+            return;
         }
+        Assert.True(diffs.Count == 0, report);
         // The page path (useCache) returns the shipped plan for the default tasks.
         BambooTrussMotion.UseCell(Cell);
         var page = BambooTrussMotion.Build(useCache: true);
         Assert.Contains(page.Notes, n => n.StartsWith("plan: shipped", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// On every platform, the shipped plan (what the page plays) is valid here: it loads for the current layout
+    /// fingerprint, builds all 7 members PTP-only, and replays through the full Motus scan collision-clear (the same
+    /// dense check and 2 mm margin as the live plan), with every grasp tracked and every cane released on its member.
+    /// </summary>
+    [Fact]
+    public void ShippedDefaultPlan_ReplaysCleanly_OnEveryPlatform()
+    {
+        BambooTrussMotion.UseCell(Cell);
+        var cached = BambooTrussMotion.LoadCachedDefaultPlan();
+        Assert.True(cached is not null, $"shipped plan not loadable: {BambooTrussMotion.CacheStatus}");
+        Assert.Equal(BambooTrussLayout.Members.Select(m => m.Id).OrderBy(x => x), cached!.Built.OrderBy(x => x));
+        foreach (var k in cached.Keys)
+            foreach (var bad in new[] { ":Approach", "Slide up", "Slide down", ":Lower", "Back off", ":Lift", ":Retreat", ":Transit", ":Carry" })
+                Assert.False(k.Label.Contains(bad, StringComparison.Ordinal), $"non-PTP segment {k.Label}");
+        foreach (var k in cached.Keys) Assert.True(K.WithinLimits(k.Q), $"{k.Label}: joint limits");
+        var scan = new BambooTrussScan(Cell, cached.Keys, cached.Cycles, BambooTrussLayout.Members, BambooTrussLayout.JawClosedMm).RunToEnd();
+        Assert.Null(scan.TrackMiss);
+        Assert.True(scan.Complete);
+        Assert.True(scan.FirstHit is null, $"Motus hit in shipped plan: {scan.FirstHit?.Describe()} at {scan.FirstHit?.T:F4} ({scan.FirstHit?.Label})");
+        Assert.Equal(1.0, scan.LastClearT, 9);
+        foreach (var m in BambooTrussLayout.Members)
+        {
+            var w = scan.World.Single(x => x.ActiveId == m.Id);
+            Assert.NotNull(w.Released);
+            var want = BambooIcdCell.PlacementWorld(m.Place);
+            var d = Math.Sqrt(Sq(w.Released![3] - want[3]) + Sq(w.Released[7] - want[7]) + Sq(w.Released[11] - want[11]));
+            Assert.True(d < K.GripPosTolM, $"{m.Id}: shipped plan releases {d * 1000:F4} mm off design");
+        }
+    }
+
+    /// <summary>Live planning on this platform also builds all 7 members (its collision validity is the other tests').</summary>
+    [Fact]
+    public void LivePlan_BuildsAllSevenMembers_OnEveryPlatform()
+    {
+        var built = Build();
+        Assert.Equal(BambooTrussLayout.Members.Select(m => m.Id).OrderBy(x => x), built.Built.OrderBy(x => x));
     }
 
     /// <summary>

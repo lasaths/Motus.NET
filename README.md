@@ -174,6 +174,18 @@ cmake --build native/build
 
 Benchmarks: `benchmarks/Motus.Benchmarks` (BenchmarkDotNet).
 
+### Shipped bamboo-truss plan (viewer)
+
+The viewer embeds a pre-computed default plan (`src/Motus.Viewer/Services/BambooTrussDefaultPlan.json`). The
+planner is a sampling search over dense collision checks, and last-ulp differences between platform math
+libraries (glibc / Windows CRT / Apple libm) can lead it to a different, equally valid plan. So:
+
+- **Linux x64 is the reference platform**: there the live plan must match the shipped plan structurally (same keys,
+  labels, modes, grasp sites; numbers within 1e-6). Regenerate on Linux x64 with
+  `BAMBOO_TRUSS_WRITE_PLAN=1 dotnet test tests/Motus.Core.Tests --filter ShippedDefaultPlan_IsIdenticalToLivePlanning`.
+- **Every platform** checks that the shipped plan loads, builds all 7 members PTP-only and replays Motus
+  collision-clear, and that its own live plan is complete and collision-clear.
+
 ## Releases
 
 Tag `vX.Y.Z` → [release workflow](.github/workflows/release.yml) builds, tests, packs, publishes to [nuget.org](https://www.nuget.org/profiles/lasaths), and creates a GitHub Release.
