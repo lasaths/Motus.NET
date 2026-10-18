@@ -522,9 +522,9 @@ public sealed class BambooIcdCell
     {
         // The scene (environment + mount parts at the current mount pose and jaw, allowed pairs) is rebuilt only when one
         // of those changes; with a static mount consecutive poses share it (same objects, so the same verdicts).
-        var key = new MountMemoKey(MountWorld, gLmm, environment, allowed, 0);
-        if (RobotMeshCollisionChecker.ReferencePath || _sceneKey is null || !_sceneKey.Equals(key))
+        if (RobotMeshCollisionChecker.ReferencePath || _sceneKey is null || !_sceneKey.Matches(MountWorld, gLmm, environment, allowed, 0))
         {
+            var key = new MountMemoKey(MountWorld, gLmm, environment, allowed, 0);
             var objects = new List<CollisionObject>(environment.Count + 6);
             objects.AddRange(environment);
             objects.AddRange(MountObjects(gLmm));
@@ -593,15 +593,21 @@ public sealed class BambooIcdCell
         // instances (immutable, by reference), the allowed pairs and the part checkers in use (generation). While the
         // L-grip is the clamped base the mount does not move, so almost every pose reuses the previous answer.
         if (RobotMeshCollisionChecker.ReferencePath) return MountEnvironmentContactsCore(gLmm, environment, allowed);
+        if (_lastMountKey is not null && _lastMountKey.Matches(MountWorld, gLmm, environment, allowed, _mountCheckerGeneration)) return _lastMountRes!;
         var key = new MountMemoKey(MountWorld, gLmm, environment, allowed, _mountCheckerGeneration);
-        if (_mountMemo.TryGetValue(key, out var memo)) return memo;
-        var res = MountEnvironmentContactsCore(gLmm, environment, allowed).ToArray();
-        if (_mountMemo.Count > 4096) _mountMemo.Clear();
-        _mountMemo[key] = res;
+        if (!_mountMemo.TryGetValue(key, out var res))
+        {
+            res = MountEnvironmentContactsCore(gLmm, environment, allowed).ToArray();
+            if (_mountMemo.Count > 4096) _mountMemo.Clear();
+            _mountMemo[key] = res;
+        }
+        _lastMountKey = key; _lastMountRes = res;
         return res;
     }
 
     readonly Dictionary<MountMemoKey, CollisionContact[]> _mountMemo = new();
+    MountMemoKey? _lastMountKey;
+    CollisionContact[]? _lastMountRes;
     int _mountCheckerGeneration;
 
     sealed class MountMemoKey : IEquatable<MountMemoKey>
@@ -623,6 +629,17 @@ public sealed class BambooIcdCell
             foreach (var a in _allowed) { h.Add(a.A); h.Add(a.B); }
             _gen = gen; h.Add(gen);
             _hash = h.ToHashCode();
+        }
+
+        /// <summary>Same inputs as this key (no allocation): bitwise pose / jaw, same instances, same pair strings.</summary>
+        public bool Matches(double[] mount, double gLmm, IReadOnlyList<CollisionObject> env, IReadOnlyList<(string A, string B)> allowed, int gen)
+        {
+            if (gen != _gen || BitConverter.DoubleToInt64Bits(gLmm) != _g || env.Count != _env.Length || allowed.Count != _allowed.Length) return false;
+            for (var i = 0; i < 16; i++) if (BitConverter.DoubleToInt64Bits(mount[i]) != _pose[i]) return false;
+            for (var i = 0; i < _env.Length; i++) if (!ReferenceEquals(env[i], _env[i])) return false;
+            for (var i = 0; i < _allowed.Length; i++)
+                if (!string.Equals(allowed[i].A, _allowed[i].A, StringComparison.Ordinal) || !string.Equals(allowed[i].B, _allowed[i].B, StringComparison.Ordinal)) return false;
+            return true;
         }
 
         public override int GetHashCode() => _hash;

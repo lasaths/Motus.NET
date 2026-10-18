@@ -130,7 +130,17 @@ public static class BambooTrussCollision
     }
 
     /// <summary>Long axis of a mesh (local AABB, longest extent): centre, unit direction and half length, world (Motus).</summary>
+    static readonly System.Runtime.CompilerServices.ConditionalWeakTable<CollisionObject, Tuple<double[], double[], double>> _axes = new();
+
     static (double[] C, double[] U, double H) AxisOf(CollisionObject o)
+    {
+        if (_axes.TryGetValue(o, out var t)) return (t.Item1, t.Item2, t.Item3);
+        var r = AxisOfCore(o);
+        _axes.AddOrUpdate(o, Tuple.Create(r.C, r.U, r.H));
+        return r;
+    }
+
+    static (double[] C, double[] U, double H) AxisOfCore(CollisionObject o)
     {
         var mn = o.MeshAabbMin!; var mx = o.MeshAabbMax!;
         var k = 0;
