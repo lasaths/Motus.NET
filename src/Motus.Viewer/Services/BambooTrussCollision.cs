@@ -82,24 +82,25 @@ public static class BambooTrussCollision
         var allowed = Allowed(lOn, rOn);
         if (marginM <= 0) return cell.PoseContacts(qDeg, gR, gL, held, env, allowed, max);
         var clamped = $"{lOn}|{rOn}".Split('|', StringSplitOptions.RemoveEmptyEntries);
-        var grown = env.Select(o => clamped.Contains(o.Name) ? o : Inflate(o, marginM)).ToList();
         // Grasp zone: a gripper whose slot axis lies on an object's axis (within the margin) is grasping / releasing /
         // sliding on it — its own parts may be closer than the margin to that object (still never in exact contact).
         var (lw, rw) = BambooGripKinematics.Grippers(baseGripper == "R" ? BambooGripKinematics.Gripper.R : BambooGripKinematics.Gripper.L, baseWorld, qDeg);
         var zoneL = GraspZone(BambooTrussPlanner.ToMotus(lw), env, marginM);
         var zoneR = GraspZone(BambooTrussPlanner.ToMotus(rw), env, marginM);
-        bool Exempt(CollisionContact c) => IsPegRest(c) && held is not null || InZone(c.BodyA, c.BodyB, zoneL, zoneR) || InZone(c.BodyB, c.BodyA, zoneL, zoneR);
-        if (zoneL.Count == 0 && zoneR.Count == 0 && held is null) return cell.PoseContacts(qDeg, gR, gL, held, grown, allowed, max);
-        var all = cell.PoseContacts(qDeg, gR, gL, held, grown, allowed, max + 16);
-        var kept = all.Where(c => !Exempt(c)).ToList();
-        if (kept.Count < all.Count && kept.Count < max)
-        {
-            // Exempt from the margin only: those objects must still not be touched exactly.
-            var names = all.Where(Exempt).SelectMany(c => new[] { c.BodyA, c.BodyB }).ToHashSet(StringComparer.Ordinal);
-            var exact = env.Where(o => names.Contains(o.Name)).ToList();
-            kept.AddRange(cell.PoseContacts(qDeg, gR, gL, held, exact, allowed, max));
-        }
-        return kept.Take(max).ToList();
+        bool Candidate(CollisionObject o) => zoneL.Contains(o.Name) || zoneR.Contains(o.Name) ||
+            (held is not null && o.Name.StartsWith(PegPrefix, StringComparison.Ordinal));
+        bool Exempt(CollisionContact c) => (IsPegRest(c) && held is not null) || InZone(c.BodyA, c.BodyB, zoneL, zoneR) || InZone(c.BodyB, c.BodyA, zoneL, zoneR);
+        // Pass 1 (early-out): everything grown except clamped objects and exemption candidates, which are exact here.
+        var pass1 = env.Select(o => clamped.Contains(o.Name) || Candidate(o) ? o : Inflate(o, marginM)).ToList();
+        var hits = cell.PoseContacts(qDeg, gR, gL, held, pass1, allowed, max);
+        if (hits.Count >= max) return hits;
+        // Pass 2: the candidates grown, keeping the margin for every pair that is not an intended contact.
+        var cands = env.Where(o => !clamped.Contains(o.Name) && Candidate(o)).Select(o => Inflate(o, marginM)).ToList();
+        if (cands.Count == 0) return hits;
+        var kept = hits.ToList();
+        foreach (var c in cell.PoseContacts(qDeg, gR, gL, held, cands, allowed, 64))
+            if (!Exempt(c) && kept.Count < max) kept.Add(c);
+        return kept;
     }
 
     static bool IsRPart(string n) => n == "neck" || n.StartsWith("R-grip", StringComparison.Ordinal);
