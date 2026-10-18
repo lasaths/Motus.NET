@@ -6,7 +6,7 @@ namespace Motus.Geometry;
 public sealed class RobotMeshCollisionChecker : ICollisionChecker, ICollisionContactReporter
 {
     private readonly IFkSolver _fk;
-    private readonly BaseFrame _base;
+    private BaseFrame _base;
     private readonly ToolFrame _tool;
     private readonly RobotCollisionModel? _robotCollision;
     private readonly SphereCollisionChecker _fallback;
@@ -20,6 +20,13 @@ public sealed class RobotMeshCollisionChecker : ICollisionChecker, ICollisionCon
     private JointState? _segmentState;
     private double[][]? _linkMats;
     private readonly double[] _baseM;
+
+    /// <summary>Move the robot base (exact pose for every later query; nothing cached depends on it).</summary>
+    public void SetBase(BaseFrame baseFrame)
+    {
+        _base = baseFrame;
+        Transforms.FromFrameInto(_baseM, baseFrame.Frame);
+    }
     private int _sceneFingerprint;
     private bool _sceneFingerprintValid;
     private CollisionScene? _lastScene;

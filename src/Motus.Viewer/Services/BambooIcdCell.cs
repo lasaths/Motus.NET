@@ -71,7 +71,7 @@ public sealed class BambooIcdCell
     /// no hang rod). Default true for /bamboo.
     /// </summary>
     public bool IncludePole { get; set; } = true;
-    private readonly Dictionary<(int gR, bool held, int off, int hang), RobotMeshCollisionChecker> _checkers = new();
+    private readonly Dictionary<(int gR, bool held, (double, double, double, double, double, double, double) off), RobotMeshCollisionChecker> _checkers = new();
 
     public sealed record CellPart(string Name, string Link, double[] Size, double[] Pos);
 
@@ -435,11 +435,11 @@ public sealed class BambooIcdCell
     /// <summary>Checker for an R-grip opening (jaw plates moved to match the drawing) and optional held strut.</summary>
     public RobotMeshCollisionChecker Checker(double gRmm, Frame? heldOffset)
     {
-        var offKey = heldOffset is { } o
-            ? HashCode.Combine(Math.Round(o.X, 6), Math.Round(o.Y, 6), Math.Round(o.Z, 6), Math.Round(o.Qw, 6), Math.Round(o.Qx, 6), Math.Round(o.Qy, 6), Math.Round(o.Qz, 6))
-            : 0;
-        var key = ((int)Math.Round(gRmm * 10), heldOffset is not null, offKey, _mountKey);
-        if (_checkers.TryGetValue(key, out var c)) return c;
+        // Keyed by the exact held offset, and the base is set to the exact current mount on every call: the checker's
+        // geometry no longer depends on which pose first created it (was: rounded keys, first-seen base / offset).
+        var offKey = heldOffset is { } o ? (o.X, o.Y, o.Z, o.Qw, o.Qx, o.Qy, o.Qz) : default;
+        var key = ((int)Math.Round(gRmm * 10), heldOffset is not null, offKey);
+        if (_checkers.TryGetValue(key, out var c)) { c.SetBase(HangBaseFrame); return c; }
         var baseModel = Model.CollisionModel!;
         var links = baseModel.Links.Select(l =>
         {
@@ -456,6 +456,7 @@ public sealed class BambooIcdCell
         model = new RobotModel(model.Preset, new RobotCollisionModel(links), Urdf.JointNames);
         var attached = heldOffset is { } off ? new[] { HeldStrut(off) } : Array.Empty<AttachedBody>();
         c = new RobotMeshCollisionChecker(model, Chain, attached, SelfCollisionMinLinkGap);
+        c.SetBase(HangBaseFrame);
         if (_checkers.Count > 512) _checkers.Clear();
         _checkers[key] = c;
         return c;
