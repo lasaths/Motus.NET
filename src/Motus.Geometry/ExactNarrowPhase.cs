@@ -187,7 +187,124 @@ internal static class ExactNarrowPhase
         static double Sq(double x, double y, double z) => x * x + y * y + z * z;
     }
 
-    /// <summary>Sphere centres along a capsule axis spaced at most a quarter radius apart (near-exact union).</summary>
+    /// <summary>Squared distance from point p to segment [a,b].</summary>
+    public static double PointSegmentDistanceSq(
+        double px, double py, double pz, double ax, double ay, double az, double bx, double by, double bz)
+    {
+        double abx = bx - ax, aby = by - ay, abz = bz - az;
+        double apx = px - ax, apy = py - ay, apz = pz - az;
+        var ll = abx * abx + aby * aby + abz * abz;
+        var t = ll > 0 ? Math.Clamp((apx * abx + apy * aby + apz * abz) / ll, 0, 1) : 0;
+        double dx = apx - t * abx, dy = apy - t * aby, dz = apz - t * abz;
+        return dx * dx + dy * dy + dz * dz;
+    }
+
+    /// <summary>Squared distance between segments [p1,q1] and [p2,q2] (Ericson RTCD §5.1.9).</summary>
+    public static double SegmentSegmentDistanceSq(
+        double p1x, double p1y, double p1z, double q1x, double q1y, double q1z,
+        double p2x, double p2y, double p2z, double q2x, double q2y, double q2z)
+    {
+        double d1x = q1x - p1x, d1y = q1y - p1y, d1z = q1z - p1z;
+        double d2x = q2x - p2x, d2y = q2y - p2y, d2z = q2z - p2z;
+        double rx = p1x - p2x, ry = p1y - p2y, rz = p1z - p2z;
+        var a = d1x * d1x + d1y * d1y + d1z * d1z;
+        var e = d2x * d2x + d2y * d2y + d2z * d2z;
+        var f = d2x * rx + d2y * ry + d2z * rz;
+        double s, t;
+        if (a <= Eps && e <= Eps) { s = t = 0; }
+        else if (a <= Eps) { s = 0; t = Math.Clamp(f / e, 0, 1); }
+        else
+        {
+            var c = d1x * rx + d1y * ry + d1z * rz;
+            if (e <= Eps) { t = 0; s = Math.Clamp(-c / a, 0, 1); }
+            else
+            {
+                var b = d1x * d2x + d1y * d2y + d1z * d2z;
+                var denom = a * e - b * b;
+                s = denom > 0 ? Math.Clamp((b * f - c * e) / denom, 0, 1) : 0;
+                t = (b * s + f) / e;
+                if (t < 0) { t = 0; s = Math.Clamp(-c / a, 0, 1); }
+                else if (t > 1) { t = 1; s = Math.Clamp((b - c) / a, 0, 1); }
+            }
+        }
+        double dx = p1x + d1x * s - (p2x + d2x * t), dy = p1y + d1y * s - (p2y + d2y * t), dz = p1z + d1z * s - (p2z + d2z * t);
+        return dx * dx + dy * dy + dz * dz;
+    }
+
+    /// <summary>
+    /// Exact squared distance from segment [p,q] to triangle (a,b,c): 0 when the segment pierces the triangle,
+    /// otherwise the minimum of endpoint–triangle and segment–edge distances (closest features of a segment and a
+    /// triangle are always among these).
+    /// </summary>
+    public static double SegmentTriangleDistanceSq(
+        double px, double py, double pz, double qx, double qy, double qz,
+        double ax, double ay, double az, double bx, double by, double bz, double cx, double cy, double cz)
+    {
+        if (SegmentPiercesTriangle(px, py, pz, qx, qy, qz, ax, ay, az, bx, by, bz, cx, cy, cz)) return 0;
+        var d = PointTriangleDistanceSq(px, py, pz, ax, ay, az, bx, by, bz, cx, cy, cz);
+        d = Math.Min(d, PointTriangleDistanceSq(qx, qy, qz, ax, ay, az, bx, by, bz, cx, cy, cz));
+        d = Math.Min(d, SegmentSegmentDistanceSq(px, py, pz, qx, qy, qz, ax, ay, az, bx, by, bz));
+        d = Math.Min(d, SegmentSegmentDistanceSq(px, py, pz, qx, qy, qz, bx, by, bz, cx, cy, cz));
+        d = Math.Min(d, SegmentSegmentDistanceSq(px, py, pz, qx, qy, qz, cx, cy, cz, ax, ay, az));
+        return d;
+    }
+
+    private static bool SegmentPiercesTriangle(
+        double px, double py, double pz, double qx, double qy, double qz,
+        double ax, double ay, double az, double bx, double by, double bz, double cx, double cy, double cz)
+    {
+        double abx = bx - ax, aby = by - ay, abz = bz - az, acx = cx - ax, acy = cy - ay, acz = cz - az;
+        double nx = aby * acz - abz * acy, ny = abz * acx - abx * acz, nz = abx * acy - aby * acx;
+        var dp = (px - ax) * nx + (py - ay) * ny + (pz - az) * nz;
+        var dq = (qx - ax) * nx + (qy - ay) * ny + (qz - az) * nz;
+        if (dp * dq > 0 || dp == dq) return false; // same side or parallel (parallel case covered by edge/endpoint terms)
+        var t = dp / (dp - dq);
+        double x = px + t * (qx - px), y = py + t * (qy - py), z = pz + t * (qz - pz);
+        // Point-in-triangle by same-sign cross products against the normal.
+        double S(double ux, double uy, double uz, double vx, double vy, double vz) =>
+            (uy * vz - uz * vy) * nx + (uz * vx - ux * vz) * ny + (ux * vy - uy * vx) * nz;
+        var s0 = S(bx - ax, by - ay, bz - az, x - ax, y - ay, z - az);
+        var s1 = S(cx - bx, cy - by, cz - bz, x - bx, y - by, z - bz);
+        var s2 = S(ax - cx, ay - cy, az - cz, x - cx, y - cy, z - cz);
+        return (s0 >= 0 && s1 >= 0 && s2 >= 0) || (s0 <= 0 && s1 <= 0 && s2 <= 0);
+    }
+
+    /// <summary>
+    /// Exact squared distance from segment [p,q] (box-local coordinates) to the axis-aligned box with half extents h:
+    /// 0 if the segment meets the box, else the minimum of endpoint–box and segment–edge distances.
+    /// </summary>
+    public static double SegmentAabbDistanceSqLocal(
+        double px, double py, double pz, double qx, double qy, double qz, double hx, double hy, double hz)
+    {
+        // Slab test for intersection.
+        double t0 = 0, t1 = 1;
+        if (Slab(px, qx - px, hx) && Slab(py, qy - py, hy) && Slab(pz, qz - pz, hz)) return 0;
+        var d = Math.Min(PointBox(px, py, pz), PointBox(qx, qy, qz));
+        for (var i = 0; i < 4; i++)
+        {
+            double sa = (i & 1) == 0 ? -1 : 1, sb = (i & 2) == 0 ? -1 : 1;
+            d = Math.Min(d, SegmentSegmentDistanceSq(px, py, pz, qx, qy, qz, -hx, sa * hy, sb * hz, hx, sa * hy, sb * hz));
+            d = Math.Min(d, SegmentSegmentDistanceSq(px, py, pz, qx, qy, qz, sa * hx, -hy, sb * hz, sa * hx, hy, sb * hz));
+            d = Math.Min(d, SegmentSegmentDistanceSq(px, py, pz, qx, qy, qz, sa * hx, sb * hy, -hz, sa * hx, sb * hy, hz));
+        }
+        return d;
+
+        bool Slab(double o, double dir, double h)
+        {
+            if (Math.Abs(dir) < 1e-300) return o >= -h && o <= h;
+            var ta = (-h - o) / dir; var tb = (h - o) / dir;
+            if (ta > tb) (ta, tb) = (tb, ta);
+            t0 = Math.Max(t0, ta); t1 = Math.Min(t1, tb);
+            return t0 <= t1;
+        }
+        double PointBox(double x, double y, double z)
+        {
+            var dx = Math.Max(Math.Abs(x) - hx, 0); var dy = Math.Max(Math.Abs(y) - hy, 0); var dz = Math.Max(Math.Abs(z) - hz, 0);
+            return dx * dx + dy * dy + dz * dz;
+        }
+    }
+
+    /// <summary>Sphere centres along a capsule axis spaced at most a quarter radius apart (legacy inner approximation; kept only OR-ed with the exact capsule tests so verdicts are never less conservative).</summary>
     public static int DenseCapsuleSamples(double radius, double halfLength)
     {
         if (radius <= 0) return 8;
