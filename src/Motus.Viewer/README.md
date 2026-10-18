@@ -129,7 +129,7 @@ click or drag the track to scrub, click a block to jump to its start; Play/Pause
   walls and floor, anchor columns, connectors, stock pegs, placed canes and self. The only allowed touches are a
   gripper's jaw plates on what it clamps.
 - **Scan / playback / WASM:** unchanged — `BambooTrussScan` re-derives everything from the keys; the page loads the
-  embedded `Services/BambooTrussDefaultPlan.json` keyed by the 6-decimal `LayoutFingerprint`; regenerate with
+  embedded `src/Motus.Construction/Bamboo/BambooTrussDefaultPlan.json` keyed by the 6-decimal `LayoutFingerprint`; regenerate with
   `BAMBOO_TRUSS_WRITE_PLAN=1 dotnet test --filter ShippedDefaultPlan`.
 
 ### Walking on the bamboo: the `walk` task block (shipped, PTP)

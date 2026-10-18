@@ -63,7 +63,7 @@ public static class AssemblyPlanner
     public static AssemblyPlanRequest WarrenTrussExample => new()
     {
         Site = SiteDefaults.Chosen,
-        Structure = BambooTrussLayout.WarrenTruss(SiteDefaults.Chosen.Length + 2 * SiteDefaults.Chosen.Gap, SiteDefaults.Chosen.NodeY)
+        Structure = SiteDefaults.WarrenTruss(SiteDefaults.Chosen.Length + 2 * SiteDefaults.Chosen.Gap, SiteDefaults.Chosen.NodeY)
     };
 
     public static AssemblyPlan Plan(AssemblyPlanRequest? request = null)

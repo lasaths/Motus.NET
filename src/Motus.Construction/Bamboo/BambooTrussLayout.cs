@@ -61,35 +61,12 @@ public static class BambooTrussLayout
     /// <summary>
     /// The structure to assemble: nodes and members, members listed in the default build order. Supports are the nodes
     /// with an anchor column (<see cref="Stake"/> named "anchor-&lt;node&gt;" in the <see cref="Site"/>).
-    /// <see cref="Site.Structure"/> null means the Warren truss (<see cref="WarrenTruss"/>) sized from the site.
+    /// <see cref="Site.Structure"/> null means the Warren truss (<see cref="SiteDefaults.WarrenTruss"/>) sized from the site.
     /// </summary>
     public sealed record StructureDefinition(IReadOnlyList<StructureNode> Nodes, IReadOnlyList<StructureMember> Members);
 
-    /// <summary>The example structure: the three-triangle Warren truss A–M–D / T1–T2 with panel <paramref name="panel"/>.</summary>
-    public static StructureDefinition WarrenTruss(double panel, double nodeY, double planeZ = PlaneZ)
-    {
-        var h = panel * Math.Sqrt(3) / 2;
-        return new StructureDefinition(
-            [
-                new("A", -panel, nodeY, planeZ),
-                new("M", 0, nodeY, planeZ),
-                new("D", panel, nodeY, planeZ),
-                new("T1", -panel / 2, nodeY + h, planeZ),
-                new("T2", panel / 2, nodeY + h, planeZ)
-            ],
-            [
-                new("AM", "bottom chord A–M", "_", "A", "M"),
-                new("AT1", "diagonal A–T1", "/", "A", "T1"),
-                new("T1M", "diagonal T1–M", "\\", "T1", "M"),
-                new("MT2", "diagonal M–T2", "/", "M", "T2"),
-                new("T1T2", "top chord T1–T2", "‾", "T1", "T2"),
-                new("MD", "bottom chord M–D", "_", "M", "D"),
-                new("T2D", "diagonal T2–D", "\\", "T2", "D")
-            ]);
-    }
-
     /// <summary>The structure being assembled: <see cref="Site.Structure"/>, or the Warren truss sized from the site.</summary>
-    public static StructureDefinition Structure => Current.Structure ?? WarrenTruss(Panel, FootY0);
+    public static StructureDefinition Structure => Current.Structure ?? SiteDefaults.WarrenTruss(Panel, FootY0);
 
     /// <summary>Support nodes: nodes carrying an anchor column ("anchor-X" ⇒ node X).</summary>
     public static IReadOnlyList<string> SupportNodes =>
