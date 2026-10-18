@@ -1,8 +1,8 @@
 using Motus.Core;
 using Motus.Geometry;
-using K = Motus.Viewer.Services.BambooGripKinematics;
+using K = Motus.Construction.BambooGripKinematics;
 
-namespace Motus.Viewer.Services;
+namespace Motus.Construction;
 
 /// <summary>
 /// Grounded, base-swapping planner for /bamboo-truss. At every instant at least one gripper is clamped on a real

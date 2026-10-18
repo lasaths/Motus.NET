@@ -1,7 +1,7 @@
 using Motus.Core;
-using K = Motus.Viewer.Services.BambooGripKinematics;
+using K = Motus.Construction.BambooGripKinematics;
 
-namespace Motus.Viewer.Services;
+namespace Motus.Construction;
 
 /// <summary>
 /// Motus string-identity tasks and motion keys for /bamboo-truss. Each member is a pick (single store feed) →
@@ -449,7 +449,7 @@ public static class BambooTrussMotion
     public const int BrachiateLSolutions = 4;
 
     public const string PlannerVersion = "warren-pit-3-search";
-    public const string DefaultPlanResource = "Motus.Viewer.Services.BambooTrussDefaultPlan.json";
+    public const string DefaultPlanResource = "Motus.Construction.BambooTrussDefaultPlan.json";
 
     /// <summary>Everything the planner's output depends on (layout, tolerances, version), invariant-formatted.</summary>
     public static string LayoutFingerprint

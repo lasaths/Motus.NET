@@ -1,6 +1,6 @@
 using Motus.Core;
 
-namespace Motus.Viewer.Services;
+namespace Motus.Construction;
 
 /// <summary>
 /// ICD/LIS bamboo-arm planar IK and pick/place motion keys for the Motus.Viewer page.

@@ -1,4 +1,4 @@
-namespace Motus.Viewer.Services;
+namespace Motus.Construction;
 
 /// <summary>
 /// The motion rules of a grounded, base-swapping robot, in one place. The planner, the collision scan and the tests

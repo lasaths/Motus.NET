@@ -1,5 +1,6 @@
 <Solution>
   <Folder Name="/src/">
+    <Project Path="src/Motus.Construction/Motus.Construction.csproj" />
     <Project Path="src/Motus.Core/Motus.Core.csproj" />
     <Project Path="src/Motus.Geometry/Motus.Geometry.csproj" />
     <Project Path="src/Motus.Native/Motus.Native.csproj" />

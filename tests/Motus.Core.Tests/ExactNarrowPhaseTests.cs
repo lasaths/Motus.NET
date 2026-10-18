@@ -58,10 +58,10 @@ public class ExactNarrowPhaseTests
     [Fact]
     public void FindContacts_NamesEveryPair_AndHonoursGeometryLevelAllowedPairs()
     {
-        var bamboo = Motus.Viewer.Services.BambooIcdCell.LoadFile(Path.GetFullPath(Path.Combine(
+        var bamboo = Motus.Construction.BambooIcdCell.LoadFile(Path.GetFullPath(Path.Combine(
             AppContext.BaseDirectory, "..", "..", "..", "..", "..", "tests", "fixtures", "bamboo_icd", "bamboo_icd.urdf")));
         var checker = bamboo.Checker(40, null);
-        var q = new JointState(Motus.Viewer.Services.BambooIcdCell.RadFromDeg(new double[] { -90, 0, 0, 0, 0 }));
+        var q = new JointState(Motus.Construction.BambooIcdCell.RadFromDeg(new double[] { -90, 0, 0, 0, 0 }));
         var ground = CollisionObject.Box("ground", new Frame(0, 0, -0.025), 1, 1, 0.025);
         var contacts = checker.FindContacts(q, new CollisionScene(new[] { ground }));
         Assert.NotEmpty(contacts);

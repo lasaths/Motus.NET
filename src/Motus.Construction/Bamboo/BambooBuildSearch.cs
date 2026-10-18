@@ -1,6 +1,6 @@
 using Motus.Core;
 
-namespace Motus.Viewer.Services;
+namespace Motus.Construction;
 
 /// <summary>
 /// Derives the build order and the walk / relay sequence from the structure graph and the reach map, instead of a

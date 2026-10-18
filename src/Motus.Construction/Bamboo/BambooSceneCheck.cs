@@ -1,4 +1,4 @@
-namespace Motus.Viewer.Services;
+namespace Motus.Construction;
 
 /// <summary>
 /// Fail-fast scene check, before any planning: for every member there must be a clamp site whose free gripper reaches

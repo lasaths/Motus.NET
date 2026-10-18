@@ -1,7 +1,7 @@
 using Motus.Core;
-using K = Motus.Viewer.Services.BambooGripKinematics;
+using K = Motus.Construction.BambooGripKinematics;
 
-namespace Motus.Viewer.Services;
+namespace Motus.Construction;
 
 /// <summary>
 /// Store/truss member poses and fixed ground fixtures for /bamboo-truss (viewer coordinates, Y-up).

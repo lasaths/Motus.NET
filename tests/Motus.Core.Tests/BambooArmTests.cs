@@ -37,7 +37,7 @@ public class BambooArmTests
         var fk = KinematicsResolver.CreateFkSolver(robot.Preset, robot.Chain);
 
         // Arm hangs under the pole (Motus Z = 0.40). Viewer home pose keeps the jaw above ground.
-        var home = new JointState(Motus.Viewer.Services.BambooIcdCell.RadFromDeg(Motus.Viewer.Services.BambooIcdMotion.HomeDeg));
+        var home = new JointState(Motus.Construction.BambooIcdCell.RadFromDeg(Motus.Construction.BambooIcdMotion.HomeDeg));
         var linkOrigins = fk.ComputeLinkOrigins(home.Positions, Frame.Identity);
         Assert.NotEmpty(linkOrigins);
 
@@ -74,9 +74,9 @@ public class BambooArmTests
         var urdfPath = Path.Combine(FixturesRoot, "bamboo_icd", "bamboo_icd.urdf");
         var robot = UrdfRobotLoader.Load(urdfPath);
         var checker = new RobotMeshCollisionChecker(robot.ToModel(), robot.Chain, null,
-            Motus.Viewer.Services.BambooIcdCell.SelfCollisionMinLinkGap);
+            Motus.Construction.BambooIcdCell.SelfCollisionMinLinkGap);
 
-        var homeState = new JointState(Motus.Viewer.Services.BambooIcdCell.RadFromDeg(Motus.Viewer.Services.BambooIcdMotion.HomeDeg));
+        var homeState = new JointState(Motus.Construction.BambooIcdCell.RadFromDeg(Motus.Construction.BambooIcdMotion.HomeDeg));
         var scene = new CollisionScene();
 
         Assert.True(checker.IsCollisionFree(homeState, scene));
@@ -88,12 +88,12 @@ public class BambooArmTests
         var urdfPath = Path.Combine(FixturesRoot, "bamboo_icd", "bamboo_icd.urdf");
         var robot = UrdfRobotLoader.Load(urdfPath);
         var model = robot.ToModel();
-        IInverseKinematics ik = new Motus.Viewer.Services.BambooIcdIk();
-        var checker = new RobotMeshCollisionChecker(model, robot.Chain, null, Motus.Viewer.Services.BambooIcdCell.SelfCollisionMinLinkGap);
+        IInverseKinematics ik = new Motus.Construction.BambooIcdIk();
+        var checker = new RobotMeshCollisionChecker(model, robot.Chain, null, Motus.Construction.BambooIcdCell.SelfCollisionMinLinkGap);
         var fk = KinematicsResolver.CreateFkSolver(robot.Preset, robot.Chain);
 
         // In the arm's working plane (θ1 = -90°, θ5 = 0) — the planar IK branch family the viewer plays.
-        var seed = new JointState(Motus.Viewer.Services.BambooIcdCell.RadFromDeg(new double[] { -90, -40, -50, 60, 0 }));
+        var seed = new JointState(Motus.Construction.BambooIcdCell.RadFromDeg(new double[] { -90, -40, -50, 60, 0 }));
         var forwardTcp = fk.ComputeTcp(seed, BaseFrame.Identity, robot.Preset.ToolFrame);
         
         var reachableFrame = forwardTcp.Tcp;
@@ -130,11 +130,11 @@ public class BambooArmTests
         var urdfPath = Path.Combine(FixturesRoot, "bamboo_icd", "bamboo_icd.urdf");
         var robot = UrdfRobotLoader.Load(urdfPath);
         var model = robot.ToModel();
-        IInverseKinematics ik = new Motus.Viewer.Services.BambooIcdIk();
-        var checker = new RobotMeshCollisionChecker(model, robot.Chain, null, Motus.Viewer.Services.BambooIcdCell.SelfCollisionMinLinkGap);
+        IInverseKinematics ik = new Motus.Construction.BambooIcdIk();
+        var checker = new RobotMeshCollisionChecker(model, robot.Chain, null, Motus.Construction.BambooIcdCell.SelfCollisionMinLinkGap);
 
         // A reachable pick frame (the default grasp plane) with an obstacle sitting on it.
-        var target = Motus.Viewer.Services.BambooIcdMotion.PlaneToMotusFrame(0, 0.00778, 0.09194, 0);
+        var target = Motus.Construction.BambooIcdMotion.PlaneToMotusFrame(0, 0.00778, 0.09194, 0);
         var task = new TaskInstance("collision_test",
             new Dictionary<string, Frame> { ["target"] = target });
         var path = new TaskPath(task);
@@ -159,7 +159,7 @@ public class BambooArmTests
         var robot = UrdfRobotLoader.Load(urdfPath);
         var checker = new RobotMeshCollisionChecker(robot.ToModel(), robot.Chain);
 
-        var homeState = new JointState(Motus.Viewer.Services.BambooIcdCell.RadFromDeg(Motus.Viewer.Services.BambooIcdMotion.HomeDeg));
+        var homeState = new JointState(Motus.Construction.BambooIcdCell.RadFromDeg(Motus.Construction.BambooIcdMotion.HomeDeg));
         var scene = new CollisionScene();
 
         Assert.True(checker.IsCollisionFree(homeState, scene));

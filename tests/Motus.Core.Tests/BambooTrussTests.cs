@@ -1,7 +1,7 @@
 using Motus.Core;
 using Motus.Geometry;
-using Motus.Viewer.Services;
-using K = Motus.Viewer.Services.BambooGripKinematics;
+using Motus.Construction;
+using K = Motus.Construction.BambooGripKinematics;
 
 namespace Motus.Core.Tests;
 
@@ -1114,7 +1114,7 @@ public partial class BambooTrussTests
     // ---------------- shipped plan (WASM) ----------------
 
     private static string PlanCachePath => Path.GetFullPath(Path.Combine(
-        AppContext.BaseDirectory, "..", "..", "..", "..", "..", "src", "Motus.Viewer", "Services", "BambooTrussDefaultPlan.json"));
+        AppContext.BaseDirectory, "..", "..", "..", "..", "..", "src", "Motus.Construction", "Bamboo", "BambooTrussDefaultPlan.json"));
 
     /// <summary>
     /// Platform that generated the shipped plan (CI ubuntu-latest / dev boxes: Linux x64). The planner is a sampling

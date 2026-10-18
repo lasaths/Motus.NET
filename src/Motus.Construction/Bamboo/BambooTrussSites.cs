@@ -1,4 +1,4 @@
-namespace Motus.Viewer.Services;
+namespace Motus.Construction;
 
 /// <summary>
 /// Sites (cane length + node gap + supports + stock + walk) for /bamboo-truss. <see cref="Chosen"/> is the shipped one.

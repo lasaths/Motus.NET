@@ -4,7 +4,7 @@ using Motus.Core;
 using Motus.Geometry;
 using Motus.Presets;
 
-namespace Motus.Viewer.Services;
+namespace Motus.Construction;
 
 /// <summary>
 /// The ICD/LIS bamboo work cell as Motus.NET sees it: the hung arm loaded from <c>bamboo_icd.urdf</c>

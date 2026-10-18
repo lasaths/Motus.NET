@@ -1,4 +1,4 @@
-namespace Motus.Viewer.Services;
+namespace Motus.Construction;
 
 /// <summary>
 /// Full-pose kinematics of the two-gripper bamboo arm for brachiation. Either gripper can be the base:

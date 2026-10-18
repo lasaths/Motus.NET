@@ -1,4 +1,4 @@
-namespace Motus.Viewer.Services;
+namespace Motus.Construction;
 
 /// <summary>
 /// Play clock for /bamboo-truss. Keeps motion time as a double (the page used to round it into the

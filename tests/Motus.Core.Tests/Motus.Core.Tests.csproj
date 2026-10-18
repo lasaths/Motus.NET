@@ -29,15 +29,9 @@
     <ProjectReference Include="..\..\src\Motus.Geometry\Motus.Geometry.csproj" />
     <ProjectReference Include="..\..\src\Motus.OMPL.NET\Motus.OMPL.NET.csproj" />
     <ProjectReference Include="..\..\src\Motus.Presets\Motus.Presets.csproj" />
+    <ProjectReference Include="..\..\src\Motus.Construction\Motus.Construction.csproj" />
   </ItemGroup>
 
-  <!-- Bamboo viewer services compiled verbatim so tests exercise the exact code /bamboo runs. -->
-  <ItemGroup>
-    <Compile Include="..\..\src\Motus.Viewer\Services\Bamboo*.cs" Link="BambooViewer\%(Filename)%(Extension)" />
-    <Compile Include="..\..\src\Motus.Viewer\Services\MotionConstraints.cs" Link="BambooViewer\MotionConstraints.cs" />
-    <!-- Same shipped default plan the viewer embeds (BambooTrussMotion.LoadCachedDefaultPlan). -->
-    <EmbeddedResource Include="..\..\src\Motus.Viewer\Services\BambooTrussDefaultPlan.json" LogicalName="Motus.Viewer.Services.BambooTrussDefaultPlan.json" Link="BambooViewer\BambooTrussDefaultPlan.json" Condition="Exists('..\..\src\Motus.Viewer\Services\BambooTrussDefaultPlan.json')" />
-  </ItemGroup>
 
   <Import Project="..\..\src\Motus.Native\buildTransitive\Motus.Native.targets" />
 

@@ -1,4 +1,4 @@
-namespace Motus.Viewer.Services;
+namespace Motus.Construction;
 
 /// <summary>
 /// Walking on the bamboo — the planner behind the /bamboo-truss <c>walk</c> task block. The L-grip is the resting base;

@@ -1,6 +1,6 @@
 using Motus.Core;
 
-namespace Motus.Viewer.Services;
+namespace Motus.Construction;
 
 /// <summary>
 /// Binds the viewer's editable task blocks (<see cref="BambooIcdMotion.TaskEdit"/>) to the core task types

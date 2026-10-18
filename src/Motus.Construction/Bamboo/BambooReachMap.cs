@@ -1,7 +1,7 @@
 using Motus.Core;
-using K = Motus.Viewer.Services.BambooGripKinematics;
+using K = Motus.Construction.BambooGripKinematics;
 
-namespace Motus.Viewer.Services;
+namespace Motus.Construction;
 
 /// <summary>
 /// Reach map: for a clamp site (the base gripper's world frame on an anchor column or a cane), which grasp targets the

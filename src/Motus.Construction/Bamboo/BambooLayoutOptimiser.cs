@@ -1,6 +1,6 @@
 using System.Globalization;
 
-namespace Motus.Viewer.Services;
+namespace Motus.Construction;
 
 /// <summary>
 /// Layout optimiser: a small grid search over the layout knobs that decide reachability — stock pose (offset from the

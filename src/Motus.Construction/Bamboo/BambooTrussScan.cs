@@ -1,8 +1,8 @@
 using Motus.Core;
 using Motus.Geometry;
-using K = Motus.Viewer.Services.BambooGripKinematics;
+using K = Motus.Construction.BambooGripKinematics;
 
-namespace Motus.Viewer.Services;
+namespace Motus.Construction;
 
 /// <summary>
 /// Motus collision scan for the grounded /bamboo-truss motion. Independently of the planner it re-derives, from the
