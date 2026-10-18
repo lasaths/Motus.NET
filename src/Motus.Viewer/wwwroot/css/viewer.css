@@ -210,3 +210,8 @@ input[type="range"]:disabled { opacity: var(--andura-opacity-dim); }
 }
 .tl-block span { padding: 0 0 0 1px; text-indent: 0; }
 .tl-block { padding: 0; }
+/* /bamboo (legacy ICD page) shares this sheet: keep its row layout (viewport | controls) on the same tokens. */
+.viewer-container:not(.andura) { flex-direction: row; }
+.viewer-container:not(.andura) .controls { padding: var(--andura-space-24); border-left: 1px solid var(--andura-color-line); }
+.viewer-container:not(.andura) .controls h1 { font-weight: var(--andura-font-weight-medium); letter-spacing: var(--andura-type-label-tracking); text-transform: uppercase; }
+.controls h1:focus { outline: none; }
