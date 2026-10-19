@@ -106,4 +106,40 @@ public class AssemblyPlannerTests
         Assert.True(plan.CollisionFree, plan.Verdict);
         Assert.Equal(oldFp, BambooTrussMotion.LayoutFingerprint); // state restored
     }
+
+    /// <summary>Per-member cane length: the triangle with a 0.22 m bottom chord (others 0.24 m) also plans collision-free.</summary>
+    [Fact]
+    public void Triangle_ShorterChord_PlansToCompletion_CollisionFree()
+    {
+        var t = Triangle();
+        t = t with { Members = t.Members.Select(m => m.Id == "AM" ? m with { Length = 0.22 } : m).ToList() };
+        var plan = AssemblyPlanner.Plan(new AssemblyPlanRequest { Structure = t });
+        _out.WriteLine($"verdict: {plan.Verdict}; built {string.Join(",", plan.Build.Built)}; error '{plan.Build.Error}'");
+        foreach (var n in plan.Build.Notes.Take(40)) _out.WriteLine(n);
+        Assert.Equal(0.22, plan.Members.Single(m => m.Id == "AM").Length);
+        Assert.Equal(new[] { "AM", "AT", "TM" }, plan.Build.Built.OrderBy(x => x, StringComparer.Ordinal));
+        Assert.True(plan.CollisionFree, plan.Verdict);
+    }
+
+    /// <summary>A robot given as URDF + gripper definition (here bamboo_icd itself) is used for the call only.</summary>
+    [Fact]
+    public void CustomRobot_IsScopedToTheCall()
+    {
+        var urdf = File.ReadAllText(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "fixtures", "bamboo_icd", "bamboo_icd.urdf")));
+        var boundBefore = BambooTrussMotion.BoundCell;
+        var plan = AssemblyPlanner.Plan(new AssemblyPlanRequest { Structure = Triangle(), RobotUrdfXml = urdf, Robot = RobotDefinition.BambooIcd });
+        Assert.True(plan.CollisionFree, plan.Verdict);
+        Assert.Equal(new[] { "AM", "AT", "TM" }, plan.Build.Built.OrderBy(x => x, StringComparer.Ordinal));
+        Assert.Same(boundBefore, BambooTrussMotion.BoundCell);
+        Assert.Same(RobotDefinition.BambooIcd, RobotDefinition.Current);
+        Assert.Same(BambooIcdMotion.BambooIcdSeg, BambooIcdMotion.Seg);
+        // The URDF chain is the one the built-in kinematics use.
+        var cell = BambooIcdCell.Load(urdf);
+        Assert.Equal(BambooIcdMotion.BambooIcdSeg, cell.Seg);
+        for (var i = 0; i < 5; i++)
+        {
+            Assert.Equal(BambooIcdMotion.BambooIcdLimitsDeg[i].Min, cell.LimitsDeg[i].Min, 3);
+            Assert.Equal(BambooIcdMotion.BambooIcdLimitsDeg[i].Max, cell.LimitsDeg[i].Max, 3);
+        }
+    }
 }

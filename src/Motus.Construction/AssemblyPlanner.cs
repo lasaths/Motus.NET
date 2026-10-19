@@ -113,8 +113,11 @@ public static class AssemblyPlanner
                 else cell = oldCell ?? BambooTrussMotion.CurrentCell;
                 // Bind for this call, configured for this site (ground pads, start clamp).
                 if (cell is not null) BambooTrussMotion.UseCell(cell);
-                var build = BambooTrussMotion.BuildAsync(request.Tasks ?? BambooTrussMotion.ShippedTasks(), null, request.UseShippedPlan)
-                    .GetAwaiter().GetResult();
+                var tasks = request.Tasks ?? BambooTrussMotion.ShippedTasks();
+                // Live: the sequence runner (pick / place / park / walk, structure-graph rules), as for the shipped sequence.
+                var build = request.UseShippedPlan
+                    ? BambooTrussMotion.BuildAsync(tasks, null, useCache: true).GetAwaiter().GetResult()
+                    : BambooTrussMotion.RunSequence(tasks);
                 var members = BambooTrussLayout.Members.ToList();
                 bool clean; string verdict;
                 if (build.Error.Length > 0) { clean = false; verdict = "plan failed: " + build.Error; }
