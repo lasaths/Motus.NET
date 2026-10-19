@@ -87,7 +87,7 @@ public sealed class BambooReachMap
     public static TargetLine Stock() => new("stock", BambooTrussLayout.Store, BambooTrussLayout.StockGraspOffsets) { Touch = BambooIcdCell.Strut };
 
     /// <summary>A member's place line (or a relay's parked pose), grasped at the stock offsets.</summary>
-    public static TargetLine PlaceOf(BambooTrussLayout.MemberDef m) => new("place " + m.Id, m.Place, BambooTrussLayout.StockGraspOffsets) { Touch = "placed-" + m.Id };
+    public static TargetLine PlaceOf(BambooTrussLayout.MemberDef m) => new("place " + m.Id, m.Place, BambooTrussLayout.StockGraspOffsetsFor(m.Length)) { Touch = "placed-" + m.Id };
 
     // ---------------- queries ----------------
 

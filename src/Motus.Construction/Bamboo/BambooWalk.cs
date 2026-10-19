@@ -56,12 +56,15 @@ public static class BambooWalk
 
     public static double Half => BambooTrussLayout.StrutLength / 2 - 0.03;
 
+    /// <summary>Clamp half-range of cane <paramref name="cane"/> (member id or "placed-…"): its length / 2 − 3 cm.</summary>
+    public static double HalfOf(string cane) => BambooTrussLayout.LengthOf(cane) / 2 - 0.03;
+
     /// <summary>World position of a clamp site on its (design) cane line.</summary>
     public static (double X, double Y, double Z) Pos(string cane, double f)
     {
         var id = cane.StartsWith("placed-", StringComparison.Ordinal) ? cane["placed-".Length..] : cane;
-        var d = BambooTrussLayout.Members.First(m => m.Id == id).Place; var u = d.Axis;
-        return (d.X + u.X * f * Half, d.Y + u.Y * f * Half, d.Z + u.Z * f * Half);
+        var d = BambooTrussLayout.Members.First(m => m.Id == id).Place; var u = d.Axis; var half = HalfOf(id);
+        return (d.X + u.X * f * half, d.Y + u.Y * f * half, d.Z + u.Z * f * half);
     }
 
     static double Dist((double X, double Y, double Z) a, (double X, double Y, double Z) b) =>
@@ -93,7 +96,7 @@ public static class BambooWalk
             from t in c.Sites() let d = Dist(Pos(t.Cane, t.F), SitePos(s)) where d > 0.01 && d <= 0.07
             orderby d descending
             from l in Enumerable.Range(0, c.LSolutions)
-            select new Move("inchworm " + Kind(s, t.Cane), s.On, s.F * Half, t.Cane, t.F, l)));
+            select new Move("inchworm " + Kind(s, t.Cane), s.On, s.F * HalfOf(s.On), t.Cane, t.F, l)));
 
     /// <summary>(b) Shuffle: R leads — it clamps the next site ahead (up to 13 cm) — and L closes up one grid step
     /// behind R on R's cane.</summary>
@@ -105,7 +108,7 @@ public static class BambooWalk
             where back >= -1.0001 && back <= 1.0001
             orderby d descending
             from l in Enumerable.Range(0, c.LSolutions)
-            select new Move("shuffle", "placed-" + lead.Cane, lead.F * Half, lead.Cane, back, l)));
+            select new Move("shuffle", "placed-" + lead.Cane, lead.F * HalfOf(lead.Cane), lead.Cane, back, l)));
 
     /// <summary>(c) Brachiation swing: R clamps next to L (≤ 4 cm), L swings past R to the farthest site it can reach
     /// (≥ 10 cm) — the longest stride.</summary>
@@ -116,7 +119,7 @@ public static class BambooWalk
             orderby d descending
             from rOff in new[] { 0.04, -0.04 }
             from l in Enumerable.Range(0, c.LSolutions)
-            select new Move("swing", s.On, s.F * Half + rOff, t.Cane, t.F, l)));
+            select new Move("swing", s.On, s.F * HalfOf(s.On) + rOff, t.Cane, t.F, l)));
 
     static readonly double[] Nodes = { -1.0, 1.0 };
 
@@ -136,7 +139,7 @@ public static class BambooWalk
         "Inchworm plus roll-in-place: L re-clamps the same point from the other side (the arm changes side).", Fine, true,
         (c, s) => s.IsStake ? Entry(c, Fine) : ToStake(c, s).Concat(
             (from l in Enumerable.Range(0, 4)
-             select new Move("roll", s.On, (s.F + (s.F > 0 ? -0.5 : 0.5)) * Half, s.On["placed-".Length..], s.F, l))
+             select new Move("roll", s.On, (s.F + (s.F > 0 ? -0.5 : 0.5)) * HalfOf(s.On), s.On["placed-".Length..], s.F, l))
             .Concat(Inchworm.Moves(c, s).Where(m => m.Kind.StartsWith("inchworm", StringComparison.Ordinal)))));
 
     public static IReadOnlyList<Gait> Gaits { get; } = new[] { Inchworm, Shuffle, Swing, NodeTransfer, Roll };
@@ -152,7 +155,7 @@ public static class BambooWalk
         if (BambooTrussLayout.IsSupport(on)) return new Site(on, 0, 0);
         var w = p.BaseWorldNow;
         var d = BambooTrussLayout.Members.First(m => m.Id == on["placed-".Length..]).Place; var u = d.Axis;
-        var f = ((w[3] - d.X) * u.X + (w[7] - d.Y) * u.Y + (w[11] - d.Z) * u.Z) / Half;
+        var f = ((w[3] - d.X) * u.X + (w[7] - d.Y) * u.Y + (w[11] - d.Z) * u.Z) / HalfOf(on);
         var all = offsets.Concat(Fine).Distinct();
         f = all.OrderBy(o => Math.Abs(o - f)).First();
         return new Site(on, f, w[9] >= 0 ? 1 : -1);

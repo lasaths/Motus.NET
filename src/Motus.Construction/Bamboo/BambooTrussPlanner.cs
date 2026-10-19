@@ -191,7 +191,7 @@ public sealed class BambooTrussPlanner
     {
         Checks++;
         PoseWatch.Start();
-        var ok = BambooTrussCollision.Contacts(_cell, BaseName, _baseWorld, q, gR, gL, hold == 1 ? _held : null, Env(hold), lOn, rOn, 1, Constraints.ClearanceMarginM).Count == 0;
+        var ok = BambooTrussCollision.Contacts(_cell, BaseName, _baseWorld, q, gR, gL, hold == 1 ? _held : null, Env(hold), lOn, rOn, 1, Constraints.ClearanceMarginM, BambooTrussLayout.LengthOf(_activeId)).Count == 0;
         PoseWatch.Stop();
         VerdictLog?.Add(new PoseVerdict(q.ToArray(), gR, gL, hold, lOn, rOn, BaseName, _baseWorld.ToArray(), Env(hold).ToArray(), hold == 1 ? _held : null, ok));
         return ok;
@@ -199,7 +199,7 @@ public sealed class BambooTrussPlanner
 
     public IReadOnlyList<CollisionContact> ContactsNow(double[] q, double gR, double gL, int hold, string? lOn, string? rOn)
     {
-        return BambooTrussCollision.Contacts(_cell, BaseName, _baseWorld, q, gR, gL, hold == 1 ? _held : null, Env(hold), lOn, rOn, 8, Constraints.ClearanceMarginM);
+        return BambooTrussCollision.Contacts(_cell, BaseName, _baseWorld, q, gR, gL, hold == 1 ? _held : null, Env(hold), lOn, rOn, 8, Constraints.ClearanceMarginM, BambooTrussLayout.LengthOf(_activeId));
     }
 
     /// <summary>Segment from the current state to (qb, gRb, gLb): intermediate samples keep the current hold.</summary>
@@ -266,7 +266,7 @@ public sealed class BambooTrussPlanner
     {
         var order = BisectionOrder(samples.Count).ToArray();
         var envA = Env(holdA); var envB = holdB == holdA ? envA : Env(holdB);
-        var baseName = BaseName; var baseWorld = _baseWorld; var held = _held; var margin = Constraints.ClearanceMarginM;
+        var baseName = BaseName; var baseWorld = _baseWorld; var held = _held; var margin = Constraints.ClearanceMarginM; var heldLen = BambooTrussLayout.LengthOf(_activeId);
         var next = -1; var firstFail = int.MaxValue;
         var workers = Math.Min(twins.Length, Math.Max(1, samples.Count / 4));
         PoseWatch.Start();
@@ -283,7 +283,7 @@ public sealed class BambooTrussPlanner
                 var env = hold == holdA ? envA : hold == holdB ? envB : null;
                 if (env is null) { lock (twins) env = Env(hold); }
                 var ok = BambooTrussCollision.Contacts(cell, baseName, baseWorld, q, gRa + (gRb - gRa) * u, gLa + (gLb - gLa) * u,
-                    hold == 1 ? held : null, env, lOn, rOn, 1, margin).Count == 0;
+                    hold == 1 ? held : null, env, lOn, rOn, 1, margin, heldLen).Count == 0;
                 if (ok) continue;
                 int seen;
                 while (k < (seen = Volatile.Read(ref firstFail)) && Interlocked.CompareExchange(ref firstFail, k, seen) != seen) { }
@@ -704,7 +704,7 @@ public sealed class BambooTrussPlanner
         var designM = BambooIcdCell.PlacementWorld(design);
         var u = design.Axis;
         // Grasp offsets along the stock cane, clear of its pegs (near either end first: far placements need them).
-        var offsets = BambooTrussLayout.StockGraspOffsets;
+        var offsets = BambooTrussLayout.StockGraspOffsetsFor(member.Length);
         var startKeys = Keys.Count;
         var snapshot = Snapshot();
         // Each grasp IK solution holds the cane differently (which side the slot comes from), which decides whether
@@ -882,7 +882,7 @@ public sealed class BambooTrussPlanner
             if (!Clampable(_placed.Select(p => p.Name["placed-".Length..])).Contains(id))
                 return Fail($"walk: {anchor} is not fixed at both ends — the robot may not clamp it");
             var m = BambooTrussLayout.Members.First(x => x.Id == id);
-            var half = BambooTrussLayout.StrutLength / 2 - 0.04;
+            var half = m.Length / 2 - 0.04;
             foreach (var f in new[] { 0.0, -0.5, 0.5, -1.0, 1.0, -0.25, 0.25, -0.75, 0.75 })
                 grips.Add(K.OnStrut(PlacedPlacement(m), f * half, anchor));
         }
@@ -1063,7 +1063,7 @@ public sealed class BambooTrussPlanner
         var m = BambooTrussLayout.Members.First(x => x.Id == memberId);
         var line = PlacedPlacement(m);
         var name = "placed-" + memberId;
-        var half = BambooTrussLayout.StrutLength / 2;
+        var half = m.Length / 2;
         // Clamp points along the cane: near either end first (where the stock and the remaining members are closest).
         var offsets = (offsetFraction is { } only ? new[] { only } : BrachiateOffsets).Select(f => f * (half - 0.03)).ToList();
         foreach (var anchorGrip in AnchorGrips(anchor))
@@ -1120,7 +1120,7 @@ public sealed class BambooTrussPlanner
         var oldLine = PlacedPlacement(BambooTrussLayout.Members.First(x => x.Id == oldL["placed-".Length..]));
         var m = BambooTrussLayout.Members.First(x => x.Id == lCane);
         var name = "placed-" + lCane;
-        var target = K.OnStrut(PlacedPlacement(m), lOffsetFraction * (BambooTrussLayout.StrutLength / 2 - 0.03), name);
+        var target = K.OnStrut(PlacedPlacement(m), lOffsetFraction * (m.Length / 2 - 0.03), name);
         foreach (var anchorGrip in AnchorGrips(rCane, rOffsetM))
             for (var idx = 0; idx < 3; idx++)
             {
@@ -1137,7 +1137,7 @@ public sealed class BambooTrussPlanner
                 if (!RRetreat(anchorGrip)) continue;
                 if (!RPark()) continue;
                 _lStake = name;
-                Notes.Add($"{_cycle}: R clamps {anchorGrip.On} at ({anchorGrip.X:F3},{anchorGrip.Y:F3},{anchorGrip.Z:F3}); L {oldL} → {name} at {lOffsetFraction * (BambooTrussLayout.StrutLength / 2 - 0.03):+0.000;-0.000} m from its centre; R parks");
+                Notes.Add($"{_cycle}: R clamps {anchorGrip.On} at ({anchorGrip.X:F3},{anchorGrip.Y:F3},{anchorGrip.Z:F3}); L {oldL} → {name} at {lOffsetFraction * (m.Length / 2 - 0.03):+0.000;-0.000} m from its centre; R parks");
                 return true;
             }
         Restore(snap, startKeys);
@@ -1226,12 +1226,12 @@ public sealed class BambooTrussPlanner
         if (_base != K.Gripper.L) return res;
         var placedIds = _placed.Select(p => p.Name["placed-".Length..]).ToList();
         var fixedIds = Clampable(placedIds);
-        var half = BambooTrussLayout.StrutLength / 2;
+        var half = member.Length / 2;
         var store = member.Store; var d = member.Place; var u = d.Axis;
         var pk = _placed.FirstOrDefault(p => p.Name.StartsWith("placed-" + member.Id + ">", StringComparison.Ordinal));
         if (pk.Name is not null) store = BambooTrussLayout.Def(pk.Name["placed-".Length..])!.Place;
-        var stockT = BambooTrussLayout.StockGraspOffsets.Select(o => K.OnStrut(store, o, "s")).ToList();
-        var placeT = BambooTrussLayout.StockGraspOffsets.Select(o => new K.GripTarget(d.X + o * u.X, d.Y + o * u.Y, d.Z + o * u.Z, u.X, u.Y, u.Z, "p")).ToList();
+        var stockT = BambooTrussLayout.StockGraspOffsetsFor(member.Length).Select(o => K.OnStrut(store, o, "s")).ToList();
+        var placeT = BambooTrussLayout.StockGraspOffsetsFor(member.Length).Select(o => new K.GripTarget(d.X + o * u.X, d.Y + o * u.Y, d.Z + o * u.Z, u.X, u.Y, u.Z, "p")).ToList();
         // Pure IK over (R cane, R offset) outer cases, run in parallel; per-case lists are concatenated in the sequential
         // order, so the candidate list (and its stable score sort) is identical.
         var outer = (from rc in fixedIds from fr in new[] { -1.0, -0.5, 0.0, 0.5, 1.0 } select (rc, fr)).ToList();
@@ -1366,7 +1366,7 @@ public sealed class BambooTrussPlanner
             if (!_placed.Any(p => p.Name == anchor)) yield break;
             if (!Clampable(_placed.Select(p => p.Name["placed-".Length..])).Contains(id)) yield break;
             var m = BambooTrussLayout.Members.First(x => x.Id == id);
-            var half = BambooTrussLayout.StrutLength / 2 - 0.04;
+            var half = m.Length / 2 - 0.04;
             if (rOffsetM is { } off) { yield return K.OnStrut(PlacedPlacement(m), Math.Clamp(off, -half, half), anchor); yield break; }
             foreach (var f in new[] { 0.0, -0.5, 0.5, -1.0, 1.0 })
                 yield return K.OnStrut(PlacedPlacement(m), f * half, anchor);

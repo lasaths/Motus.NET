@@ -19,8 +19,17 @@ public sealed record AssemblyPlanRequest
     /// <summary>Extra fixed obstacles (site geometry) added to the anchor columns, stock pegs and pit.</summary>
     public IReadOnlyList<CollisionObject>? Obstacles { get; init; }
 
-    /// <summary>Robot URDF XML (base_link → tool0, L/R grippers as in bamboo_icd.urdf). Null: the bound or fixture cell.</summary>
+    /// <summary>Explicit ground surfaces / pit boxes. Null: the site's, else derived from the supports.</summary>
+    public BambooTrussLayout.GroundDefinition? Ground { get; init; }
+
+    /// <summary>Robot URDF XML. Null: the bound or fixture cell (bamboo_icd).</summary>
     public string? RobotUrdfXml { get; init; }
+
+    /// <summary>Grippers and chain of <see cref="RobotUrdfXml"/>. Null: <see cref="RobotDefinition.BambooIcd"/>.</summary>
+    public RobotDefinition? Robot { get; init; }
+
+    /// <summary>Jaw strokes and fixture geometry. Null: unchanged (<see cref="BambooTrussLayout.Scene"/>).</summary>
+    public BambooTrussLayout.SceneDescription? Scene { get; init; }
 
     /// <summary>Planner settings (clearance margin, search/verify steps). Null: <see cref="MotionConstraints.Current"/>.</summary>
     public MotionConstraints? Settings { get; init; }
@@ -53,7 +62,8 @@ public sealed record AssemblyPlan(
 /// <summary>
 /// Public entry point (e.g. for Motus.Grasshopper): plan the robotic assembly of a structure and replay-check it.
 /// Wraps the existing planner (<see cref="BambooTrussMotion"/>) and scan (<see cref="BambooTrussScan"/>); no new logic.
-/// The planner uses process-wide layout state, so calls must not run concurrently.
+/// The planner uses process-wide state (site, scene, settings, robot, bound cell); each call sets it and restores the
+/// previous state afterwards, and calls are serialised.
 /// </summary>
 public static class AssemblyPlanner
 {
@@ -74,23 +84,35 @@ public static class AssemblyPlanner
             var site = (request.Site ?? SiteDefaults.Chosen) with
             {
                 Structure = request.Structure ?? request.Site?.Structure,
-                Obstacles = request.Obstacles ?? request.Site?.Obstacles
+                Obstacles = request.Obstacles ?? request.Site?.Obstacles,
+                Ground = request.Ground ?? request.Site?.Ground
             };
             var oldSite = BambooTrussLayout.Current;
+            var oldScene = BambooTrussLayout.Scene;
             var oldConstraints = MotionConstraints.Current;
             var oldSeeds = BambooGripKinematics.SeedScale;
+            var oldRobot = RobotDefinition.Current;
+            var oldSeg = BambooIcdMotion.Seg;
+            var oldLimits = BambooIcdMotion.LimitsDeg;
+            var oldCell = BambooTrussMotion.BoundCell;
             try
             {
+                if (request.Scene is not null) BambooTrussLayout.UseScene(request.Scene);
                 BambooTrussLayout.Use(site);
                 if (request.Settings is not null) MotionConstraints.Current = request.Settings;
                 if (request.SeedScale is { } s) BambooGripKinematics.SeedScale = s;
-                BambooIcdCell? cell = null;
+                BambooIcdCell? cell;
                 if (request.RobotUrdfXml is not null)
                 {
-                    cell = BambooIcdCell.Load(request.RobotUrdfXml, BambooTrussLayout.StrutLength);
-                    BambooTrussMotion.UseCell(cell);
+                    var robot = request.Robot ?? RobotDefinition.BambooIcd;
+                    cell = BambooIcdCell.Load(request.RobotUrdfXml, BambooTrussLayout.StrutLength, robot);
+                    RobotDefinition.Current = robot;
+                    BambooIcdMotion.Seg = cell.Seg;
+                    BambooIcdMotion.LimitsDeg = cell.LimitsDeg;
                 }
-                cell ??= BambooTrussMotion.CurrentCell;
+                else cell = oldCell ?? BambooTrussMotion.CurrentCell;
+                // Bind for this call, configured for this site (ground pads, start clamp).
+                if (cell is not null) BambooTrussMotion.UseCell(cell);
                 var build = BambooTrussMotion.BuildAsync(request.Tasks ?? BambooTrussMotion.ShippedTasks(), null, request.UseShippedPlan)
                     .GetAwaiter().GetResult();
                 var members = BambooTrussLayout.Members.ToList();
@@ -109,9 +131,14 @@ public static class AssemblyPlanner
             }
             finally
             {
+                RobotDefinition.Current = oldRobot;
+                BambooIcdMotion.Seg = oldSeg;
+                BambooIcdMotion.LimitsDeg = oldLimits;
+                BambooTrussLayout.UseScene(oldScene);
                 BambooTrussLayout.Use(oldSite);
                 MotionConstraints.Current = oldConstraints;
                 BambooGripKinematics.SeedScale = oldSeeds;
+                BambooTrussMotion.RestoreCell(oldCell);
             }
         }
     }

@@ -20,11 +20,17 @@ public static class BambooIcdMotion
         public static HangPose Pole { get; } = new(0, PoleY, 0);
         public bool IsPole => Math.Abs(X) < 1e-12 && Math.Abs(Y - PoleY) < 1e-12 && Math.Abs(Z) < 1e-12;
     }
-    public static readonly double[] Seg = { 0.030, 0.080, 0.088, 0.088, 0.088, 0.046 };
-    public static readonly (double Min, double Max)[] LimitsDeg =
+    /// <summary>bamboo_icd joint offsets along −Y (base → θ1, …, θ5 → tool).</summary>
+    public static readonly double[] BambooIcdSeg = { 0.030, 0.080, 0.088, 0.088, 0.088, 0.046 };
+    /// <summary>bamboo_icd joint limits (degrees).</summary>
+    public static readonly (double Min, double Max)[] BambooIcdLimitsDeg =
     {
         (-170, 170), (-90, 90), (-135, 135), (-90, 90), (-170, 170)
     };
+    /// <summary>Joint offsets the kinematics use (default bamboo_icd; <see cref="AssemblyPlanner"/> swaps in a custom robot's).</summary>
+    public static double[] Seg { get; internal set; } = BambooIcdSeg;
+    /// <summary>Joint limits the kinematics use (default bamboo_icd).</summary>
+    public static (double Min, double Max)[] LimitsDeg { get; internal set; } = BambooIcdLimitsDeg;
     public static readonly double[] HomeDeg = { -90, -72, -80, -24, 0 };
     public static readonly (double X, double Y, double Z) Pick = (0, 0.00778, 0.09194);
     public static readonly (double X, double Y, double Z) Place = (0, 0.1506, 0.2000);

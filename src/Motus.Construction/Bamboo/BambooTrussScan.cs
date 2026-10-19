@@ -262,7 +262,8 @@ public sealed class BambooTrussScan
         var (g, w, _) = BaseAt(t);
         var world = _cycles.Count > 0 ? _world[BambooTrussMotion.CycleIndexAt(_keys, _cycles, t)] : null;
         var held = hold == 1 ? world?.HeldOffset : null;
-        return BambooTrussCollision.Contacts(_cell, g, w, q, gR, gL, held, EnvironmentAt(t, hold), k?.LOn, k?.ROn, max, Constraints.ClearanceMarginM);
+        return BambooTrussCollision.Contacts(_cell, g, w, q, gR, gL, held, EnvironmentAt(t, hold), k?.LOn, k?.ROn, max, Constraints.ClearanceMarginM,
+            BambooTrussLayout.LengthOf(world?.ActiveId));
     }
 
     void CheckNext()
