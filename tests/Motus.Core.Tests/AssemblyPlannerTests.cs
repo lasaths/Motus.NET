@@ -142,4 +142,26 @@ public class AssemblyPlannerTests
             Assert.Equal(BambooIcdMotion.BambooIcdLimitsDeg[i].Max, cell.LimitsDeg[i].Max, 3);
         }
     }
+
+    /// <summary>The bamboo_icd URDF given explicitly still reuses the shipped Warren plan (chain compared by value).</summary>
+    [Fact]
+    public void ShippedPlan_IsReused_WithBambooIcdUrdf()
+    {
+        var urdf = File.ReadAllText(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "fixtures", "bamboo_icd", "bamboo_icd.urdf")));
+        string? fp = null;
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        var plan = AssemblyPlanner.Plan(AssemblyPlanner.WarrenTrussExample with
+        {
+            UseShippedPlan = true, RobotUrdfXml = urdf
+        });
+        clock.Stop();
+        _out.WriteLine($"{clock.Elapsed.TotalSeconds:F1} s, cache {BambooTrussMotion.CacheStatus}, verdict {plan.Verdict}");
+        Assert.Equal("hit", BambooTrussMotion.CacheStatus);
+        Assert.Contains(plan.Build.Notes, n => n.StartsWith("plan: shipped build-time plan", StringComparison.Ordinal));
+        using (var s = typeof(BambooTrussMotion).Assembly.GetManifestResourceStream(BambooTrussMotion.DefaultPlanResource)!)
+            fp = System.Text.Json.JsonSerializer.Deserialize<BambooTrussMotion.PlanCache>(s)!.Fingerprint;
+        Assert.True(BambooTrussMotion.FingerprintMatches(fp, BambooTrussMotion.LayoutFingerprint));
+        Assert.True(plan.CollisionFree, plan.Verdict);
+        Assert.True(clock.Elapsed < TimeSpan.FromMinutes(2), $"took {clock.Elapsed}");
+    }
 }

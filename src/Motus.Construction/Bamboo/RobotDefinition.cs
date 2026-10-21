@@ -17,6 +17,10 @@ public sealed record GripperDefinition(
 {
     internal string[] Plates { get; } = JawPlates.ToArray();
 
+    /// <summary>Value equality (the record's own compares the lists by reference).</summary>
+    public bool SameAs(GripperDefinition o) =>
+        Name == o.Name && Link == o.Link && JawPlates.SequenceEqual(o.JawPlates) && PartNames.SequenceEqual(o.PartNames) && PartPrefixes.SequenceEqual(o.PartPrefixes);
+
     /// <summary>True when collision part <paramref name="part"/> belongs to this gripper.</summary>
     public bool Owns(string part)
     {
@@ -46,6 +50,10 @@ public sealed record RobotDefinition(
         ["joint_1", "joint_2", "joint_3", "joint_4", "joint_5", "tool_joint"],
         // θ1 housing is journaled in the base tube; the opened L-grip carriage sits in the joint-1 housing.
         [("θ1", "base tube"), ("θ1", "L-grip body")]);
+
+    /// <summary>Value equality (the record's own compares the lists by reference).</summary>
+    public bool SameAs(RobotDefinition o) =>
+        BaseLink == o.BaseLink && L.SameAs(o.L) && R.SameAs(o.R) && ChainJoints.SequenceEqual(o.ChainJoints) && MechanismContacts.SequenceEqual(o.MechanismContacts);
 
     /// <summary>Robot the cells and collision checks use (process-wide; <see cref="AssemblyPlanner"/> scopes it per call).</summary>
     public static RobotDefinition Current { get; internal set; } = BambooIcd;

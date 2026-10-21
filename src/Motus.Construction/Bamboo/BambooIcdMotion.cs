@@ -27,6 +27,15 @@ public static class BambooIcdMotion
     {
         (-170, 170), (-90, 90), (-135, 135), (-90, 90), (-170, 170)
     };
+    /// <summary>
+    /// True when a chain equals the bamboo_icd one by value: offsets within 1e-9 m, limits within 1e-4° (a URDF stores
+    /// limits in radians to 6 decimals, ≤ 3e-5° off the round degree values).
+    /// </summary>
+    public static bool IsBambooIcdChain(IReadOnlyList<double> seg, IReadOnlyList<(double Min, double Max)> limitsDeg) =>
+        seg.Count == BambooIcdSeg.Length && limitsDeg.Count == BambooIcdLimitsDeg.Length
+        && seg.Select((v, i) => Math.Abs(v - BambooIcdSeg[i]) <= 1e-9).All(x => x)
+        && limitsDeg.Select((l, i) => Math.Abs(l.Min - BambooIcdLimitsDeg[i].Min) <= 1e-4 && Math.Abs(l.Max - BambooIcdLimitsDeg[i].Max) <= 1e-4).All(x => x);
+
     /// <summary>Joint offsets the kinematics use (default bamboo_icd; <see cref="AssemblyPlanner"/> swaps in a custom robot's).</summary>
     public static double[] Seg { get; internal set; } = BambooIcdSeg;
     /// <summary>Joint limits the kinematics use (default bamboo_icd).</summary>

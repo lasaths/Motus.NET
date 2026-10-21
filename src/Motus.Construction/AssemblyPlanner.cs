@@ -107,8 +107,12 @@ public static class AssemblyPlanner
                     var robot = request.Robot ?? RobotDefinition.BambooIcd;
                     cell = BambooIcdCell.Load(request.RobotUrdfXml, BambooTrussLayout.StrutLength, robot);
                     RobotDefinition.Current = robot;
-                    BambooIcdMotion.Seg = cell.Seg;
-                    BambooIcdMotion.LimitsDeg = cell.LimitsDeg;
+                    // A URDF with the bamboo_icd chain keeps the built-in values (identical kinematics, shipped plan reusable).
+                    if (!BambooIcdMotion.IsBambooIcdChain(cell.Seg, cell.LimitsDeg))
+                    {
+                        BambooIcdMotion.Seg = cell.Seg;
+                        BambooIcdMotion.LimitsDeg = cell.LimitsDeg;
+                    }
                 }
                 else cell = oldCell ?? BambooTrussMotion.CurrentCell;
                 // Bind for this call, configured for this site (ground pads, start clamp).

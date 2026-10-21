@@ -516,7 +516,7 @@ public static class BambooTrussMotion
             if (site.Obstacles is { Count: > 0 } obs)
                 parts.Add("obstacles:" + string.Join("/", obs.Select(o =>
                     $"{o.Name}:{o.Shape}:{F(o.Pose.X)},{F(o.Pose.Y)},{F(o.Pose.Z)},{F(o.Pose.Qw)},{F(o.Pose.Qx)},{F(o.Pose.Qy)},{F(o.Pose.Qz)},{F(o.ExtentX)},{F(o.ExtentY)},{F(o.ExtentZ)}")));
-            if (!ReferenceEquals(RobotDefinition.Current, RobotDefinition.BambooIcd) || !ReferenceEquals(BambooIcdMotion.Seg, BambooIcdMotion.BambooIcdSeg))
+            if (!RobotDefinition.Current.SameAs(RobotDefinition.BambooIcd) || !BambooIcdMotion.IsBambooIcdChain(BambooIcdMotion.Seg, BambooIcdMotion.LimitsDeg))
                 parts.Add($"robot:{RobotDefinition.Current.L.Link},{RobotDefinition.Current.R.Link}," + string.Join("/", BambooIcdMotion.Seg.Select(F))
                     + "," + string.Join("/", BambooIcdMotion.LimitsDeg.Select(l => $"{F(l.Min)}:{F(l.Max)}")));
             return string.Join(";", parts);
