@@ -4,7 +4,7 @@
 
 | Motus.NET | [Motus.Grasshopper](https://github.com/lasaths/Motus.Grasshopper) |
 |-----------|-------------------------------------------------------------------|
-| Versioned libraries on [nuget.org](https://www.nuget.org/profiles/lasaths) (package identity **2.0.0**) | Rhino/GH UI that calls these APIs |
+| Versioned libraries on [nuget.org](https://www.nuget.org/profiles/lasaths) (package identity **2.1.0**) | Rhino/GH UI that calls these APIs |
 | Owns math, units, Status contracts, method DOIs | Thin components + examples |
 
 The libraries have no UI or vendor runtime dependencies and no live robot I/O. The optional [Motus.Viewer](src/Motus.Viewer/README.md) Blazor app exercises the same libraries in the browser with bamboo-arm and truss previews. Algorithm catalog: [docs/METHODS.md](docs/METHODS.md) · citations: [docs/REFERENCES.bib](docs/REFERENCES.bib).
@@ -192,7 +192,7 @@ libraries (glibc / Windows CRT / Apple libm) can lead it to a different, equally
 
 Tag `vX.Y.Z` → [release workflow](.github/workflows/release.yml) builds, tests, packs, publishes to [nuget.org](https://www.nuget.org/profiles/lasaths), and creates a GitHub Release.
 
-Changelog: [CHANGELOG.md](CHANGELOG.md). Package/`Directory.Build.props` targets **2.0.0**. Development changes remain unreleased until a coordinated version/tag cut; merging a branch does not publish packages.
+Changelog: [CHANGELOG.md](CHANGELOG.md). Package/`Directory.Build.props` targets **2.1.0** (NuGet publish on the `v2.1.0` tag). Development changes remain unreleased until a coordinated version/tag cut; merging a branch does not publish packages.
 
 ## Safety
 
