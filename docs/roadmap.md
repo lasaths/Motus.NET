@@ -178,3 +178,12 @@ Offline dual-agent tower demo: HolonomicSE3 drone delivers a brick; serial arm f
 - [x] GH example `11_aerial_arm_pass_off` (generated mini-tower ×4 + One Play scrub; `layout.cs` for full 5×4)
 - [x] Docs: `aerial.md` pass-off; METHODS; ADRs 0002 / GH 0006
 - [ ] Coordinated **2.1.0** NuGet / GH / tags when green (Yak GA still explicit product call); **Rhino Auto Plan pass on example 11**
+
+### 2.1.0 — tasks and construction (integrated on `master`, not released)
+
+- [x] Robot-independent task model (`TaskInstance` / `TaskPath`, typed pick/place/walk/park, sequence rules, reachability + sampled collision validation; see [tasks.md](tasks.md))
+- [x] `Motus.Construction` library: bamboo work cell, Warren truss planner, build search with checkpoint/resume, `AssemblyPlanner` + `RobotDefinition`
+- [x] Exact collision with a 2 mm clearance margin (grasp/clamp exempt); exact-shape speed-ups with shipped-plan identity tests
+- [x] Retimer unit fix (prismatic m/s defaults) and validation/retiming hardening
+- [ ] Motus.Construction stays **experimental** (not in the supported surface / Yak headline) until the coordinated 2.1.0 cut above
+- [ ] Motus.Grasshopper `12_bamboo_truss_assembly` on NuGet (needs a published 2.1.0 package)

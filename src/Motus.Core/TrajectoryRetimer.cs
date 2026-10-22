@@ -12,18 +12,26 @@ public sealed class TrajectoryRetimerOptions
 {
     public RetimerAlgorithm Algorithm { get; init; } = RetimerAlgorithm.Bottleneck;
     /// <summary>
-    /// Default velocity limit in the joint coordinate unit per second when a <see cref="JointLimit"/>
-    /// omits <see cref="JointLimit.MaxVelocity"/>. For revolute axes this is rad/s; for prismatic
-    /// or Stewart axes this is m/s. The historical property name is revolute-biased.
+    /// Default velocity limit in rad/s for radian-unit joints when a <see cref="JointLimit"/>
+    /// omits <see cref="JointLimit.MaxVelocity"/>.
     /// </summary>
     public double DefaultMaxVelocityRadiansPerSecond { get; init; } = 1.5;
     /// <summary>
-    /// Default acceleration limit in the joint coordinate unit per second squared when a
-    /// <see cref="JointLimit"/> omits <see cref="JointLimit.MaxAcceleration"/>. Revolute axes use
-    /// rad/s^2; prismatic or Stewart axes use m/s^2.
+    /// Default acceleration limit in rad/s² for radian-unit joints when a
+    /// <see cref="JointLimit"/> omits <see cref="JointLimit.MaxAcceleration"/>.
     /// </summary>
     public double DefaultMaxAccelerationRadiansPerSecondSquared { get; init; } = 3.0;
+    /// <summary>
+    /// Radian-unit jerk setting (rad/s³) for the segment spacing heuristic. This does not
+    /// construct or guarantee a continuous jerk-limited profile.
+    /// </summary>
     public double DefaultMaxJerkRadiansPerSecondCubed { get; init; } = 15.0;
+    /// <summary>Default velocity for meter-unit joints (m/s) when unset.</summary>
+    public double DefaultMaxVelocityMetersPerSecond { get; init; } = 0.5;
+    /// <summary>Default acceleration for meter-unit joints (m/s²) when unset.</summary>
+    public double DefaultMaxAccelerationMetersPerSecondSquared { get; init; } = 1.0;
+    /// <summary>Meter-unit jerk setting (m/s³) for the same segment spacing heuristic.</summary>
+    public double DefaultMaxJerkMetersPerSecondCubed { get; init; } = 5.0;
 }
 
 /// <summary>Joint-space retiming: segment trapezoid, path-wide bottleneck, or managed TOPP-RA-style TOTG.</summary>
@@ -33,6 +41,7 @@ public static class TrajectoryRetimer
     {
         options ??= new TrajectoryRetimerOptions();
         ValidateGeometricTrajectory(geometric);
+        ValidateDynamicLimits(geometric.Robot.Preset.JointLimits, options);
         var points = geometric.Points;
         if (points.Count <= 1) return geometric;
         // Program dwells and attachment transitions are exact-stop boundaries. Retime each
@@ -101,12 +110,17 @@ public static class TrajectoryRetimer
         return RetimeSegmentTrapezoid(geometric, options);
     }
 
-    private static Trajectory RetimeTotg(Trajectory geometric, TrajectoryRetimerOptions options)
+    private static Trajectory RetimeTotg(Trajectory geometric, TrajectoryRetimerOptions options) =>
+        RetimePath(geometric, options, usePathWideBottleneck: false);
+
+    private static Trajectory RetimeBottleneck(Trajectory geometric, TrajectoryRetimerOptions options) =>
+        RetimePath(geometric, options, usePathWideBottleneck: true);
+
+    private static Trajectory RetimePath(
+        Trajectory geometric, TrajectoryRetimerOptions options, bool usePathWideBottleneck)
     {
         var points = geometric.Points;
         if (points.Count <= 1) return geometric;
-
-        ValidateGeometricTrajectory(geometric);
 
         var limits = geometric.Robot.Preset.JointLimits;
         var n = limits.Count;
@@ -117,6 +131,8 @@ public static class TrajectoryRetimer
 
         for (var i = 1; i < count; i++)
         {
+            // s is an arbitrary path parameter, including for mixed m/rad axes. Project each
+            // axis's limits through dq/ds rather than treating the norm as meters or radians.
             var ds2 = 0.0;
             for (var j = 0; j < n; j++)
             {
@@ -141,12 +157,12 @@ public static class TrajectoryRetimer
                 if (dqds < 1e-12) continue;
 
                 var vmax = PositiveLimit(
-                    limits[j].MaxVelocityRadiansPerSecond,
-                    options.DefaultMaxVelocityRadiansPerSecond,
+                    limits[j].MaxVelocity,
+                    DefaultVelocity(limits[j], options),
                     $"joint {j + 1} velocity");
                 var amax = PositiveLimit(
-                    limits[j].MaxAccelerationRadiansPerSecondSquared,
-                    options.DefaultMaxAccelerationRadiansPerSecondSquared,
+                    limits[j].MaxAcceleration,
+                    DefaultAcceleration(limits[j], options),
                     $"joint {j + 1} acceleration");
 
                 velocitySq = Math.Min(velocitySq, (vmax / dqds) * (vmax / dqds));
@@ -154,14 +170,22 @@ public static class TrajectoryRetimer
             }
 
             segmentVelocitySquared[i - 1] = double.IsPositiveInfinity(velocitySq)
-                ? options.DefaultMaxVelocityRadiansPerSecond * options.DefaultMaxVelocityRadiansPerSecond
+                ? DefaultVelocity(limits[0], options) * DefaultVelocity(limits[0], options)
                 : velocitySq;
             segmentAccel[i - 1] = double.IsPositiveInfinity(accel)
-                ? options.DefaultMaxAccelerationRadiansPerSecondSquared
+                ? DefaultAcceleration(limits[0], options)
                 : accel;
         }
 
         if (s[^1] < 1e-12) return geometric;
+
+        if (usePathWideBottleneck)
+        {
+            var velocitySq = segmentVelocitySquared.Min();
+            var accel = segmentAccel.Min();
+            Array.Fill(segmentVelocitySquared, velocitySq);
+            Array.Fill(segmentAccel, accel);
+        }
 
         var vertexVelocitySquared = new double[count];
         for (var i = 0; i < count; i++)
@@ -180,8 +204,13 @@ public static class TrajectoryRetimer
         for (var i = count - 2; i >= 0; i--)
         {
             var ds = s[i + 1] - s[i];
-            if (ds < 1e-12) continue;
-            var accel = PositiveLimit(segmentAccel[i], options.DefaultMaxAccelerationRadiansPerSecondSquared, $"segment {i} acceleration");
+            if (ds < 1e-12)
+            {
+                // Repeated waypoints cannot reset the speed or bypass the terminal stop.
+                controllable[i] = Math.Min(controllable[i], controllable[i + 1]);
+                continue;
+            }
+            var accel = PositiveLimit(segmentAccel[i], DefaultAcceleration(limits[0], options), $"segment {i} acceleration");
             controllable[i] = Math.Min(controllable[i], controllable[i + 1] + 2.0 * accel * ds);
         }
 
@@ -192,11 +221,11 @@ public static class TrajectoryRetimer
             var ds = s[i] - s[i - 1];
             if (ds < 1e-12)
             {
-                x[i] = Math.Min(controllable[i], vertexVelocitySquared[i]);
+                x[i] = Math.Min(x[i - 1], Math.Min(controllable[i], vertexVelocitySquared[i]));
                 continue;
             }
 
-            var accel = PositiveLimit(segmentAccel[i - 1], options.DefaultMaxAccelerationRadiansPerSecondSquared, $"segment {i - 1} acceleration");
+            var accel = PositiveLimit(segmentAccel[i - 1], DefaultAcceleration(limits[0], options), $"segment {i - 1} acceleration");
             var reachable = x[i - 1] + 2.0 * accel * ds;
             x[i] = Math.Min(Math.Min(vertexVelocitySquared[i], controllable[i]), reachable);
         }
@@ -216,95 +245,20 @@ public static class TrajectoryRetimer
                 }
                 else
                 {
-                    var accel = PositiveLimit(segmentAccel[i - 1], options.DefaultMaxAccelerationRadiansPerSecondSquared, $"segment {i - 1} acceleration");
-                    t += 2.0 * Math.Sqrt(ds / accel);
+                    var accel = PositiveLimit(segmentAccel[i - 1], DefaultAcceleration(limits[0], options), $"segment {i - 1} acceleration");
+                    var vmax = Math.Sqrt(segmentVelocitySquared[i - 1]);
+                    // With rest at both sampled ends, insert the implicit peak/cruise phase.
+                    // A triangular profile is valid only if its peak stays under vmax.
+                    t += RestToRestDuration(ds, vmax, accel);
                 }
             }
 
             if (!double.IsFinite(t))
-                throw new InvalidOperationException("TOTG retiming produced a non-finite timestamp.");
+                throw new InvalidOperationException("Path retiming produced a non-finite timestamp.");
             retimed.Add(CopyWithTime(points[i], t));
         }
 
         return new Trajectory(geometric.Robot, retimed);
-    }
-
-    private static Trajectory RetimeBottleneck(Trajectory geometric, TrajectoryRetimerOptions options)
-    {
-        var points = geometric.Points;
-        if (points.Count <= 1) return geometric;
-
-        var limits = geometric.Robot.Preset.JointLimits;
-        var n = limits.Count;
-        var count = points.Count;
-
-        var s = new double[count];
-        for (var i = 1; i < count; i++)
-        {
-            var seg = 0.0;
-            for (var j = 0; j < n; j++)
-            {
-                var dq = points[i].JointState.Positions[j] - points[i - 1].JointState.Positions[j];
-                seg += dq * dq;
-            }
-            s[i] = s[i - 1] + Math.Sqrt(seg);
-        }
-        if (s[^1] < 1e-12) return geometric;
-
-        var vLimit = new double[count];
-        for (var i = 0; i < count; i++)
-        {
-            vLimit[i] = double.MaxValue;
-            if (i == 0 || i == count - 1) { vLimit[i] = 0; continue; }
-            for (var j = 0; j < n; j++)
-            {
-                var ds = s[i] - s[i - 1];
-                if (ds < 1e-12) continue;
-                var dqds = Math.Abs((points[i].JointState.Positions[j] - points[i - 1].JointState.Positions[j]) / ds);
-                if (dqds < 1e-12) continue;
-                var vmax = limits[j].MaxVelocityRadiansPerSecond ?? options.DefaultMaxVelocityRadiansPerSecond;
-                vLimit[i] = Math.Min(vLimit[i], vmax / dqds);
-            }
-            if (double.IsPositiveInfinity(vLimit[i])) vLimit[i] = options.DefaultMaxVelocityRadiansPerSecond;
-        }
-
-        var vFwd = (double[])vLimit.Clone();
-        for (var i = 1; i < count; i++)
-        {
-            var ds = s[i] - s[i - 1];
-            if (ds < 1e-12) continue;
-            var amax = MinAccel(limits, n, options);
-            vFwd[i] = Math.Min(vFwd[i], Math.Sqrt(vFwd[i - 1] * vFwd[i - 1] + 2 * amax * ds));
-        }
-
-        var v = (double[])vFwd.Clone();
-        for (var i = count - 2; i >= 0; i--)
-        {
-            var ds = s[i + 1] - s[i];
-            if (ds < 1e-12) continue;
-            var amax = MinAccel(limits, n, options);
-            v[i] = Math.Min(v[i], Math.Sqrt(v[i + 1] * v[i + 1] + 2 * amax * ds));
-        }
-
-        var retimed = new List<TrajectoryPoint>(count) { CopyWithTime(points[0], 0) };
-        var t = 0.0;
-        for (var i = 1; i < count; i++)
-        {
-            var ds = s[i] - s[i - 1];
-            var vAvg = Math.Max(1e-3, (v[i - 1] + v[i]) * 0.5);
-            t += ds / vAvg;
-            retimed.Add(CopyWithTime(points[i], t));
-        }
-
-        return new Trajectory(geometric.Robot, retimed);
-    }
-
-    private static double MinAccel(IReadOnlyList<JointLimit> limits, int n, TrajectoryRetimerOptions options)
-    {
-        var min = options.DefaultMaxAccelerationRadiansPerSecondSquared;
-        for (var j = 0; j < n; j++)
-            min = Math.Min(min, limits[j].MaxAccelerationRadiansPerSecondSquared ?? options.DefaultMaxAccelerationRadiansPerSecondSquared);
-        return Math.Max(min, 1e-3);
     }
 
     private static Trajectory RetimeSegmentTrapezoid(Trajectory geometric, TrajectoryRetimerOptions options)
@@ -314,6 +268,8 @@ public static class TrajectoryRetimer
 
         var limits = geometric.Robot.Preset.JointLimits;
         var n = limits.Count;
+        // Aerial body poses have their own planning clock and no joint coordinates to retime.
+        if (n == 0) return geometric;
         ValidateGeometricTrajectory(geometric);
 
         var retimed = new List<TrajectoryPoint>(points.Count) { CopyWithTime(points[0], 0) };
@@ -330,6 +286,8 @@ public static class TrajectoryRetimer
             }
 
             t += dt;
+            if (!double.IsFinite(t))
+                throw new InvalidOperationException("Segment trapezoid retiming produced a non-finite timestamp.");
             retimed.Add(CopyWithTime(points[i], t));
 
             prevVel = new double[n];
@@ -349,13 +307,9 @@ public static class TrajectoryRetimer
             var dq = Math.Abs(to.Positions[j] - from.Positions[j]);
             if (dq < 1e-12) continue;
 
-            var vmax = limits[j].MaxVelocityRadiansPerSecond ?? options.DefaultMaxVelocityRadiansPerSecond;
-            var amax = limits[j].MaxAccelerationRadiansPerSecondSquared ?? options.DefaultMaxAccelerationRadiansPerSecondSquared;
-            if (vmax <= 0 || amax <= 0) continue;
-
-            var tTri = 2.0 * Math.Sqrt(dq / amax);
-            var tTrap = (dq / vmax) + (vmax / amax);
-            maxDuration = Math.Max(maxDuration, dq < (vmax * vmax / amax) ? tTri : tTrap);
+            var vmax = PositiveLimit(limits[j].MaxVelocity, DefaultVelocity(limits[j], options), $"joint {j + 1} velocity");
+            var amax = PositiveLimit(limits[j].MaxAcceleration, DefaultAcceleration(limits[j], options), $"joint {j + 1} acceleration");
+            maxDuration = Math.Max(maxDuration, RestToRestDuration(dq, vmax, amax));
         }
 
         return maxDuration;
@@ -370,10 +324,10 @@ public static class TrajectoryRetimer
         {
             var dq = to.Positions[j] - from.Positions[j];
             var vel = dq / dt;
-            var acc = (vel - prevVel[j]) / dt;
-            var jmax = options.DefaultMaxJerkRadiansPerSecondCubed;
-            if (jmax <= 0) continue;
-            var minDt = Math.Pow(Math.Abs(acc) / jmax, 1.0 / 3.0);
+            var jmax = PositiveLimit(null, DefaultJerk(limits[j], options), $"joint {j + 1} jerk");
+            // Average-velocity change / dt² estimates jerk, so spacing scales as sqrt(Δv/j).
+            // It is a finite-difference heuristic, not a continuous jerk-limited profile.
+            var minDt = Math.Sqrt(Math.Abs(vel - prevVel[j]) / jmax);
             maxExtra = Math.Max(maxExtra, minDt);
         }
         return maxExtra;
@@ -406,6 +360,37 @@ public static class TrajectoryRetimer
             throw new InvalidOperationException($"{name} limit must be finite and positive.");
         return value;
     }
+
+    private static void ValidateDynamicLimits(IReadOnlyList<JointLimit> limits, TrajectoryRetimerOptions options)
+    {
+        for (var j = 0; j < limits.Count; j++)
+        {
+            PositiveLimit(limits[j].MaxVelocity, DefaultVelocity(limits[j], options), $"joint {j + 1} velocity");
+            PositiveLimit(limits[j].MaxAcceleration, DefaultAcceleration(limits[j], options), $"joint {j + 1} acceleration");
+            if (options.Algorithm == RetimerAlgorithm.SegmentTrapezoid)
+                PositiveLimit(null, DefaultJerk(limits[j], options), $"joint {j + 1} jerk");
+        }
+    }
+
+    private static double RestToRestDuration(double distance, double vmax, double amax) =>
+        distance <= vmax * vmax / amax
+            ? 2.0 * Math.Sqrt(distance / amax)
+            : distance / vmax + vmax / amax;
+
+    private static double DefaultVelocity(JointLimit limit, TrajectoryRetimerOptions options) =>
+        limit.Unit == JointCoordinateUnit.Meters
+            ? options.DefaultMaxVelocityMetersPerSecond
+            : options.DefaultMaxVelocityRadiansPerSecond;
+
+    private static double DefaultAcceleration(JointLimit limit, TrajectoryRetimerOptions options) =>
+        limit.Unit == JointCoordinateUnit.Meters
+            ? options.DefaultMaxAccelerationMetersPerSecondSquared
+            : options.DefaultMaxAccelerationRadiansPerSecondSquared;
+
+    private static double DefaultJerk(JointLimit limit, TrajectoryRetimerOptions options) =>
+        limit.Unit == JointCoordinateUnit.Meters
+            ? options.DefaultMaxJerkMetersPerSecondCubed
+            : options.DefaultMaxJerkRadiansPerSecondCubed;
 
     private static TrajectoryPoint CopyWithTime(TrajectoryPoint source, double timeSeconds) =>
         new(

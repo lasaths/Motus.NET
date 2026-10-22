@@ -133,3 +133,31 @@ public sealed class CollisionObject
         return hash.ToHashCode();
     }
 }
+
+/// <summary>What kind of body pair produced a <see cref="CollisionContact"/>.</summary>
+public enum CollisionContactKind
+{
+    /// <summary>Two robot link geometries.</summary>
+    Self,
+    /// <summary>Robot link geometry vs a scene obstacle.</summary>
+    Scene,
+    /// <summary>Tool geometry vs a scene obstacle.</summary>
+    Tool,
+    /// <summary>Attached (carried) body vs a scene obstacle or robot link.</summary>
+    Attached
+}
+
+/// <summary>
+/// One colliding body pair reported by an <see cref="ICollisionContactReporter"/>.
+/// <see cref="BodyA"/>/<see cref="BodyB"/> are collision-geometry or scene-object names;
+/// <see cref="LinkA"/>/<see cref="LinkB"/> carry the owning robot link name when the body is a link part.
+/// </summary>
+public sealed record CollisionContact(
+    string BodyA,
+    string BodyB,
+    CollisionContactKind Kind,
+    string? LinkA = null,
+    string? LinkB = null)
+{
+    public override string ToString() => $"{BodyA} ↔ {BodyB} ({Kind})";
+}

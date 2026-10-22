@@ -29,7 +29,9 @@
     <ProjectReference Include="..\..\src\Motus.Geometry\Motus.Geometry.csproj" />
     <ProjectReference Include="..\..\src\Motus.OMPL.NET\Motus.OMPL.NET.csproj" />
     <ProjectReference Include="..\..\src\Motus.Presets\Motus.Presets.csproj" />
+    <ProjectReference Include="..\..\src\Motus.Construction\Motus.Construction.csproj" />
   </ItemGroup>
+
 
   <Import Project="..\..\src\Motus.Native\buildTransitive\Motus.Native.targets" />
 

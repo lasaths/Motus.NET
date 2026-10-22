@@ -1,0 +1,499 @@
+using Motus.Core;
+using K = Motus.Construction.BambooGripKinematics;
+
+namespace Motus.Construction;
+
+/// <summary>
+/// Store/truss member poses and fixed ground fixtures for /bamboo-truss (viewer coordinates, Y-up).
+/// <para>
+/// Three-triangle Warren truss over a U-shaped pit, every member in ONE vertical plane (z = <see cref="PlaneZ"/>):
+/// <code>
+///        T1 ———— T2        bottom chord A–M, M–D; diagonals A–T1, T1–M, M–T2, T2–D; top chord T1–T2
+///       /  \    /  \       all triangles equilateral with panel length P (node to node)
+///      A ——— M ——— D       pin support at A, roller at D (support columns at the pit edges)
+///  ____|           |____   ground at support level outside A and D
+///      |___________|       pit below the span (two walls + floor): no earth inside the span
+/// </code>
+/// Node connectors (cubes, <see cref="HubHalf"/>) sit at every node; each cane is P − 2·<see cref="Site.Gap"/> long and
+/// ends a fixed gap short of the node centre, so canes never touch each other or the hubs.
+/// </para>
+/// <para>
+/// <b>No stakes.</b> The robot starts with its L-grip clamped on the pin-support column under node A. The only fixed
+/// things it may clamp are the anchor columns at A and D and members fixed into the structure (both end nodes in a
+/// rigid, triangulated subframe that contains an anchor, see <see cref="FixedBothEnds"/>).
+/// </para>
+/// </summary>
+public static class BambooTrussLayout
+{
+    // ---------------- site (cane length, supports, stock) ----------------
+
+    /// <summary>A vertical clamp support (slot axis = support axis = viewer +Y): the anchor columns at A and D.</summary>
+    public sealed record Stake(string Name, double X, double Z, double ClampY, double Top, double HeadingDeg)
+    {
+        /// <summary>Grip target on the support at <see cref="ClampY"/>.</summary>
+        public K.GripTarget Grip => new(X, ClampY, Z, 0, 1, 0, Name);
+        public K.GripTarget At(double y) => new(X, y, Z, 0, 1, 0, Name);
+    }
+
+    /// <summary>
+    /// Everything that depends on the chosen cane length: cane length, node gap, node height (support level), pit
+    /// depth, the clamp supports (anchor columns), the stock and the walk.
+    /// </summary>
+    public sealed record Site(
+        double Length,
+        double Gap,
+        double NodeY,
+        double PitDepth,
+        IReadOnlyList<Stake> Stakes,
+        string StartStake,
+        double FeedX, double FeedZ, double FeedYawDeg, double FeedTop,
+        string WalkRAnchor, string WalkLTarget,
+        IReadOnlyDictionary<string, string> Unreachable,
+        StructureDefinition? Structure = null,
+        IReadOnlyList<CollisionObject>? Obstacles = null,
+        GroundDefinition? Ground = null);
+
+    /// <summary>
+    /// Explicit ground: support-level surfaces (top y = 0; empty = one unbounded ground plane) and boxes below them
+    /// (pit walls / floor). <see cref="Site.Ground"/> null derives both from the supports (<see cref="DerivedGround"/>).
+    /// </summary>
+    public sealed record GroundDefinition(
+        IReadOnlyList<(string Name, double X, double Z, double HalfX, double HalfZ)> Pads,
+        IReadOnlyList<(string Name, double X, double Y, double Z, double HalfX, double HalfY, double HalfZ)> PitBoxes);
+
+    /// <summary>A structure node (viewer coordinates, metres, Y-up).</summary>
+    public sealed record StructureNode(string Name, double X, double Y, double Z);
+
+    /// <summary>A structure member (one cane) between two nodes; Length (metres) null = the site's uniform <see cref="Site.Length"/>.</summary>
+    public sealed record StructureMember(string Id, string Label, string Glyph, string NodeA, string NodeB, double? Length = null);
+
+    /// <summary>
+    /// The structure to assemble: nodes and members, members listed in the default build order. Supports are the nodes
+    /// with an anchor column (<see cref="Stake"/> named "anchor-&lt;node&gt;" in the <see cref="Site"/>).
+    /// <see cref="Site.Structure"/> null means the Warren truss (<see cref="SiteDefaults.WarrenTruss"/>) sized from the site.
+    /// </summary>
+    public sealed record StructureDefinition(IReadOnlyList<StructureNode> Nodes, IReadOnlyList<StructureMember> Members);
+
+    /// <summary>The structure being assembled: <see cref="Site.Structure"/>, or the Warren truss sized from the site.</summary>
+    public static StructureDefinition Structure => Current.Structure ?? SiteDefaults.WarrenTruss(Panel, FootY0);
+
+    /// <summary>Support nodes: nodes carrying an anchor column ("anchor-X" ⇒ node X).</summary>
+    public static IReadOnlyList<string> SupportNodes =>
+        Stakes.Where(s => s.Name.StartsWith("anchor-", StringComparison.Ordinal)).Select(s => s.Name["anchor-".Length..])
+            .Where(n => Structure.Nodes.Any(x => x.Name == n)).ToList();
+
+    public static Site Default => SiteDefaults.Chosen;
+
+    static Site? _current;
+    // Lazy: SiteDefaults and this class reference each other during static initialisation.
+    public static Site Current { get => _current ??= Default; private set => _current = value; }
+
+    /// <summary>Switch the site (offline sweeps / tests). Clears every derived cache.</summary>
+    public static void Use(Site site)
+    {
+        Current = site;
+        _fixtures = null; _members = null; _hubs.Clear(); _lengths.Clear();
+    }
+
+    /// <summary>Cane length (metres): panel − 2 × node gap, the same for every member.</summary>
+    public static double StrutLength => Current.Length;
+    /// <summary>Node gap: each cane end stops this far short of the node centre (the connector bridges it).</summary>
+    public static double NodeGap => Current.Gap;
+    /// <summary>Panel length (node to node) of every equilateral triangle.</summary>
+    public static double Panel => Current.Length + 2 * Current.Gap;
+    public static double Side => Panel;
+    /// <summary>Truss height: P·√3/2.</summary>
+    public static double Height => Panel * Math.Sqrt(3) / 2;
+
+    /// <summary>
+    /// Bamboo-specific robot / scene geometry (jaw openings incl. the opened L grip, node connectors, anchor columns, stock
+    /// pegs) as data instead of code constants. Switch with <see cref="UseScene"/>; part of the layout fingerprint.
+    /// </summary>
+    public sealed record SceneDescription(
+        double JawClosedMm = 14, double JawOpenMm = 40, double LJawOpenMm = 45,
+        double HubHalf = 0.015, double AnchorPostRadius = 0.007, double RackPegInset = 0.085, double StakeSlideClear = 0.018);
+
+    static SceneDescription? _scene;
+    // Lazy: the static site defaults (initialised first) already read the scene geometry.
+    public static SceneDescription Scene { get => _scene ??= new(); private set => _scene = value; }
+
+    /// <summary>Switch the robot / scene description (clears derived caches like <see cref="Use"/>).</summary>
+    public static void UseScene(SceneDescription scene)
+    {
+        Scene = scene;
+        _fixtures = null; _members = null; _hubs.Clear();
+    }
+
+    public static double JawClosedMm => Scene.JawClosedMm;
+    public static double JawOpenMm => Scene.JawOpenMm;
+    /// <summary>L-grip fully open (jaw plates 15 mm off a 14 mm cane / column).</summary>
+    public static double LJawOpenMm => Scene.LJawOpenMm;
+
+    /// <summary>The one vertical plane of every member axis (viewer Z).</summary>
+    public const double PlaneZ = 0.11;
+    /// <summary>Support level: node height of A, M, D above the ground outside the pit.</summary>
+    public static double FootY0 => Current.NodeY;
+    /// <summary>|x| of A and D (= one panel).</summary>
+    public static double HalfSpan => Panel;
+    /// <summary>Node connector cube half-size.</summary>
+    public static double HubHalf => Scene.HubHalf;
+    /// <summary>Anchor (pin / roller support) column radius: 14 mm, the L clamp's closed width.</summary>
+    public static double AnchorPostRadius => Scene.AnchorPostRadius;
+    /// <summary>Pit edge: the pit starts this far inboard of the A / D column axis (the column stands on the ground).</summary>
+    public const double PitEdgeInset = 0.012;
+    /// <summary>Ground slabs outside the pit: how far they reach outboard of the pit edge and either side of the plane.</summary>
+    public const double GroundReach = 0.55, GroundHalfZ = 0.45;
+    public const double EarthWall = 0.03;
+
+    public static double StakeRadius => AnchorPostRadius;
+    /// <summary>How far above a support's free top an L clamp clears (not used by the anchor columns: hub above).</summary>
+    public static double StakeSlideClear => Scene.StakeSlideClear;
+    public const double StakeTopAbove = 0.02;
+    public const double StakePadHalf = 0.0;
+
+    public static IReadOnlyList<Stake> Stakes => Current.Stakes;
+    /// <summary>True for a clamp support (anchor column) rather than a cane.</summary>
+    public static bool IsSupport(string? name) => name is not null && (name.StartsWith("anchor-", StringComparison.Ordinal) || name.StartsWith("stake-", StringComparison.Ordinal));
+    public static Stake StakeNamed(string name) => Current.Stakes.Single(s => s.Name == name);
+    /// <summary>Start support (L-grip clamped at t = 0): the anchor column at A.</summary>
+    public static Stake S1 => StakeNamed(Current.StartStake);
+    public static Stake WalkTarget => StakeNamed(Current.WalkLTarget);
+
+    /// <summary>Exact L-grip clamp frame on <see cref="S1"/> (viewer 4×4): the IK base at t = 0.</summary>
+    public static double[] StartBase => K.StakeClampFrame(S1.X, S1.ClampY, S1.Z, S1.HeadingDeg);
+
+    /// <summary>Stock: the cane lies flat next to A (outside the pit) on two narrow pegs; 0.5 mm seat gap.</summary>
+    public static double RackTop => Current.FeedTop;
+    public const double RackHalfAlong = 0.015;
+    public const double RackHalfAcross = 0.004;
+    public static double RackPegOffset => StrutLength / 2 - Scene.RackPegInset;
+    public static double[] StockGraspOffsets => StockGraspOffsetsFor(StrutLength);
+
+    /// <summary>Grasp offsets along a cane of <paramref name="length"/> on the stock (clear of the pegs).</summary>
+    public static double[] StockGraspOffsetsFor(double length)
+    {
+        var e = length / 2;
+        var inner = Math.Min(RackPegOffset, e - Scene.RackPegInset) - 0.035;
+        return new[] { -(e - 0.025), e - 0.025, -(e - 0.045), e - 0.045, 0.0, -inner, inner }.Select(v => Math.Round(v, 3)).ToArray();
+    }
+    public static double FeedX => Current.FeedX;
+    public static double FeedZ => Current.FeedZ;
+    public const double RackSeatGap = 0.0005;
+    public static double StrutY => RackTop + 0.007 + RackSeatGap;
+    static (double X, double Z) FeedAxis => (Math.Sin(Current.FeedYawDeg * Math.PI / 180), Math.Cos(Current.FeedYawDeg * Math.PI / 180));
+    static bool FeedAlongX => Math.Abs(FeedAxis.X) > 0.5;
+
+    /// <summary>Ground surfaces at support level (top y = 0): <see cref="Site.Ground"/> or <see cref="DerivedGround"/>.</summary>
+    public static IReadOnlyList<(string Name, double X, double Z, double HalfX, double HalfZ)> Pads => (Current.Ground ?? DerivedGround()).Pads;
+
+    /// <summary>Boxes below the ground (pit walls / floor): <see cref="Site.Ground"/> or <see cref="DerivedGround"/>.</summary>
+    public static IReadOnlyList<(string Name, double X, double Y, double Z, double HalfX, double HalfY, double HalfZ)> PitBoxes =>
+        (Current.Ground ?? DerivedGround()).PitBoxes;
+
+    /// <summary>
+    /// Ground derived from the supports: a pit of <see cref="Site.PitDepth"/> spanning (along x) between the outermost
+    /// anchor columns, starting <see cref="PitEdgeInset"/> inboard of them, with ground surfaces outside it, all centred
+    /// on the supports' z. <see cref="Site.PitDepth"/> ≤ 0: no pit, one unbounded ground plane (no pads).
+    /// </summary>
+    public static GroundDefinition DerivedGround()
+    {
+        var d = Current.PitDepth;
+        var sup = Stakes.Where(t => t.Name.StartsWith("anchor-", StringComparison.Ordinal)).ToList();
+        if (sup.Count == 0) sup = Stakes.ToList();
+        if (d <= 0 || sup.Count == 0) return new GroundDefinition([], []);
+        double minX = sup.Min(t => t.X), maxX = sup.Max(t => t.X);
+        var z = sup.Sum(t => t.Z) / sup.Count;
+        // West / east pit edges (written so a span symmetric about x = 0 gives exactly ±(half span − inset)).
+        var w = -(-minX - PitEdgeInset);
+        var e = maxX - PitEdgeInset;
+        return new GroundDefinition(
+            [
+                ("ground-W", w - GroundReach / 2, z, GroundReach / 2, GroundHalfZ),
+                ("ground-E", e + GroundReach / 2, z, GroundReach / 2, GroundHalfZ)
+            ],
+            [
+                ("pit-wall-W", w - EarthWall / 2, -d / 2, z, EarthWall / 2, d / 2, GroundHalfZ),
+                ("pit-wall-E", e + EarthWall / 2, -d / 2, z, EarthWall / 2, d / 2, GroundHalfZ),
+                ("pit-floor", (w + e) / 2, -d - EarthWall / 2, z, (e - w) / 2 + EarthWall, EarthWall / 2, GroundHalfZ)
+            ]);
+    }
+
+    /// <summary>Anchor columns (pin at A, roller at D) as vertical cylinders: (name, x, z, top, radius) — clampable.</summary>
+    public static IReadOnlyList<(string Name, double X, double Z, double Top, double Radius)> Posts =>
+        Stakes.Select(st => (st.Name, st.X, st.Z, st.Top, AnchorPostRadius)).ToList();
+
+    public static IReadOnlyList<(string Name, double X, double Z, double HalfX, double HalfZ, double Top)> Racks
+    {
+        get
+        {
+            var (ax, az) = FeedAxis; var o = RackPegOffset;
+            var hx = FeedAlongX ? RackHalfAlong : RackHalfAcross; var hz = FeedAlongX ? RackHalfAcross : RackHalfAlong;
+            return
+            [
+                ("store-peg-1", FeedX - ax * o, FeedZ - az * o, hx, hz, RackTop),
+                ("store-peg-2", FeedX + ax * o, FeedZ + az * o, hx, hz, RackTop)
+            ];
+        }
+    }
+
+    /// <summary>
+    /// Every ground object (ground surfaces, columns, pegs) as an x-extent. Only the A/D anchor columns may touch the
+    /// span edge; everything else lies at x ≤ −PitEdge or x ≥ +PitEdge (the pit floor/walls are below ground, not earth
+    /// the robot could stand on).
+    /// </summary>
+    public static IEnumerable<(string Name, double MinX, double MaxX, bool IsAnchor)> GroundXExtents() =>
+        Pads.Select(p => (p.Name, p.X - p.HalfX, p.X + p.HalfX, false))
+            .Concat(Posts.Select(p => (p.Name, p.X - p.Radius, p.X + p.Radius, true)))
+            .Concat(Racks.Select(r => (r.Name, r.X - r.HalfX, r.X + r.HalfX, false)));
+
+    static IReadOnlyList<CollisionObject>? _fixtures;
+    /// <summary>Motus objects for the anchor columns, stock pegs, pit walls/floor and the A / D connectors (cached per site).</summary>
+    public static IReadOnlyList<CollisionObject> FixtureObjects =>
+        _fixtures ??= Posts.Select(p => BambooIcdCell.PostAt(p.Name, p.X, p.Z, 0, p.Top, p.Radius))
+            .Concat(Racks.Select(r => BambooIcdCell.BoxAt(r.Name, r.X, r.Top / 2, r.Z, r.HalfX, r.Top / 2, r.HalfZ)))
+            .Concat(PitBoxes.Select(b => BambooIcdCell.BoxAt(b.Name, b.X, b.Y, b.Z, b.HalfX, b.HalfY, b.HalfZ)))
+            .Concat(SupportNodes.Select(HubObject))
+            .Concat(Current.Obstacles ?? [])
+            .ToList();
+
+    static CollisionObject HubObject(string node)
+    {
+        var n = FootNodes.First(f => f.Name == node);
+        return BambooIcdCell.BoxAt("hub-" + node, n.X, n.Y, n.Z, HubHalf, HubHalf, HubHalf);
+    }
+
+    static readonly System.Collections.Concurrent.ConcurrentDictionary<string, IReadOnlyList<CollisionObject>> _hubs = new();
+    /// <summary>
+    /// Connectors at the inner nodes (M, T1, T2) that exist once a placed member reaches them (A / D are part of the
+    /// supports, in <see cref="FixtureObjects"/>). Motus obstacles; the cached list is per node set.
+    /// </summary>
+    public static IReadOnlyList<CollisionObject> HubObjects(IEnumerable<string> placedIds)
+    {
+        var nodes = InnerHubNodes(placedIds);
+        var key = string.Join(",", nodes);
+        if (!_hubs.TryGetValue(key, out var list)) _hubs[key] = list = nodes.Select(HubObject).ToList();
+        return list;
+    }
+
+    /// <summary>Inner nodes with a connector for <paramref name="placedIds"/> (sorted).</summary>
+    public static List<string> InnerHubNodes(IEnumerable<string> placedIds)
+    {
+        var ids = placedIds.ToHashSet(StringComparer.Ordinal);
+        return Members.Where(m => ids.Contains(m.Id)).SelectMany(m => new[] { m.NodeA, m.NodeB })
+            .Where(n => !SupportNodes.Contains(n)).Distinct().OrderBy(n => n, StringComparer.Ordinal).ToList();
+    }
+
+    /// <summary>Configure a cell for /bamboo-truss: no hang rod, the two ground surfaces as pads.</summary>
+    public static void Configure(BambooIcdCell cell)
+    {
+        cell.IncludePole = false;
+        cell.SetGroundPads(Pads);
+    }
+
+    public sealed record MemberDef(
+        string Id,
+        string Label,
+        string Glyph,
+        BambooIcdCell.StrutPlacement Store,
+        BambooIcdCell.StrutPlacement Place,
+        (double X, double Y, double Z) EdgeA,
+        (double X, double Y, double Z) EdgeB,
+        string NodeA = "",
+        string NodeB = "",
+        double? CaneLength = null)
+    {
+        /// <summary>Cane length of this member (metres): <see cref="CaneLength"/> or the site's uniform length.</summary>
+        public double Length => CaneLength ?? StrutLength;
+    }
+
+    /// <summary>Cane length of a member / relay id, or of a "placed-…" object name; the uniform length otherwise.</summary>
+    public static double LengthOf(string? id)
+    {
+        if (id is null) return StrutLength;
+        return _lengths.GetOrAdd(id, k => Def(k.StartsWith("placed-", StringComparison.Ordinal) ? k["placed-".Length..] : k)?.Length ?? StrutLength);
+    }
+
+    static readonly System.Collections.Concurrent.ConcurrentDictionary<string, double> _lengths = new();
+
+    /// <summary>Stock feed: cane flat on its pegs next to anchor A.</summary>
+    public static BambooIcdCell.StrutPlacement Store => new(FeedX, StrutY, FeedZ, 0, Current.FeedYawDeg);
+
+    /// <summary>Truss nodes: A / M / D at support level, apexes T1 / T2; all at z = <see cref="PlaneZ"/>.</summary>
+    public static (string Name, double X, double Y, double Z)[] FootNodes =>
+        Structure.Nodes.Select(n => (n.Name, n.X, n.Y, n.Z)).ToArray();
+
+    static IReadOnlyList<MemberDef>? _members;
+    /// <summary>The seven members (Ids name their end nodes), in the default build order.</summary>
+    public static IReadOnlyList<MemberDef> Members => _members ??= BuildMembers();
+
+    static IReadOnlyList<MemberDef> BuildMembers()
+    {
+        (double, double, double) At(string node)
+        {
+            var n = FootNodes.First(f => f.Name == node);
+            return (n.X, n.Y, n.Z);
+        }
+        var edges = Structure.Members.Select(m => (m.Id, m.Label, m.Glyph, P: m.NodeA, Q: m.NodeB, m.Length));
+        return edges.Select(e => new MemberDef(e.Id, e.Label, e.Glyph, Store, AlongEdge(At(e.P), At(e.Q), e.Length), At(e.P), At(e.Q), e.P, e.Q, e.Length)).ToList();
+    }
+
+    /// <summary>
+    /// Cane of <paramref name="length"/> (default <see cref="StrutLength"/>) centred on edge P→Q, axis along the edge.
+    /// </summary>
+    public static BambooIcdCell.StrutPlacement AlongEdge(
+        (double X, double Y, double Z) p, (double X, double Y, double Z) q, double? length = null)
+    {
+        var cane = length ?? StrutLength;
+        var dx = q.X - p.X; var dy = q.Y - p.Y; var dz = q.Z - p.Z;
+        var len = Math.Sqrt(dx * dx + dy * dy + dz * dz);
+        if (len < cane - 1e-6)
+            throw new InvalidOperationException($"edge length {len:F4} m < strut {cane} m");
+        dx /= len; dy /= len; dz /= len;
+        var (pitch, yaw) = PitchYawForAxis(dx, dy, dz);
+        var alt = PitchYawForAxis(-dx, -dy, -dz);
+        if (PreferAlt(pitch, yaw, alt.Pitch, alt.Yaw))
+            (pitch, yaw) = alt;
+        return new BambooIcdCell.StrutPlacement((p.X + q.X) / 2, (p.Y + q.Y) / 2, (p.Z + q.Z) / 2, pitch, yaw);
+    }
+
+    static (double Pitch, double Yaw) PitchYawForAxis(double dx, double dy, double dz)
+    {
+        if (dx * dx + dz * dz < 1e-12)
+            return (dy >= 0 ? -90 : 90, 0);
+        var pitch = Math.Atan2(-dy, Math.Sqrt(dx * dx + dz * dz)) * 180 / Math.PI;
+        var yaw = Math.Atan2(dx, dz) * 180 / Math.PI;
+        return (pitch, yaw);
+    }
+
+    static bool PreferAlt(double p0, double y0, double p1, double y1)
+    {
+        if (Math.Abs(Math.Abs(y1) - 90) < 1 && p1 <= 0 && p0 > 0) return true;
+        if (Math.Abs(y1) < 1e-9 && Math.Abs(p1 + 90) < 1) return true;
+        return false;
+    }
+
+    // ---------------- relays: a cane parked in a node connector ----------------
+
+    /// <summary>
+    /// Relay id "MEMBER>NODE/DIR": member MEMBER's cane parked in NODE's connector, pointing away from it along DIR
+    /// (angle in degrees in the connector's member plane, from that plane's x axis, or "z+" / "z−" along the plane
+    /// normal; see <see cref="NodePlane"/>). The connector is a socket: the cane end
+    /// slides in along its axis and is held fully; the parked cane ends one node gap from the node centre (like a
+    /// placed member) and is a Motus obstacle until it is re-grasped and pulled out along its axis.
+    /// </summary>
+    public static string RelayId(string member, string node, string dir) => $"{member}>{node}/{dir}";
+
+    public static bool IsRelay(string id) => id.Contains('>') && !id.StartsWith("walk", StringComparison.Ordinal);
+
+    /// <summary>Unit direction (viewer) of a relay id's DIR part.</summary>
+    public static (double X, double Y, double Z) RelayDir(string id)
+    {
+        var dir = id[(id.IndexOf('/') + 1)..];
+        var (n, u, v) = NodePlane(RelayNode(id));
+        if (dir == "z+") return n;
+        if (dir == "z-") return (-n.X, -n.Y, -n.Z);
+        var a = double.Parse(dir, System.Globalization.CultureInfo.InvariantCulture) * Math.PI / 180;
+        double c = Math.Cos(a), s = Math.Sin(a);
+        return (c * u.X + s * v.X, c * u.Y + s * v.Y, c * u.Z + s * v.Z);
+    }
+
+    /// <summary>
+    /// Plane of the members meeting at <paramref name="node"/> (falls back to the whole structure, then to z = const):
+    /// unit normal N (largest component positive), X = world +x projected into the plane (world +y if +x is normal), Y = N × X.
+    /// For a structure in a plane z = const this is N = +z, X = +x, Y = +y.
+    /// </summary>
+    public static ((double X, double Y, double Z) N, (double X, double Y, double Z) U, (double X, double Y, double Z) V) NodePlane(string node)
+    {
+        var nodes = FootNodes;
+        (double X, double Y, double Z) P(string name) { var f = nodes.First(x => x.Name == name); return (f.X, f.Y, f.Z); }
+        static (double, double, double) Cross((double X, double Y, double Z) a, (double X, double Y, double Z) b) =>
+            (a.Y * b.Z - a.Z * b.Y, a.Z * b.X - a.X * b.Z, a.X * b.Y - a.Y * b.X);
+        static double Norm((double X, double Y, double Z) a) => Math.Sqrt(a.X * a.X + a.Y * a.Y + a.Z * a.Z);
+        (double X, double Y, double Z)? Normal(IEnumerable<(double X, double Y, double Z)> dirs)
+        {
+            var list = dirs.ToList();
+            for (var i = 0; i < list.Count; i++)
+                for (var j = i + 1; j < list.Count; j++)
+                {
+                    var c = Cross(list[i], list[j]);
+                    var l = Norm(c);
+                    if (l > 1e-9 * Norm(list[i]) * Norm(list[j])) return (c.Item1 / l, c.Item2 / l, c.Item3 / l);
+                }
+            return null;
+        }
+        (double X, double Y, double Z) Dir(MemberDef m) { var a = P(m.NodeA); var b = P(m.NodeB); return (b.X - a.X, b.Y - a.Y, b.Z - a.Z); }
+        var n = Normal(Members.Where(m => m.NodeA == node || m.NodeB == node).Select(Dir))
+                ?? Normal(Members.Select(Dir)) ?? (0, 0, 1);
+        var big = Math.Abs(n.X) >= Math.Abs(n.Y) && Math.Abs(n.X) >= Math.Abs(n.Z) ? n.X : Math.Abs(n.Y) >= Math.Abs(n.Z) ? n.Y : n.Z;
+        if (big < 0) n = (-n.X, -n.Y, -n.Z);
+        (double X, double Y, double Z) w = Math.Abs(n.X) > 1 - 1e-9 ? (0, 1, 0) : (1, 0, 0);
+        var dot = w.X * n.X + w.Y * n.Y + w.Z * n.Z;
+        (double X, double Y, double Z) u = (w.X - dot * n.X, w.Y - dot * n.Y, w.Z - dot * n.Z);
+        var ul = Norm(u);
+        u = (u.X / ul, u.Y / ul, u.Z / ul);
+        var v = Cross(n, u);
+        return (n, u, v);
+    }
+
+    public static string RelayNode(string id) => id[(id.IndexOf('>') + 1)..id.IndexOf('/')];
+    public static string RelayMember(string id) => id[..id.IndexOf('>')];
+
+    /// <summary>Member definition for a member id or a relay id (relay: picked from the stock, placed parked).</summary>
+    public static MemberDef? Def(string id)
+    {
+        var m = Members.FirstOrDefault(x => x.Id == id);
+        if (m is not null || !IsRelay(id)) return m;
+        var n = FootNodes.First(f => f.Name == RelayNode(id));
+        var d = RelayDir(id);
+        var cane = Members.FirstOrDefault(x => x.Id == RelayMember(id))?.CaneLength;
+        var len = (cane ?? StrutLength) + 2 * NodeGap;
+        var a = (n.X, n.Y, n.Z);
+        var b = (n.X + d.X * len, n.Y + d.Y * len, n.Z + d.Z * len);
+        return new MemberDef(id, $"{RelayMember(id)} parked at {RelayNode(id)}", "·", Store, AlongEdge(a, b, cane), a, b, RelayNode(id), "", cane);
+    }
+
+    /// <summary>Members no allowed support can reach, with the reason (reported, never faked).</summary>
+    public static IReadOnlyDictionary<string, string> UnreachableMembers => Current.Unreachable;
+
+    /// <summary>Nodes a new member may start from: the anchors A, D and every node a placed member reaches.</summary>
+    public static HashSet<string> ExistingNodes(IEnumerable<string> placed) => BambooStructureGraph.FromLayout().ExistingNodes(placed);
+
+    /// <summary>Rigid, anchored subframes of the placed members (<see cref="BambooStructureGraph.AnchoredRigidGroups"/>).</summary>
+    public static List<HashSet<string>> AnchoredRigidClusters(IEnumerable<string> placed) => BambooStructureGraph.FromLayout().AnchoredRigidGroups(placed);
+
+    /// <summary>Fixed nodes: the anchors plus every node of an anchored rigid cluster.</summary>
+    public static HashSet<string> FixedNodes(IEnumerable<string> placed) => BambooStructureGraph.FromLayout().FixedNodes(placed);
+
+    /// <summary>
+    /// Members fixed into the structure — the only canes the robot may clamp: both end nodes lie in one anchored
+    /// rigid cluster (<see cref="BambooStructureGraph.Fixed"/>).
+    /// </summary>
+    public static IReadOnlyList<string> FixedBothEnds(IEnumerable<string> placed) => BambooStructureGraph.FromLayout().Fixed(placed);
+
+    /// <summary>Members fixed into the structure after the first <paramref name="placedCount"/> members are placed.</summary>
+    public static IReadOnlyList<string> WalkableMemberIdsAfter(int placedCount) =>
+        FixedBothEnds(Members.Take(placedCount).Select(m => m.Id));
+
+    public static object FootprintDescription() => new
+    {
+        nodes = FootNodes.Select(n => new { name = n.Name, x = n.X, y = n.Y, z = n.Z }),
+        edges = Members.Select(m => new
+        {
+            id = m.Id,
+            glyph = m.Glyph,
+            ax = m.EdgeA.X, ay = m.EdgeA.Y, az = m.EdgeA.Z,
+            bx = m.EdgeB.X, by = m.EdgeB.Y, bz = m.EdgeB.Z
+        }),
+        anchors = Pads.Select(a => new { name = a.Name, x = a.X, z = a.Z, halfX = a.HalfX, halfZ = a.HalfZ }),
+        pit = PitBoxes.Select(b => new { name = b.Name, x = b.X, y = b.Y, z = b.Z, halfX = b.HalfX, halfY = b.HalfY, halfZ = b.HalfZ }),
+        posts = Posts.Select(p => new { name = p.Name, x = p.X, z = p.Z, top = p.Top, radius = p.Radius }),
+        racks = Racks.Select(r => new { name = r.Name, x = r.X, z = r.Z, halfX = r.HalfX, halfZ = r.HalfZ, top = r.Top }),
+        motusLimit = $"{StrutLength:F3} m canes, panel {Panel:F3} m, node gap {NodeGap:F3} m; pit between A and D; L-grip on the anchor columns or fixed members; unreachable: " +
+                     (UnreachableMembers.Count == 0 ? "none" : string.Join(", ", UnreachableMembers.Keys))
+    };
+
+    public static object StoreDescription() => new
+    {
+        slots = new[] { new { id = "feed", x = Store.X, y = Store.Y, z = Store.Z, pitch = Store.PitchDeg, yaw = Store.YawDeg } }
+    };
+}

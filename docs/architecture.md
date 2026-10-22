@@ -17,6 +17,9 @@ See [rhino-host.md](rhino-host.md) for Windows/macOS deployment (managed-first).
 - **Motion-program contracts** — `MotionProgramRequest` with `PTP/LIN/CIRC` segments
 - **Presets are data** — JSON files loaded by Motus.Presets, not hardcoded switches
 - **PlanningContext** — robot + scene + attach/detach; optional `PlanningGroup` for reduced-DOF planning
+- **TaskInstance / CoreTasks** — robot-independent intent and sequence rules; [task validation](tasks.md) reuses IK and collision interfaces
+
+`Motus.Viewer` is an optional Blazor WebAssembly host. It depends on the libraries; the libraries do not depend on its UI or bamboo-specific planning services. Three.js renders the C# state.
 
 ## Motion Program Layer (0.6.0)
 

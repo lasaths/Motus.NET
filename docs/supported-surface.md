@@ -37,6 +37,7 @@ Motus.NET tests + docs; **no** Motus.Grasshopper GA Aerial / H2 / Go2 components
 | Unitree H2 | Meshless LoadTree / FK / arm group fixture | Balance, biped Walk GA |
 | Unitree Go2 | Meshless FK stance smoke (≠ insectoid legged) | Spot-class loco product |
 | Catalog Panda / UR10e+Robotiq minimal | CI smoke fixtures | Claiming every upstream URDF is GA |
+| Bamboo viewer / truss search | Optional Blazor preview, task data, sampled collision and bounded planner-confirmed build sequence | Physical assembly, load/stiffness certification, or a general complete assembly planner |
 
 See [aerial.md](aerial.md), ADR `docs/adr/0001-holonomic-se3-aerial.md`, and roadmap experimental mobility.
 

@@ -1,0 +1,5 @@
+/* IBM Plex (SIL Open Font License 1.1, see ../../fonts/OFL.txt), bundled locally: no CDN, no local() lookup.
+   Adapted from ANDURA tokens/build/andura-fonts.css with app-relative URLs. */
+@font-face { font-family: "IBM Plex Mono"; font-weight: 400; font-display: swap; src: url("../../fonts/IBMPlexMono-Regular.ttf") format("truetype"); }
+@font-face { font-family: "IBM Plex Mono"; font-weight: 500; font-display: swap; src: url("../../fonts/IBMPlexMono-Medium.ttf") format("truetype"); }
+@font-face { font-family: "IBM Plex Sans"; font-weight: 400 500; font-display: swap; src: url("../../fonts/IBMPlexSans-Variable.ttf") format("truetype"); }
