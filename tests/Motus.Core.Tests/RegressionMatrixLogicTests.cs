@@ -234,7 +234,20 @@ public class RegressionMatrixLogicTests
             Retimer = new TrajectoryRetimerOptions { Algorithm = RetimerAlgorithm.TotgLite }
         });
         Assert.Equal(explicitLite.DurationSeconds, defaulted.DurationSeconds, 9);
-        Assert.True(defaulted.DurationSeconds >= traj.DurationSeconds);
+        // The planner's own clock is not a lower bound (it uses a conservative fixed speed). The retimed
+        // duration must respect every joint's rest-to-rest minimum time under its velocity/acceleration limits.
+        var first = traj.Points[0].JointState.Positions;
+        var last = traj.Points[^1].JointState.Positions;
+        var bound = 0.0;
+        for (var j = 0; j < first.Length; j++)
+        {
+            var d = Math.Abs(last[j] - first[j]);
+            var v = preset.JointLimits[j].MaxVelocity!.Value;
+            var a = preset.JointLimits[j].MaxAcceleration!.Value;
+            bound = Math.Max(bound, d <= v * v / a ? 2.0 * Math.Sqrt(d / a) : d / v + v / a);
+        }
+        Assert.True(bound > 0);
+        Assert.True(defaulted.DurationSeconds >= bound - 1e-9, $"retimed {defaulted.DurationSeconds} s < rest-to-rest bound {bound} s");
     }
 
     [Fact]
