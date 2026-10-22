@@ -60,6 +60,13 @@ public interface ICollisionChecker
     }
 }
 
+/// <summary>Collision checker that can name every colliding body pair, not just answer yes/no.</summary>
+public interface ICollisionContactReporter
+{
+    /// <summary>All colliding pairs at <paramref name="state"/> (empty when collision-free).</summary>
+    IReadOnlyList<CollisionContact> FindContacts(JointState state, CollisionScene scene, int maxContacts = 64);
+}
+
 public interface IBaseFrameCollisionChecker : ICollisionChecker
 {
     /// <summary>Evaluate collision with an explicit world base pose for mobile-base planners.</summary>

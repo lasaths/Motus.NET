@@ -47,6 +47,7 @@ public sealed class CollisionScene
     public IReadOnlyList<(string A, string B)> AllowedPairs { get; }
 
     private readonly HashSet<(string, string)>? _allowedSet;
+    private readonly HashSet<string>? _allowedNames;
 
     public CollisionScene(IReadOnlyList<CollisionObject>? objects = null, IReadOnlyList<(string, string)>? allowedPairs = null)
     {
@@ -56,8 +57,13 @@ public sealed class CollisionScene
         if (AllowedPairs.Count > 0)
         {
             _allowedSet = new HashSet<(string, string)>();
+            _allowedNames = new HashSet<string>(StringComparer.Ordinal);
             foreach (var (a, b) in AllowedPairs)
+            {
                 _allowedSet.Add(NormalizePair(a, b));
+                _allowedNames.Add(a);
+                _allowedNames.Add(b);
+            }
         }
     }
 
@@ -66,6 +72,12 @@ public sealed class CollisionScene
         if (_allowedSet is null) return false;
         return _allowedSet.Contains(NormalizePair(bodyA, bodyB));
     }
+
+    /// <summary>
+    /// False when <paramref name="body"/> appears in no allowed pair, so every pair with it is checked
+    /// (exact shortcut for <see cref="IsPairAllowed"/>: one lookup per body instead of one per pair).
+    /// </summary>
+    public bool MayHaveAllowedPair(string body) => _allowedNames is not null && _allowedNames.Contains(body);
 
     private static (string, string) NormalizePair(string a, string b) =>
         string.CompareOrdinal(a, b) <= 0 ? (a, b) : (b, a);
