@@ -103,22 +103,22 @@ public sealed class BambooTrussPlanner
     readonly ReplayRandom _rng = new(11);
 
     /// <summary>
-    /// Seeded random stream whose position is part of a deep checkpoint: rolling back also rewinds the stream, so a
+    /// Seeded random stream whose history is part of a deep checkpoint: restoring also restores the stream, so a
     /// branch that was tried and abandoned leaves no trace and a re-run of the same calls is bit-identical.
     /// </summary>
-    sealed class ReplayRandom(int seed)
+    internal sealed class ReplayRandom(int seed)
     {
         Random _r = new(seed);
         readonly List<int> _log = new(); // -1 = NextDouble, otherwise Next(max)
-        public int Position => _log.Count;
         public double NextDouble() { _log.Add(-1); return _r.NextDouble(); }
         public int Next(int max) { _log.Add(max); return _r.Next(max); }
-        public void Rewind(int position)
+        public int[] Save() => _log.ToArray();
+        public void Restore(IReadOnlyList<int> history)
         {
-            if (position >= _log.Count) return;
             _r = new Random(seed);
-            for (var i = 0; i < position; i++) { if (_log[i] < 0) _r.NextDouble(); else _r.Next(_log[i]); }
-            _log.RemoveRange(position, _log.Count - position);
+            foreach (var call in history) { if (call < 0) _r.NextDouble(); else _r.Next(call); }
+            _log.Clear();
+            _log.AddRange(history);
         }
     }
 
@@ -1568,9 +1568,9 @@ public sealed class BambooTrussPlanner
     public sealed class DeepCheckpoint
     {
         internal DeepCheckpoint(object state, List<BambooIcdMotion.MotionKey> keys, List<(string, int, int)> cycles,
-            List<GripRecord> grips, List<string> notes, List<(string, double[])> placed, string cycle, int rng)
+            List<GripRecord> grips, List<string> notes, List<(string, double[])> placed, string cycle, int[] rng)
         { State = state; Keys = keys; Cycles = cycles; Grips = grips; Notes = notes; Placed = placed; Cycle = cycle; Rng = rng; }
-        internal int Rng { get; }
+        internal int[] Rng { get; }
         internal object State { get; }
         internal List<BambooIcdMotion.MotionKey> Keys { get; }
         internal List<(string, int, int)> Cycles { get; }
@@ -1582,7 +1582,7 @@ public sealed class BambooTrussPlanner
     }
 
     public DeepCheckpoint SaveDeep() => new(Snapshot(), Keys.ToList(), CycleKeys.ToList(), Grips.ToList(), Notes.ToList(),
-        _placed.Select(p => (p.Name, p.World)).ToList(), _cycle, _rng.Position);
+        _placed.Select(p => (p.Name, p.World)).ToList(), _cycle, _rng.Save());
 
     public void RollbackDeep(DeepCheckpoint c)
     {
@@ -1592,7 +1592,7 @@ public sealed class BambooTrussPlanner
         Notes.Clear(); Notes.AddRange(c.Notes);
         _placed.Clear(); _placed.AddRange(c.Placed);
         _cycle = c.Cycle;
-        _rng.Rewind(c.Rng);
+        _rng.Restore(c.Rng);
         Restore((State)c.State, c.Keys.Count);
         _envKey = int.MinValue; // the env cache key (hold, placed count, active) cannot tell two placed sets apart
         Error = "";

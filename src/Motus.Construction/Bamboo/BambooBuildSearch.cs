@@ -18,7 +18,11 @@ public static class BambooBuildSearch
     public sealed record Choice(string MemberId, Mode Mode, string? Relay, bool WalkToPark, bool WalkToPlace, string Note);
 
     public sealed record Result(List<BambooIcdMotion.TaskEdit> Tasks, List<Choice> Order, List<string> Log, bool Complete,
-        int Confirmed, int Rejected, double Seconds);
+        int Confirmed, int Rejected, double Seconds)
+    {
+        public int Attempts => Confirmed + Rejected;
+        public string StopReason { get; init; } = "";
+    }
 
     public sealed record Options
     {
@@ -27,6 +31,23 @@ public static class BambooBuildSearch
         public IReadOnlyList<double> Rolls { get; init; } = Enumerable.Range(0, 8).Select(i => i * 45.0).ToArray();
         /// <summary>Stop after this many rejected planner confirmations (the search reports how far it got).</summary>
         public int MaxRejected { get; init; } = 40;
+        /// <summary>Total planner confirmations, including successful choices whose continuation reaches a dead end.</summary>
+        public int MaxConfirmations { get; init; } = 1000;
+
+        internal Options Validate()
+        {
+            if (MaxRejected < 0) throw new ArgumentOutOfRangeException(nameof(MaxRejected));
+            if (MaxConfirmations < 0) throw new ArgumentOutOfRangeException(nameof(MaxConfirmations));
+            if (CaneOffsets is null || CaneOffsets.Count == 0 || CaneOffsets.Count > 64
+                || CaneOffsets.Any(f => !double.IsFinite(f) || f < -1 || f > 1))
+                throw new ArgumentException("Cane offsets must contain 1–64 finite fractions in [-1, 1].", nameof(CaneOffsets));
+            if (Rolls is null || Rolls.Count == 0 || Rolls.Count > 72 || Rolls.Any(r => !double.IsFinite(r)))
+                throw new ArgumentException("Clamp rolls must contain 1–72 finite angles in degrees.", nameof(Rolls));
+            if (CaneOffsets.Count * Rolls.Count > 512)
+                throw new ArgumentException("The grid must contain at most 512 sites per cane.");
+            return this;
+        }
+
         /// <summary>
         /// Write the choices made so far (with the layout fingerprint) to this file after every confirmed choice and at
         /// the end, so an interrupted search can resume (<see cref="LoadCheckpoint"/> → <see cref="ResumeAt"/>).
@@ -73,16 +94,28 @@ public static class BambooBuildSearch
 
     public static Result Run(BambooIcdCell cell, Options? options = null, Action<string>? log = null)
     {
-        var o = options ?? new Options();
+        ArgumentNullException.ThrowIfNull(cell);
+        var o = (options ?? new Options()).Validate();
         var clock = System.Diagnostics.Stopwatch.StartNew();
         var graph = BambooStructureGraph.FromLayout();
         var lines = new List<string>();
         void Log(string s) { lines.Add(s); log?.Invoke(s); }
 
+        if (o.MaxRejected == 0 || o.MaxConfirmations == 0)
+        {
+            const string reason = "planner confirmation budget is zero";
+            Log($"build search: incomplete — 0/{graph.Edges.Count} placed; {reason}");
+            return new Result(new(), new(), lines, false, 0, 0, clock.Elapsed.TotalSeconds) { StopReason = reason };
+        }
+
         // Scene check: optimistic necessary condition, and the relay candidate sets.
         var check = BambooSceneCheck.Run(null, BambooTrussLayout.Members);
         Log(check.Summary);
-        if (!check.Ok) return new Result(new(), new(), lines, false, 0, 0, clock.Elapsed.TotalSeconds);
+        if (!check.Ok)
+        {
+            foreach (var detail in check.Details) Log("scene check · " + detail);
+            return new Result(new(), new(), lines, false, 0, 0, clock.Elapsed.TotalSeconds) { StopReason = "scene check failed" };
+        }
         var relayOptions = check.Members.ToDictionary(m => m.MemberId,
             m => m.RelayOptions.Select(r => BambooTrussLayout.RelayId(m.MemberId, r.Split('/')[0], r.Split('/')[1])).ToList());
 
@@ -90,20 +123,27 @@ public static class BambooBuildSearch
         Log($"reach grid: {grid.Sites.Count} sites × {grid.Line.Count} lines");
 
         var p = new BambooTrussPlanner(cell);
-        if (!p.Start()) { Log("planner start failed: " + p.Error); return new Result(new(), new(), lines, false, 0, 0, clock.Elapsed.TotalSeconds); }
+        if (!p.Start()) { Log("planner start failed: " + p.Error); return new Result(new(), new(), lines, false, 0, 0, clock.Elapsed.TotalSeconds) { StopReason = "planner start failed: " + p.Error }; }
         var start = BambooTrussLayout.StakeNamed(BambooTrussLayout.Current.StartStake);
         var placed = new List<string>();
         var order = new List<Choice>();
         var tasks = new List<BambooIcdMotion.TaskEdit>();
-        var failed = new HashSet<string>();
+        var bestOrder = new List<Choice>();
+        var bestTasks = new List<BambooIcdMotion.TaskEdit>();
         int confirmed = 0, rejected = 0;
+        string stopReason = "search exhausted";
+
+        bool BudgetReached()
+        {
+            if (rejected >= o.MaxRejected) { stopReason = $"rejected confirmation limit ({o.MaxRejected})"; return true; }
+            if (confirmed + rejected >= o.MaxConfirmations) { stopReason = $"confirmation limit ({o.MaxConfirmations})"; return true; }
+            return false;
+        }
 
         bool Dfs()
         {
             if (placed.Count == graph.Edges.Count) return true;
-            if (rejected >= o.MaxRejected) return false;
-            var key = string.Join(",", placed.OrderBy(x => x, StringComparer.Ordinal)) + "|" + StandKey(p);
-            if (failed.Contains(key)) return false;
+            if (BudgetReached()) return false;
 
             var fixedIds = graph.Fixed(placed).ToHashSet(StringComparer.Ordinal);
             var stand = Stand(p);
@@ -133,13 +173,15 @@ public static class BambooBuildSearch
             var resume = o.ResumeAt is { } ra && placed.Count < ra.Count ? ra[placed.Count] : null;
             foreach (var (id, mode, relay, _) in options.OrderBy(x => resume is not null && x.Id == resume.MemberId && x.Mode == resume.Mode && x.Relay == resume.Relay ? 0 : 1).ThenBy(x => x.Rank))
             {
+                if (BudgetReached()) break;
                 var cp = p.SaveDeep();
                 var choice = Confirm(p, id, mode, relay, Log);
-                if (choice is null) { rejected++; p.RollbackDeep(cp); if (rejected >= o.MaxRejected) break; continue; }
+                if (choice is null) { rejected++; p.RollbackDeep(cp); continue; }
                 confirmed++;
                 placed.Add(id); order.Add(choice);
                 var nt = tasks.Count;
                 tasks.AddRange(TasksFor(choice));
+                if (order.Count > bestOrder.Count) { bestOrder = order.ToList(); bestTasks = tasks.ToList(); }
                 Log($"{placed.Count}/{graph.Edges.Count} {choice.Note}");
                 SaveCheckpoint(o.CheckpointPath, order, placed.Count == graph.Edges.Count);
                 if (Dfs()) return true;
@@ -148,14 +190,15 @@ public static class BambooBuildSearch
                 tasks.RemoveRange(nt, tasks.Count - nt);
                 p.RollbackDeep(cp);
             }
-            failed.Add(key);
             return false;
         }
 
         var complete = Dfs();
         Log(complete ? $"build search: {string.Join(" → ", order.Select(c => c.MemberId + (c.Mode == Mode.Direct ? "" : c.Mode == Mode.Land ? " (land)" : $" (relay {c.Relay})")))} — {confirmed} confirmed, {rejected} rejected, {clock.Elapsed.TotalSeconds:F0} s"
-            : $"build search: incomplete — {order.Count}/{graph.Edges.Count} placed, {rejected} rejected");
-        return new Result(tasks, order, lines, complete, confirmed, rejected, clock.Elapsed.TotalSeconds);
+            : $"build search: incomplete — best confirmed prefix {bestOrder.Count}/{graph.Edges.Count} placed, {confirmed} confirmed, {rejected} rejected; {stopReason}");
+        cell.SetMountViewer(BambooTrussLayout.StartBase);
+        return new Result(complete ? tasks : bestTasks, complete ? order : bestOrder, lines, complete, confirmed, rejected, clock.Elapsed.TotalSeconds)
+        { StopReason = complete ? "complete" : stopReason };
     }
 
     /// <summary>Confirm one choice with the real planner (the same calls <see cref="BambooTrussMotion.RunSequence"/> makes).</summary>
@@ -221,12 +264,6 @@ public static class BambooBuildSearch
     {
         var k = p.Keys[^1];
         return new BambooReachMap.ClampSite(k.BaseOn ?? p.LStake, 0, 0, k.BaseWorld!);
-    }
-
-    static string StandKey(BambooTrussPlanner p)
-    {
-        var w = p.Keys[^1].BaseWorld ?? Array.Empty<double>();
-        return p.LStake + ":" + string.Join(",", w.Select(v => Math.Round(v, 3).ToString(System.Globalization.CultureInfo.InvariantCulture)));
     }
 
     static double Dist(BambooIcdCell.StrutPlacement m, BambooTrussLayout.Stake s) =>

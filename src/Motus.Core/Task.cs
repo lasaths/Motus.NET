@@ -22,9 +22,17 @@ public sealed class TaskInstance
     {
         if (string.IsNullOrWhiteSpace(identity))
             throw new ArgumentException("Identity cannot be null or whitespace.", nameof(identity));
+        ArgumentNullException.ThrowIfNull(frames);
+        foreach (var (name, frame) in frames)
+        {
+            if (string.IsNullOrWhiteSpace(name))
+                throw new ArgumentException("Frame names cannot be empty or whitespace.", nameof(frames));
+            if (!TaskPathValidator.IsFiniteFrame(frame))
+                throw new ArgumentException($"Frame '{name}' must have finite coordinates and a nonzero finite quaternion.", nameof(frames));
+        }
 
         Identity = identity;
-        Frames = new ReadOnlyDictionary<string, Frame>(new Dictionary<string, Frame>(frames ?? new Dictionary<string, Frame>()));
+        Frames = new ReadOnlyDictionary<string, Frame>(new Dictionary<string, Frame>(frames));
         Metadata = new ReadOnlyDictionary<string, object>(metadata != null
             ? new Dictionary<string, object>(metadata)
             : new Dictionary<string, object>());
@@ -78,13 +86,14 @@ public sealed class TaskPath
 
     public TaskPath(IEnumerable<TaskInstance> tasks)
     {
-        Tasks = new List<TaskInstance>(tasks).AsReadOnly();
+        ArgumentNullException.ThrowIfNull(tasks);
+        var list = new List<TaskInstance>(tasks);
+        if (list.Any(task => task is null))
+            throw new ArgumentException("A task path cannot contain null tasks.", nameof(tasks));
+        Tasks = list.AsReadOnly();
     }
 
-    public TaskPath(params TaskInstance[] tasks)
-    {
-        Tasks = new List<TaskInstance>(tasks).AsReadOnly();
-    }
+    public TaskPath(params TaskInstance[] tasks) : this((IEnumerable<TaskInstance>)tasks) { }
 
     public override string ToString() => $"TaskPath[{Tasks.Count} tasks]";
 }
@@ -96,6 +105,9 @@ public static class TaskPathValidator
 {
     /// <summary>
     /// Check if all task frames in a path are reachable and collision-free.
+    /// IK and collision checker must be configured for <paramref name="robot"/>.
+    /// Optional base/tool frames must match its preset; differing overrides are rejected because
+    /// these solver interfaces cannot reconfigure both kinematics and collision geometry.
     /// </summary>
     public static TaskPathValidationResult Validate(
         TaskPath path,
@@ -107,12 +119,28 @@ public static class TaskPathValidator
         ToolFrame? toolFrame = null,
         JointState? seed = null)
     {
+        ArgumentNullException.ThrowIfNull(path);
+        ArgumentNullException.ThrowIfNull(robot);
+        ArgumentNullException.ThrowIfNull(ik);
+        ArgumentNullException.ThrowIfNull(checker);
+        ArgumentNullException.ThrowIfNull(scene);
         baseFrame ??= robot.Preset.BaseFrame;
         toolFrame ??= robot.Preset.ToolFrame;
-        seed ??= new JointState(new double[robot.Preset.AxisCount]);
 
         var errors = new List<string>();
         var reachableStates = new List<JointState>();
+        if (!IsFiniteFrame(baseFrame.Frame) || !IsFiniteFrame(toolFrame.Frame))
+            errors.Add("Invalid input: base/tool frames must have finite coordinates and a nonzero finite quaternion.");
+        if (!baseFrame.Frame.Equals(robot.Preset.BaseFrame.Frame) || !toolFrame.Frame.Equals(robot.Preset.ToolFrame.Frame))
+            errors.Add("Unsupported base/tool frame override: configure the robot, IK and collision checker with matching frames.");
+        if (robot.Preset.AxisCount <= 0 || robot.Preset.JointLimits.Count != robot.Preset.AxisCount)
+            errors.Add("Invalid input: robot axis count must be positive and match its joint limits.");
+        // Zero is not a legal initial configuration for every prismatic axis.
+        seed ??= new JointState(robot.Preset.JointLimits.Select(limit => Math.Clamp(0.0, limit.Min, limit.Max)).ToArray());
+        if (!seed.Validate(robot.Preset.JointLimits).IsValid)
+            errors.Add("Invalid input: seed must have finite coordinates within the robot joint limits.");
+        if (errors.Count > 0)
+            return new TaskPathValidationResult(false, errors, reachableStates);
 
         foreach (var task in path.Tasks)
         {
@@ -126,7 +154,7 @@ public static class TaskPathValidator
                     continue;
                 }
 
-                if (!solution.Validate(robot.Preset.JointLimits).IsValid)
+                if (solution is null || !solution.Validate(robot.Preset.JointLimits).IsValid)
                 {
                     errors.Add($"Task '{task.Identity}' frame '{frameName}' violates joint limits");
                     continue;
@@ -148,6 +176,9 @@ public static class TaskPathValidator
 
     /// <summary>
     /// Check if segments between consecutive task frames are collision-free.
+    /// This checks joint-space interpolation, not a Cartesian line. The first frame is the start;
+    /// the IK seed is a numerical hint and is not included as a motion endpoint.
+    /// <paramref name="configurationStep"/> is in each axis's coordinate unit (radians or meters).
     /// </summary>
     public static TaskPathValidationResult ValidateWithMotion(
         TaskPath path,
@@ -160,6 +191,10 @@ public static class TaskPathValidator
         ToolFrame? toolFrame = null,
         JointState? seed = null)
     {
+        if (!double.IsFinite(configurationStep) || configurationStep <= 0)
+            return new TaskPathValidationResult(false,
+                new[] { "Invalid input: configurationStep must be positive and finite (radians for revolute axes, meters for prismatic)." },
+                Array.Empty<JointState>());
         var frameCheck = Validate(path, robot, ik, checker, scene, baseFrame, toolFrame, seed);
         if (!frameCheck.IsValid)
             return frameCheck;
@@ -176,6 +211,15 @@ public static class TaskPathValidator
         }
 
         return new TaskPathValidationResult(errors.Count == 0, errors, states);
+    }
+
+    internal static bool IsFiniteFrame(Frame frame)
+    {
+        if (!double.IsFinite(frame.X) || !double.IsFinite(frame.Y) || !double.IsFinite(frame.Z) ||
+            !double.IsFinite(frame.Qw) || !double.IsFinite(frame.Qx) || !double.IsFinite(frame.Qy) || !double.IsFinite(frame.Qz))
+            return false;
+        var normSq = frame.Qw * frame.Qw + frame.Qx * frame.Qx + frame.Qy * frame.Qy + frame.Qz * frame.Qz;
+        return double.IsFinite(normSq) && normSq >= 1e-24;
     }
 }
 

@@ -52,6 +52,7 @@ public static class BambooTrussMotion
         ArgumentNullException.ThrowIfNull(cell);
         BambooTrussLayout.Configure(cell);
         lock (CellGate) MotusCell = cell;
+        if (_shippedTasks?.Source == "graph order (cell unavailable)") _shippedTasks = null;
         cell.SetMountViewer(BambooTrussLayout.StartBase);
     }
 
@@ -213,19 +214,21 @@ public static class BambooTrussMotion
     }
 
     /// <summary>
-    /// The shipped /bamboo-truss task sequence (Warren truss over the pit): triangle 1 from the A column, a node-transfer
-    /// walk onto it, the far members tried from there (reported when unreachable), then a walk back onto the A column.
+    /// The searched default sequence, with diagnostics when only a graph-order task list could be provided.
     /// </summary>
-    static (string Fingerprint, List<BambooIcdMotion.TaskEdit> Tasks, string Source)? _shippedTasks;
+    static (string Fingerprint, List<BambooIcdMotion.TaskEdit> Tasks, string Source, List<string> Diagnostics, string Error)? _shippedTasks;
 
-    /// <summary>Where <see cref="ShippedTasks"/> came from: "shipped plan", "build search" or "graph order (search incomplete)".</summary>
+    /// <summary>Where the default tasks came from, including an incomplete search or an unavailable cell.</summary>
     public static string ShippedTasksSource => _shippedTasks?.Source ?? "not derived yet";
+    public static IReadOnlyList<string> ShippedTasksDiagnostics => _shippedTasks?.Diagnostics.ToArray() ?? Array.Empty<string>();
+    public static string ShippedTasksError => _shippedTasks?.Error ?? "";
 
     /// <summary>
     /// The default task sequence, derived by <see cref="BambooBuildSearch"/> (structure graph + reach map, every choice
     /// confirmed with the planner) — no hand-ordered list. The build-time plan carries the searched sequence, so the page
     /// reads it from there; when the layout changed the search runs live, and if it cannot complete the members are
-    /// listed in graph order (the scene check then explains what is unreachable). Returns a fresh copy.
+    /// listed in graph order for editing, with failure diagnostics; that fallback cannot be played as a complete plan.
+    /// Returns a fresh copy.
     /// </summary>
     public static List<BambooIcdMotion.TaskEdit> ShippedTasks()
     {
@@ -234,18 +237,30 @@ public static class BambooTrussMotion
         {
             var source = "shipped plan";
             var tasks = LoadCachedTasks(fp);
-            if (tasks is null && TryCell() is { } cell)
+            var diagnostics = new List<string>();
+            var error = "";
+            if (tasks is null)
             {
-                // Optional checkpoint file (offline regeneration): resume an interrupted search, save progress.
-                var ckpt = Environment.GetEnvironmentVariable("BAMBOO_SEARCH_CHECKPOINT");
-                var r = BambooBuildSearch.Run(cell, string.IsNullOrEmpty(ckpt) ? null
-                    : new BambooBuildSearch.Options { CheckpointPath = ckpt, ResumeAt = BambooBuildSearch.LoadCheckpoint(ckpt) },
-                    string.IsNullOrEmpty(ckpt) ? null : s => File.AppendAllText(ckpt + ".log", s + "\n"));
-                source = r.Complete ? "build search" : "graph order (search incomplete)";
-                tasks = r.Complete ? r.Tasks : null;
+                if (TryCell() is { } cell)
+                {
+                    // Optional checkpoint file (offline regeneration): resume an interrupted search, save progress.
+                    var ckpt = Environment.GetEnvironmentVariable("BAMBOO_SEARCH_CHECKPOINT");
+                    var r = BambooBuildSearch.Run(cell, string.IsNullOrEmpty(ckpt) ? null
+                        : new BambooBuildSearch.Options { CheckpointPath = ckpt, ResumeAt = BambooBuildSearch.LoadCheckpoint(ckpt) },
+                        string.IsNullOrEmpty(ckpt) ? null : s => File.AppendAllText(ckpt + ".log", s + "\n"));
+                    source = r.Complete ? "build search" : "graph order (search incomplete)";
+                    diagnostics.AddRange(r.Log);
+                    tasks = r.Complete ? r.Tasks : null;
+                    if (!r.Complete) error = $"build search incomplete — {r.Order.Count}/{BambooTrussLayout.Members.Count} members in the best confirmed prefix; {r.StopReason}";
+                }
+                else
+                {
+                    source = "graph order (cell unavailable)";
+                    error = "Motus cell required to derive the default build order (call UseCell).";
+                    diagnostics.Add(error);
+                }
             }
-            if (tasks is null) source = "graph order (search incomplete)";
-            _shippedTasks = c = (fp, tasks ?? DefaultTasks(), source);
+            _shippedTasks = c = (fp, tasks ?? DefaultTasks(), source, diagnostics, error);
         }
         var json = System.Text.Json.JsonSerializer.Serialize(c.Tasks);
         return System.Text.Json.JsonSerializer.Deserialize<List<BambooIcdMotion.TaskEdit>>(json)!;
@@ -258,14 +273,78 @@ public static class BambooTrussMotion
             using var stream = typeof(BambooTrussMotion).Assembly.GetManifestResourceStream(DefaultPlanResource);
             if (stream is null) return null;
             var c = System.Text.Json.JsonSerializer.Deserialize<PlanCache>(stream);
-            return c is not null && FingerprintMatches(c.Fingerprint, fp) && c.Tasks.Count > 0 ? c.Tasks : null;
+            return c is not null && FingerprintMatches(c.Fingerprint, fp) && CachedPlanError(c) is null ? c.Tasks : null;
         }
         catch (System.Text.Json.JsonException) { return null; }
     }
 
-    static string Signature(IEnumerable<BambooIcdMotion.TaskEdit> tasks) =>
-        string.Join(";", tasks.Select(t => t.Identity == "walk" ? $"walk:{t.Object}:{FingerprintNumber(WalkTargetF(t))}:{t.Gait}"
-            : t.Identity == "park" ? $"park:{t.Object}:{t.Via}" : $"{t.Identity}:{t.Object}"));
+    // Every editable task field is part of cache identity, including jaw openings and all plane coordinates.
+    static string Signature(IEnumerable<BambooIcdMotion.TaskEdit> tasks) => System.Text.Json.JsonSerializer.Serialize(tasks);
+
+    /// <summary>Reject editable settings the truss planner does not consume, instead of silently using layout defaults.</summary>
+    internal static string? TaskSurfaceError(IReadOnlyList<BambooIcdMotion.TaskEdit> tasks)
+    {
+        var parked = new Dictionary<string, string>(StringComparer.Ordinal);
+        for (var i = 0; i < tasks.Count; i++)
+        {
+            var t = tasks[i];
+            string Bad(string why) => $"task #{i} {t?.Identity} {t?.Object}: {why}";
+            if (t is null || string.IsNullOrWhiteSpace(t.Object) || t.Planes is null)
+                return Bad("invalid task input");
+            if (!double.IsFinite(t.JawMm) || t.Planes.Any(p => p is null ||
+                new[] { p.X, p.Y0, p.Z, p.PitchDeg, p.YawDeg, p.YMm }.Any(v => !double.IsFinite(v))))
+                return Bad("non-finite jaw opening or plane input");
+            BambooIcdMotion.TaskEdit expected;
+            try
+            {
+                if (t.Identity == "walk")
+                {
+                    if (t.Gait == LandGait) expected = LandTask(t.Object);
+                    else
+                    {
+                        if (t.Gait is not null && !BambooWalk.Gaits.Any(g => g.Id == t.Gait)) return Bad("unknown gait");
+                        expected = WalkTask(t.Object, WalkTargetF(t), t.Gait);
+                    }
+                }
+                else
+                {
+                    var m = BambooTrussLayout.Members.FirstOrDefault(m => m.Id == t.Object);
+                    if (m is null) return Bad("unknown truss member");
+                    if (t.Identity == "pick")
+                    {
+                        expected = parked.TryGetValue(t.Object, out var relay) ? RelayTasks(m, relay)[0] : DefaultTasks(new[] { m })[0];
+                        parked.Remove(t.Object);
+                    }
+                    else if (t.Identity == "place") expected = DefaultTasks(new[] { m })[1];
+                    else if (t.Identity == "park")
+                    {
+                        var via = t.Via?.Split('/');
+                        if (via is null || via.Length != 2) return Bad("park requires NODE/DIR");
+                        expected = ParkTask(t.Object, via[0], via[1]);
+                        parked[t.Object] = BambooTrussLayout.RelayId(t.Object, via[0], via[1]);
+                    }
+                    else return Bad("unsupported task identity");
+                }
+            }
+            catch (Exception e) when (e is ArgumentException or InvalidOperationException or FormatException)
+            {
+                return Bad("invalid target: " + e.Message);
+            }
+            if (t.JawMm != expected.JawMm) return Bad("custom jaw openings are not supported by the truss planner");
+            if (t.Gait != expected.Gait || t.Via != expected.Via) return Bad("unsupported gait or relay setting");
+            if (t.Planes.Count != expected.Planes.Count) return Bad("custom task planes are not supported by the truss planner");
+            foreach (var p in expected.Planes)
+            {
+                var matches = t.Planes.Where(x => x.Name == p.Name).ToList();
+                if (matches.Count != 1) return Bad("custom task planes are not supported by the truss planner");
+                var a = matches[0];
+                var values = new[] { a.X - p.X, a.Y0 - p.Y0, a.Z - p.Z, a.PitchDeg - p.PitchDeg, a.YawDeg - p.YawDeg, a.YMm - p.YMm };
+                // Allow platform roundoff, far below every planning tolerance; preserve supported node-walk targets.
+                if (values.Any(v => Math.Abs(v) > 1e-12)) return Bad("custom task planes are not supported by the truss planner");
+            }
+        }
+        return null;
+    }
 
     /// <summary>A <c>park</c> block: the held cane <paramref name="member"/> is set into <paramref name="node"/>'s connector, pointing <paramref name="dir"/>.</summary>
     public static BambooIcdMotion.TaskEdit ParkTask(string member, string node, string dir)
@@ -302,6 +381,7 @@ public static class BambooTrussMotion
     public static TrussBuild RunSequence(IReadOnlyList<BambooIcdMotion.TaskEdit> tasks, Action<string>? log = null,
         List<WalkLeg>? legs = null, int maxStepsPerWalk = 150)
     {
+        if (TaskSurfaceError(tasks) is { } taskError) return new TrussBuild { Error = taskError, Tasks = tasks.ToList() };
         var cell = TryCell();
         if (cell is null) return new TrussBuild { Error = "Motus cell required (call UseCell with the viewer BambooIcdCell).", Tasks = tasks.ToList() };
         var clock = System.Diagnostics.Stopwatch.StartNew();
@@ -536,6 +616,24 @@ public static class BambooTrussMotion
         public List<BambooIcdMotion.TaskEdit> Tasks { get; set; } = new();
     }
 
+    internal static string? CachedPlanError(PlanCache c)
+    {
+        var members = BambooTrussLayout.Members.Select(m => m.Id).ToHashSet(StringComparer.Ordinal);
+        if (c.Built is null || c.Built.Count != members.Count || !members.SetEquals(c.Built))
+            return "incomplete member build";
+        if (c.Tasks is null || c.Tasks.Count == 0 || !members.SetEquals(c.Tasks.Where(t => t.Identity == "place").Select(t => t.Object)))
+            return "missing or incomplete task sequence";
+        if (TaskSurfaceError(c.Tasks) is { } error) return error;
+        if (c.Keys is null || c.Keys.Count == 0 || c.Cycles is null || c.Cycles.Count == 0) return "missing motion";
+        if (c.Keys.Any(k => !double.IsFinite(k.T) || k.Q is null || k.Q.Length != 5 || k.Q.Any(q => !double.IsFinite(q))
+            || !double.IsFinite(k.GR) || !double.IsFinite(k.GL) || k.BaseWorld is null || k.BaseWorld.Length != 16 || k.BaseWorld.Any(v => !double.IsFinite(v))))
+            return "invalid motion key";
+        if (c.Notes is null || c.Notes.Any(n => n.Contains("not built", StringComparison.Ordinal)
+            || n.Contains("no landing found", StringComparison.Ordinal) || n.Contains("not reachable with this gait", StringComparison.Ordinal)))
+            return "failed task in shipped plan";
+        return null;
+    }
+
     public static string SerializePlan(TrussBuild b) => System.Text.Json.JsonSerializer.Serialize(new PlanCache
     {
         Fingerprint = LayoutFingerprint, Keys = b.Keys, Cycles = b.Cycles, Grips = b.Grips,
@@ -568,7 +666,7 @@ public static class BambooTrussMotion
             if (stream is null) return Miss("resource missing");
             var c = System.Text.Json.JsonSerializer.Deserialize<PlanCache>(stream);
             if (c is null) return Miss("deserialised null");
-            if (c.Keys.Count == 0) return Miss("no keys");
+            if (CachedPlanError(c) is { } error) return Miss(error);
             var fp = LayoutFingerprint;
             if (!FingerprintMatches(c.Fingerprint, fp))
             {
@@ -579,7 +677,7 @@ public static class BambooTrussMotion
             var notes = c.Notes.ToList();
             notes.Add("plan: shipped build-time plan for the default tasks (byte-identical to live planning — enforced by a test); Play still Motus-scans it live");
             CacheStatus = "hit";
-            return new TrussBuild { Keys = c.Keys, Cycles = c.Cycles, Grips = c.Grips, Notes = notes, Built = c.Built, MotusChecks = c.MotusChecks };
+            return new TrussBuild { Keys = c.Keys, Cycles = c.Cycles, Grips = c.Grips, Notes = notes, Built = c.Built, MotusChecks = c.MotusChecks, Tasks = c.Tasks };
         }
         catch (Exception ex)
         {
@@ -595,12 +693,9 @@ public static class BambooTrussMotion
         }
     }
 
-    static bool IsDefaultMemberOrder(IReadOnlyList<BambooIcdMotion.TaskEdit> tasks) =>
-        Pairs(tasks).Select(p => p.MemberId).SequenceEqual(BambooTrussLayout.Members.Select(m => m.Id));
-
     /// <summary>
     /// Plan phase by phase, awaiting <paramref name="onMember"/> between phases so Blazor WASM can paint. With
-    /// <paramref name="useCache"/> the default member order uses the shipped plan (live planning takes minutes in
+    /// <paramref name="useCache"/> the exact shipped task sequence uses the shipped plan (live planning takes minutes in
     /// interpreted WASM and cannot yield inside a phase).
     /// </summary>
     public static async Task<TrussBuild> BuildAsync(
@@ -609,6 +704,10 @@ public static class BambooTrussMotion
         bool useCache = false)
     {
         tasks ??= ShippedTasks();
+        if (TaskSurfaceError(tasks) is { } taskError) return new TrussBuild { Error = taskError, Tasks = tasks.ToList() };
+        if (_shippedTasks is { } defaults && defaults.Fingerprint == LayoutFingerprint && defaults.Error.Length > 0
+            && Signature(tasks) == Signature(defaults.Tasks))
+            return new TrussBuild { Error = defaults.Error, Notes = defaults.Diagnostics.ToList(), Tasks = tasks.ToList() };
         if (tasks.Any(t => t.Identity is "walk" or "park"))
         {
             if (useCache && IsShippedSequence(tasks) && LoadCachedDefaultPlan() is { } shipped)
@@ -623,8 +722,8 @@ public static class BambooTrussMotion
         var pairs = Pairs(tasks);
         if (pairs.Count == 0)
             return new TrussBuild { Error = "No pick/place pairs (object-matched).", Tasks = tasks.ToList() };
-        if (useCache && !IsDefaultMemberOrder(tasks)) Console.WriteLine("[bamboo-truss] shipped plan not used — tasks are not the default member order");
-        if (useCache && IsDefaultMemberOrder(tasks) && LoadCachedDefaultPlan() is { } cached)
+        if (useCache && !IsShippedSequence(tasks)) Console.WriteLine("[bamboo-truss] shipped plan not used — tasks are not the shipped sequence");
+        if (useCache && IsShippedSequence(tasks) && LoadCachedDefaultPlan() is { } cached)
         {
             cached.Tasks = tasks.ToList();
             return cached;

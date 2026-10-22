@@ -637,7 +637,7 @@ internal static class CollisionGeometry
             var dy = obstacle.Pose.Y - cy;
             var dz = obstacle.Pose.Z - cz;
             var r = obstacle.ExtentX;
-            return dx * dx + dy * dy + dz * dz < r * r;
+            return dx * dx + dy * dy + dz * dz <= r * r;
         }
 
         // Box/capsule: conservative accept (narrowphase decides)

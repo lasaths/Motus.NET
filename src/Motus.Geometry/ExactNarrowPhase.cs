@@ -1,3 +1,5 @@
+using Motus.Core;
+
 namespace Motus.Geometry;
 
 /// <summary>
@@ -139,6 +141,13 @@ internal static class ExactNarrowPhase
     {
         double abx = bx - ax, aby = by - ay, abz = bz - az;
         double acx = cx - ax, acy = cy - ay, acz = cz - az;
+        var nx = aby * acz - abz * acy;
+        var ny = abz * acx - abx * acz;
+        var nz = abx * acy - aby * acx;
+        if (nx * nx + ny * ny + nz * nz == 0)
+            return Math.Min(PointSegmentDistanceSq(px, py, pz, ax, ay, az, bx, by, bz),
+                Math.Min(PointSegmentDistanceSq(px, py, pz, bx, by, bz, cx, cy, cz),
+                    PointSegmentDistanceSq(px, py, pz, cx, cy, cz, ax, ay, az)));
         double apx = px - ax, apy = py - ay, apz = pz - az;
         var d1 = abx * apx + aby * apy + abz * apz;
         var d2 = acx * apx + acy * apy + acz * apz;
@@ -303,6 +312,18 @@ internal static class ExactNarrowPhase
             return dx * dx + dy * dy + dz * dz;
         }
     }
+
+    /// <summary>Frame overload of <see cref="SegmentSegmentDistanceSq(double,double,double,double,double,double,double,double,double,double,double,double)"/>.</summary>
+    public static double SegmentSegmentDistanceSq(Frame p1, Frame q1, Frame p2, Frame q2) =>
+        SegmentSegmentDistanceSq(p1.X, p1.Y, p1.Z, q1.X, q1.Y, q1.Z, p2.X, p2.Y, p2.Z, q2.X, q2.Y, q2.Z);
+
+    /// <summary>Frame overload of the exact segment–triangle distance.</summary>
+    public static double SegmentTriangleDistanceSq(Frame p, Frame q, Frame a, Frame b, Frame c) =>
+        SegmentTriangleDistanceSq(p.X, p.Y, p.Z, q.X, q.Y, q.Z, a.X, a.Y, a.Z, b.X, b.Y, b.Z, c.X, c.Y, c.Z);
+
+    /// <summary>Exact squared distance from segment [p,q] (box-local) to the AABB with half extents (hx,hy,hz).</summary>
+    public static double SegmentAabbDistanceSq(Frame p, Frame q, double hx, double hy, double hz) =>
+        SegmentAabbDistanceSqLocal(p.X, p.Y, p.Z, q.X, q.Y, q.Z, hx, hy, hz);
 
     /// <summary>Sphere centres along a capsule axis spaced at most a quarter radius apart (legacy inner approximation; kept only OR-ed with the exact capsule tests so verdicts are never less conservative).</summary>
     public static int DenseCapsuleSamples(double radius, double halfLength)
