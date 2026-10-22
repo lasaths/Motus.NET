@@ -135,37 +135,26 @@ click or drag the track to scrub, click a block to jump to its start; Play/Pause
 ### Walking on the bamboo: the `walk` task block (shipped, PTP)
 
 - **Task block:** a `walk` task is a string-identity task like pick/place: `Identity = "walk"`, `Object` = target
-  clamp ("placed-baseR", "stake-S3"), one plane `target` at the clamp point on that cane (its parameter is read back
+  clamp ("placed-AM", "anchor-A"), one plane `target` at the clamp point on that cane (its parameter is read back
   from the plane), and `Gait`. `BambooTrussMotion.WalkTask(target, f, gait)` builds one; `RunSequence(tasks)` runs
   walk / pick / place blocks in order (BuildAsync hands over to it when a sequence contains walk blocks). The task list
-  shows walk blocks as "Walk → target" with a gait selector. The default task list is `BambooTrussMotion.ShippedTasks()`: walk to S3, baseL, baseR, diagL, diagR, sep, then three node walk blocks on the bridge (S3 → baseL B end, across B onto baseR, back to S3).
+  shows walk blocks as "Walk → target" with a gait selector. `LandTask(member)` instead chooses a clamp site from which
+  that member can actually be built. The shipped Warren sequence has four targeted landings: T1–T2, M–D, the T2–D
+  relay park in T1/z+, and the final T2–D placement. `ShippedTasks()` reads the searched sequence from the shipped plan
+  or runs a build search when the layout changes.
 - **Step (every gait):** R clamps something fixed → `swap base L→R` at rest → L opens and leaves its cane (open side)
-  or stake → L clamps the next site → `swap base R→L` at rest → R retreats and parks. One gripper always clamped,
-  joints only, FK-exact clamps, only stakes outboard of A and canes fixed at both ends, nothing carried.
+  or anchor column → L clamps the next site → `swap base R→L` at rest → R retreats and parks. One gripper always clamped,
+  joints only, FK-exact clamps, only anchor columns and canes fixed into the anchored subframe, nothing carried.
   `BambooWalk.Explore` is a BFS over L clamp sites (cane, parameter, side) with deep planner checkpoints per site.
 - **Gaits (`BambooWalk.Gaits`):** inchworm (R on L's own cane, L ≤ 7 cm), shuffle (R leads ≤ 13 cm, L closes up one
   3 cm step behind R), brachiation swing (R beside L, L swings ≥ 10 cm to the farthest site), node transfer (L only
   next to a joint, f = ±1, node to node), side-clamp roll (inchworm + re-clamping the same point from the other side).
   Default: node transfer.
-- **PTP only:** `BambooTrussPlanner.Ptp = true` — every move is a joint-space point-to-point segment between IK
+- **PTP only:** `MotionConstraints.PointToPointOnly` — every move is a joint-space point-to-point segment between IK
   waypoints (densely Motus-checked, joint via-points / RRT if the direct segment hits; a backed-off pose may be used
   as a PTP via-point). No Cartesian approach / lower / slide / back-off. Keys are labelled `PTP Grasp`, `PTP Place`,
   `L:PTP to X`, `PTP via`, `PTP carry via`, `PTP Lift`, `PTP Retreat`. The planner's segment check also verifies the
-  exact sample points the Motus scan uses (fixes a carry graze "R-grip jaw- ↔ ground-S1" the coarser check missed).
-- **Benchmark at 0.30 m (PTP):**
-
-  | Gait | S3 → baseL B end | across B onto baseR | baseR → D end | back to S3 |
-  |---|---|---|---|---|
-  | node transfer | ✔ 1 step (33.6 cm) | ✔ 1 node transfer (5.4 cm) | ✘ | ✔ 1 step |
-  | inchworm / shuffle / swing / roll | ✔ (shared brachiate entry) | ✘ | ✘ | ✔ |
-
-  Winner and default: node transfer. The D end is not reached by any gait and is not in the shipped sequence.
-- **0.25 m, whole bridge:** node transfer also uses the new double-fixed sep (R clamps sep beside B). Walks onto sep's
-  or diagR's ends (f = ±1) are not reached (23 steps tried, 2 sites); the D end is not in the sequence.
-- **Shipped plan (0.25 m, `grounded-ik-8-full-bridge`, 136 keys, all five built, planned live in ≈ 190 s)** — progress:
-  walk to S3 0–10.1 %, baseL 10.1–16.4 %, baseR 16.4–27.7 %, diagL 27.7–37.9 %, diagR 37.9–44.9 %, sep 44.9–59.2 %,
-  walk (node) → baseL@-1 59.2–71.5 % (brachiate S3 → baseR B end) and 71.5–81.3 % (node transfer, R on sep),
-  walk (node) → baseR@-1 81.3–89.6 % (R on sep), walk (node) → stake-S3 89.6–100 %.
+  exact sample points the Motus scan uses.
 
 ### Motion rules, shared collision check, reach map, scene check (`/bamboo-truss`)
 
@@ -212,8 +201,15 @@ click or drag the track to scrub, click a block to jump to its start; Play/Pause
   if it or anything after it fails. The default task list (`BambooTrussMotion.ShippedTasks`) is the search result:
   the build-time plan carries it (`PlanCache.Tasks`); on a layout change the search runs live.
 - Planner: a deep checkpoint now also rewinds the RRT random stream, so a tried-and-abandoned branch leaves no trace
-  and re-planning the searched sequence is identical. A placement is also rejected when the released cane itself
+  and re-planning the searched sequence is identical. Each checkpoint retains its own random history, so walk BFS can
+  restore older and newer branches in any order. A placement is also rejected when the released cane itself
   (jaw FK ∘ held offset — grasp and place residuals add) is off its design pose by more than 0.5 mm / 0.5°.
 - Shipped (`warren-pit-3-search`): AT1 → T1M → AM → land → T1T2 → land → MD → MT2 → land → park T2D in T1/z+ →
   land → re-grasp → T2D. 7/7, 4 walks, 8 base swaps, one relay.
+- Search budgets are deterministic: at most 40 rejected choices and 1000 total planner confirmations by default.
+  An incomplete result retains the longest confirmed prefix and its stop reason. `ShippedTasksSource`,
+  `ShippedTasksDiagnostics` and `ShippedTasksError` expose a failed derivation; graph-order fallback tasks remain
+  editable but `BuildAsync` reports the failure instead of playing them as a finished default plan. A cell-unavailable
+  fallback is invalidated when `UseCell` binds the viewer cell. All editable task fields participate in shipped-plan
+  cache identity.
 

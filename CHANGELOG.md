@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Robot-independent `TaskInstance` / `TaskPath`, typed pick/place/walk/park views, sequence rules, and task-path reachability and sampled collision validation.
+- Experimental Motus.Viewer `/bamboo-truss`: Warren truss preview, shared planner/scan collision rules, reach-map scene checks, structure graph, and bounded planner-confirmed build search with targeted landings and relay placement.
 - `ICollisionContactReporter` / `CollisionContact`: `RobotMeshCollisionChecker.FindContacts` names every colliding
   body pair (self, scene, tool, attached) by collision-geometry / scene-object name.
 - `RobotMeshCollisionChecker(robot, chain, attached, selfCollisionMinLinkGap)` — configurable self-collision gap
@@ -23,6 +25,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   box/sphere/capsule/plane per triangle, denser capsule sampling. Previously boxes were a corner/centre sphere
   cloud (over-reporting by up to a half-extent) and meshes vs primitives sampled vertices with 1 cm spheres.
 - Allowed pairs may name individual collision geometries as well as `link:i` aliases (self, scene, attached).
+
+### Fixed
+
+- Retiming defaults follow each joint's coordinate unit: meters use m/s and m/s² defaults; revolute joints keep rad/s and rad/s² defaults. Two-point rest-to-rest timing observes velocity as well as acceleration limits.
+- Deep bamboo planner checkpoints restore the random stream across independently explored branches; edited task data invalidates the shipped plan cache.
+- Task validation rejects unsupported frame overrides and invalid/non-finite inputs instead of silently validating a different problem.
 
 ## [2.0.0] - 2026-09-19
 

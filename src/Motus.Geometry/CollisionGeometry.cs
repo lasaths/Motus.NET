@@ -256,11 +256,30 @@ internal static class CollisionGeometry
             case CollisionShape.Sphere:
                 return MeshHitsSpheresLocal(verts, idx, worldM, new[] { (obstacle.Pose, obstacle.ExtentX) });
             case CollisionShape.Capsule:
-                return MeshHitsSpheresLocal(verts, idx, worldM,
-                    SampleCapsule(obstacle, ExactNarrowPhase.DenseCapsuleSamples(obstacle.ExtentX, obstacle.ExtentY)));
+                return MeshHitsCapsuleLocal(mesh, worldM, obstacle);
             default:
                 return false;
         }
+    }
+
+    // A collision mesh denotes its triangle surfaces; a closed surface is not automatically a solid.
+    private static bool MeshHitsCapsuleLocal(CollisionObject mesh, double[] worldM, CollisionObject capsule)
+    {
+        if (mesh.MeshVertices is null || mesh.MeshIndices is null) return false;
+        CapsuleEndpoints(capsule, out var p, out var q);
+        var inverse = Transforms.Inverse(worldM);
+        Transforms.TransformPointInto(inverse, p.X, p.Y, p.Z, out var px, out var py, out var pz);
+        Transforms.TransformPointInto(inverse, q.X, q.Y, q.Z, out var qx, out var qy, out var qz);
+        p = new Frame(px, py, pz); q = new Frame(qx, qy, qz);
+        var radiusSq = capsule.ExtentX * capsule.ExtentX;
+        for (var t = 0; t + 2 < mesh.MeshIndices.Count; t += 3)
+        {
+            var a = Vertex(mesh.MeshVertices, mesh.MeshIndices[t]);
+            var b = Vertex(mesh.MeshVertices, mesh.MeshIndices[t + 1]);
+            var c = Vertex(mesh.MeshVertices, mesh.MeshIndices[t + 2]);
+            if (ExactNarrowPhase.SegmentTriangleDistanceSq(p, q, a, b, c) <= radiusSq) return true;
+        }
+        return false;
     }
 
     private static bool MeshHitsSpheresLocal(
@@ -380,10 +399,48 @@ internal static class CollisionGeometry
     private static bool CapsuleIntersectsObject(
         CollisionObject capsule, CollisionObject obstacle, Dictionary<int, BvhNode> bvhCache, CollisionQueryScratch? scratch)
     {
-        foreach (var (center, radius) in SampleCapsule(capsule, ExactNarrowPhase.DenseCapsuleSamples(capsule.ExtentX, capsule.ExtentY)))
-            if (SphereIntersectsObject(center, radius, obstacle, bvhCache, scratch))
-                return true;
-        return false;
+        CapsuleEndpoints(capsule, out var p, out var q);
+        var radius = capsule.ExtentX;
+        switch (obstacle.Shape)
+        {
+            case CollisionShape.Sphere:
+                var sum = radius + obstacle.ExtentX;
+                return ExactNarrowPhase.PointSegmentDistanceSq(obstacle.Pose.X, obstacle.Pose.Y, obstacle.Pose.Z,
+                    p.X, p.Y, p.Z, q.X, q.Y, q.Z) <= sum * sum;
+            case CollisionShape.Capsule:
+                CapsuleEndpoints(obstacle, out var a, out var b);
+                var combined = radius + obstacle.ExtentX;
+                return ExactNarrowPhase.SegmentSegmentDistanceSq(p, q, a, b) <= combined * combined;
+            case CollisionShape.Box:
+                return CapsuleBoxOverlap(capsule, obstacle);
+            case CollisionShape.Mesh:
+                return MeshHitsCapsuleLocal(obstacle, Transforms.FromFrame(obstacle.Pose), capsule);
+            case CollisionShape.Plane:
+                var m = Transforms.FromFrame(obstacle.Pose);
+                var dp = (p.X - obstacle.Pose.X) * m[0] + (p.Y - obstacle.Pose.Y) * m[4] + (p.Z - obstacle.Pose.Z) * m[8];
+                var dq = (q.X - obstacle.Pose.X) * m[0] + (q.Y - obstacle.Pose.Y) * m[4] + (q.Z - obstacle.Pose.Z) * m[8];
+                return Math.Min(dp, dq) <= radius;
+            default:
+                return false;
+        }
+    }
+
+    private static void CapsuleEndpoints(CollisionObject capsule, out Frame p, out Frame q)
+    {
+        var m = Transforms.FromFrame(capsule.Pose);
+        var length = capsule.ExtentY;
+        p = new Frame(m[3] - length * m[2], m[7] - length * m[6], m[11] - length * m[10]);
+        q = new Frame(m[3] + length * m[2], m[7] + length * m[6], m[11] + length * m[10]);
+    }
+
+    private static bool CapsuleBoxOverlap(CollisionObject capsule, CollisionObject box)
+    {
+        CapsuleEndpoints(capsule, out var p, out var q);
+        var inverse = Transforms.Inverse(Transforms.FromFrame(box.Pose));
+        Transforms.TransformPointInto(inverse, p.X, p.Y, p.Z, out var px, out var py, out var pz);
+        Transforms.TransformPointInto(inverse, q.X, q.Y, q.Z, out var qx, out var qy, out var qz);
+        return ExactNarrowPhase.SegmentAabbDistanceSq(new Frame(px, py, pz), new Frame(qx, qy, qz),
+            box.ExtentX, box.ExtentY, box.ExtentZ) <= capsule.ExtentX * capsule.ExtentX;
     }
 
     private static bool SphereIntersectsObject(
@@ -444,9 +501,7 @@ internal static class CollisionGeometry
             case CollisionShape.Sphere:
                 return SphereBoxOverlap(obstacle.Pose, obstacle.ExtentX, box);
             case CollisionShape.Capsule:
-                foreach (var (c, r) in SampleCapsule(obstacle, ExactNarrowPhase.DenseCapsuleSamples(obstacle.ExtentX, obstacle.ExtentY)))
-                    if (SphereBoxOverlap(c, r, box)) return true;
-                return false;
+                return CapsuleBoxOverlap(obstacle, box);
             case CollisionShape.Mesh:
                 return BoxMeshOverlap(box, boxM, obstacle, bvhCache, scratch);
             default:
@@ -536,7 +591,7 @@ internal static class CollisionGeometry
             var dy = obstacle.Pose.Y - cy;
             var dz = obstacle.Pose.Z - cz;
             var r = obstacle.ExtentX;
-            return dx * dx + dy * dy + dz * dz < r * r;
+            return dx * dx + dy * dy + dz * dz <= r * r;
         }
 
         // Box/capsule: conservative accept (narrowphase decides)

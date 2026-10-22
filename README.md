@@ -4,10 +4,10 @@
 
 | Motus.NET | [Motus.Grasshopper](https://github.com/lasaths/Motus.Grasshopper) |
 |-----------|-------------------------------------------------------------------|
-| Libraries on [nuget.org](https://www.nuget.org/profiles/lasaths) (latest published **1.8.0**; next cut **2.0.0** — publish on tag) | Rhino/GH UI that calls these APIs |
+| Versioned libraries on [nuget.org](https://www.nuget.org/profiles/lasaths) (package identity **2.0.0**) | Rhino/GH UI that calls these APIs |
 | Owns math, units, Status contracts, method DOIs | Thin components + examples |
 
-No UI, no vendor runtime, no live robot I/O. Algorithm catalog: [docs/METHODS.md](docs/METHODS.md) · citations: [docs/REFERENCES.bib](docs/REFERENCES.bib).
+The libraries have no UI or vendor runtime dependencies and no live robot I/O. The optional [Motus.Viewer](src/Motus.Viewer/README.md) Blazor app exercises the same libraries in the browser with bamboo-arm and truss previews. Algorithm catalog: [docs/METHODS.md](docs/METHODS.md) · citations: [docs/REFERENCES.bib](docs/REFERENCES.bib).
 
 Bundled presets (UR family) and **URDF / xacro** loaders; analytic IK for Universal Robots, numerical IK for generic chains. Parallel **Stewart** (`Family=stewart`, leg lengths in meters) and **legged** gait preview (`Family=legged`, radians) are first-class siblings of serial tip chains.
 
@@ -103,6 +103,8 @@ var result = planner.Plan(new MotionProgramRequest(robot, start, new MotionSegme
 
 Pick/place programs support explicit gripper contact, obstacle-aware transfers, and attachment timelines that survive retiming and export. See [docs/pick-place.md](docs/pick-place.md).
 
+Robot-independent task data (`TaskInstance`, `TaskPath`, `CoreTasks`) and sequence rules describe pick, place, walk, and relay park operations. `TaskPathValidator` checks reachability and sampled joint-space collision; it does not execute tasks. See [docs/tasks.md](docs/tasks.md).
+
 ## Algorithms and references
 
 Canonical detail (API, units, failure codes): [docs/METHODS.md](docs/METHODS.md). BibTeX: [docs/REFERENCES.bib](docs/REFERENCES.bib).
@@ -178,7 +180,7 @@ Benchmarks: `benchmarks/Motus.Benchmarks` (BenchmarkDotNet).
 
 Tag `vX.Y.Z` → [release workflow](.github/workflows/release.yml) builds, tests, packs, publishes to [nuget.org](https://www.nuget.org/profiles/lasaths), and creates a GitHub Release.
 
-Changelog: [CHANGELOG.md](CHANGELOG.md). Package/`Directory.Build.props` targets **2.0.0** (NuGet publish on `v2.0.0` tag). Latest published NuGet is **1.8.0** ([GitHub v1.8.0](https://github.com/lasaths/Motus.NET/releases/tag/v1.8.0)). Use sibling project references until **2.0.0** is tagged and published.
+Changelog: [CHANGELOG.md](CHANGELOG.md). Package/`Directory.Build.props` targets **2.0.0**. Development changes remain unreleased until a coordinated version/tag cut; merging a branch does not publish packages.
 
 ## Safety
 

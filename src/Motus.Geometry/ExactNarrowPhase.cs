@@ -1,3 +1,5 @@
+using Motus.Core;
+
 namespace Motus.Geometry;
 
 /// <summary>
@@ -139,6 +141,13 @@ internal static class ExactNarrowPhase
     {
         double abx = bx - ax, aby = by - ay, abz = bz - az;
         double acx = cx - ax, acy = cy - ay, acz = cz - az;
+        var nx = aby * acz - abz * acy;
+        var ny = abz * acx - abx * acz;
+        var nz = abx * acy - aby * acx;
+        if (nx * nx + ny * ny + nz * nz == 0)
+            return Math.Min(PointSegmentDistanceSq(px, py, pz, ax, ay, az, bx, by, bz),
+                Math.Min(PointSegmentDistanceSq(px, py, pz, bx, by, bz, cx, cy, cz),
+                    PointSegmentDistanceSq(px, py, pz, cx, cy, cz, ax, ay, az)));
         double apx = px - ax, apy = py - ay, apz = pz - az;
         var d1 = abx * apx + aby * apy + abz * apz;
         var d2 = acx * apx + acy * apy + acz * apz;
@@ -187,11 +196,120 @@ internal static class ExactNarrowPhase
         static double Sq(double x, double y, double z) => x * x + y * y + z * z;
     }
 
-    /// <summary>Sphere centres along a capsule axis spaced at most a quarter radius apart (near-exact union).</summary>
-    public static int DenseCapsuleSamples(double radius, double halfLength)
+    public static double PointSegmentDistanceSq(double px, double py, double pz,
+        double ax, double ay, double az, double bx, double by, double bz)
     {
-        if (radius <= 0) return 8;
-        var n = (int)Math.Ceiling(2 * halfLength / (0.25 * radius));
-        return Math.Clamp(n, 5, 400);
+        double dx = bx - ax, dy = by - ay, dz = bz - az;
+        var lengthSq = dx * dx + dy * dy + dz * dz;
+        var t = lengthSq == 0 ? 0 : Math.Clamp(((px - ax) * dx + (py - ay) * dy + (pz - az) * dz) / lengthSq, 0, 1);
+        double ex = px - ax - t * dx, ey = py - ay - t * dy, ez = pz - az - t * dz;
+        return ex * ex + ey * ey + ez * ez;
+    }
+
+    /// <summary>Closest distance between two finite segments (Ericson RTCD §5.1.9).</summary>
+    public static double SegmentSegmentDistanceSq(Frame p1, Frame q1, Frame p2, Frame q2)
+    {
+        double ux = q1.X - p1.X, uy = q1.Y - p1.Y, uz = q1.Z - p1.Z;
+        double vx = q2.X - p2.X, vy = q2.Y - p2.Y, vz = q2.Z - p2.Z;
+        double rx = p1.X - p2.X, ry = p1.Y - p2.Y, rz = p1.Z - p2.Z;
+        var a = ux * ux + uy * uy + uz * uz;
+        var e = vx * vx + vy * vy + vz * vz;
+        var f = vx * rx + vy * ry + vz * rz;
+        double s, t;
+        if (a == 0 && e == 0) return rx * rx + ry * ry + rz * rz;
+        if (a == 0) { s = 0; t = Math.Clamp(f / e, 0, 1); }
+        else
+        {
+            var c = ux * rx + uy * ry + uz * rz;
+            if (e == 0) { t = 0; s = Math.Clamp(-c / a, 0, 1); }
+            else
+            {
+                var b = ux * vx + uy * vy + uz * vz;
+                var denominator = a * e - b * b;
+                s = denominator > 0 ? Math.Clamp((b * f - c * e) / denominator, 0, 1) : 0;
+                t = (b * s + f) / e;
+                if (t < 0) { t = 0; s = Math.Clamp(-c / a, 0, 1); }
+                else if (t > 1) { t = 1; s = Math.Clamp((b - c) / a, 0, 1); }
+            }
+        }
+        double dx = rx + s * ux - t * vx, dy = ry + s * uy - t * vy, dz = rz + s * uz - t * vz;
+        return dx * dx + dy * dy + dz * dz;
+    }
+
+    /// <summary>Segment vs triangle surface, including an interior face crossing and degenerate triangles.</summary>
+    public static double SegmentTriangleDistanceSq(Frame p, Frame q, Frame a, Frame b, Frame c)
+    {
+        double abx = b.X - a.X, aby = b.Y - a.Y, abz = b.Z - a.Z;
+        double acx = c.X - a.X, acy = c.Y - a.Y, acz = c.Z - a.Z;
+        double nx = aby * acz - abz * acy, ny = abz * acx - abx * acz, nz = abx * acy - aby * acx;
+        var dp = nx * (p.X - a.X) + ny * (p.Y - a.Y) + nz * (p.Z - a.Z);
+        var dq = nx * (q.X - a.X) + ny * (q.Y - a.Y) + nz * (q.Z - a.Z);
+        if (dp != dq && ((dp <= 0 && dq >= 0) || (dq <= 0 && dp >= 0)))
+        {
+            var t = dp / (dp - dq);
+            double x = p.X + t * (q.X - p.X) - a.X, y = p.Y + t * (q.Y - p.Y) - a.Y, z = p.Z + t * (q.Z - p.Z) - a.Z;
+            var aa = abx * abx + aby * aby + abz * abz;
+            var bb = abx * acx + aby * acy + abz * acz;
+            var cc = acx * acx + acy * acy + acz * acz;
+            var xp = x * abx + y * aby + z * abz;
+            var yp = x * acx + y * acy + z * acz;
+            var determinant = aa * cc - bb * bb;
+            if (determinant > 0)
+            {
+                var u = (cc * xp - bb * yp) / determinant;
+                var v = (aa * yp - bb * xp) / determinant;
+                if (u >= -Eps && v >= -Eps && u + v <= 1 + Eps) return 0;
+            }
+        }
+        var distance = Math.Min(
+            PointTriangleDistanceSq(p.X, p.Y, p.Z, a.X, a.Y, a.Z, b.X, b.Y, b.Z, c.X, c.Y, c.Z),
+            PointTriangleDistanceSq(q.X, q.Y, q.Z, a.X, a.Y, a.Z, b.X, b.Y, b.Z, c.X, c.Y, c.Z));
+        return Math.Min(distance, Math.Min(SegmentSegmentDistanceSq(p, q, a, b),
+            Math.Min(SegmentSegmentDistanceSq(p, q, b, c), SegmentSegmentDistanceSq(p, q, c, a))));
+    }
+
+    /// <summary>Exact segment–AABB distance: squared distance is quadratic between the six face crossings.</summary>
+    public static double SegmentAabbDistanceSq(Frame p, Frame q, double hx, double hy, double hz)
+    {
+        Span<double> origin = stackalloc double[3] { p.X, p.Y, p.Z };
+        Span<double> delta = stackalloc double[3] { q.X - p.X, q.Y - p.Y, q.Z - p.Z };
+        Span<double> h = stackalloc double[3] { hx, hy, hz };
+        Span<double> boundaries = stackalloc double[8];
+        var count = 2;
+        boundaries[0] = 0; boundaries[1] = 1;
+        for (var axis = 0; axis < 3; axis++)
+        {
+            if (delta[axis] == 0) continue;
+            var lo = (-h[axis] - origin[axis]) / delta[axis];
+            var hi = (h[axis] - origin[axis]) / delta[axis];
+            if (lo > 0 && lo < 1) boundaries[count++] = lo;
+            if (hi > 0 && hi < 1) boundaries[count++] = hi;
+        }
+        boundaries[..count].Sort();
+        var best = double.PositiveInfinity;
+        for (var i = 1; i < count; i++)
+        {
+            var lo = boundaries[i - 1]; var hi = boundaries[i];
+            var mid = (lo + hi) * 0.5;
+            double quadratic = 0, linear = 0;
+            for (var axis = 0; axis < 3; axis++)
+            {
+                var coordinate = origin[axis] + mid * delta[axis];
+                if (coordinate >= -h[axis] && coordinate <= h[axis]) continue;
+                var bound = coordinate < -h[axis] ? -h[axis] : h[axis];
+                quadratic += delta[axis] * delta[axis];
+                linear += delta[axis] * (origin[axis] - bound);
+            }
+            var t = quadratic == 0 ? mid : Math.Clamp(-linear / quadratic, lo, hi);
+            var distance = 0.0;
+            for (var axis = 0; axis < 3; axis++)
+            {
+                var coordinate = origin[axis] + t * delta[axis];
+                var d = coordinate - Math.Clamp(coordinate, -h[axis], h[axis]);
+                distance += d * d;
+            }
+            best = Math.Min(best, distance);
+        }
+        return best;
     }
 }
