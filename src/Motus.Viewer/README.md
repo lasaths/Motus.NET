@@ -182,7 +182,7 @@ click or drag the track to scrub, click a block to jump to its start; Play/Pause
 - ICD planar IK for play lives in `BambooIcdMotion` (C#); `BambooIcdIk` exposes it as a Motus
   `IInverseKinematics` so `TaskPathValidator` can validate bamboo task paths.
 - The grasp plane cannot be driven much lower than −1.5 mm: at −2 mm it is outside the arm's reach.
-- Blazor template Counter/Weather pages were removed; Bootstrap assets may remain unused.
+- Blazor template Counter/Weather pages and the unused Bootstrap assets were removed.
 
 ## References
 
