@@ -58,6 +58,41 @@ public class TotgRetimerTests
     Assert.Contains(TotgMethodRefs.PhamPham2018ToppraDoi, provenance.GetProperty("settingsHash").GetString());
   }
 
+  [Fact]
+  public void Totg_StewartLegLengthsInMeters_UseMeterDefaults()
+  {
+    // Stewart platform leg lengths are meters; retimer must not apply radian velocity defaults.
+    var preset = new RobotPreset
+    {
+      Manufacturer = RobotManufacturer.Unknown,
+      ModelName = "stewart_retimer_test",
+      Family = Units.StewartFamily,
+      AxisCount = 6,
+      // No maxVelocity/maxAcceleration set → retimer falls back to defaults
+      JointLimits = Enumerable.Range(0, 6)
+        .Select(_ => JointLimit.Meters(0.45, 0.75))
+        .ToList()
+    };
+    var robot = new RobotModel(preset);
+    // Small leg-length motion: 0.01 m over geometric time 0.01 s → 1 m/s if geometric, much slower after retime
+    var trajectory = new Trajectory(robot, new[]
+    {
+      new TrajectoryPoint(0, new JointState(Enumerable.Repeat(0.60, 6).ToArray())),
+      new TrajectoryPoint(0.01, new JointState(Enumerable.Repeat(0.61, 6).ToArray()))
+    });
+
+    var retimed = TrajectoryRetimer.Retime(trajectory, new TrajectoryRetimerOptions { Algorithm = RetimerAlgorithm.Totg });
+
+    // The retimer should use meter-appropriate defaults (0.5 m/s, 1.0 m/s²), not radian defaults (1.5 rad/s as m/s).
+    // For 0.01 m motion with amax=1.0 m/s², triangular profile: v_peak=sqrt(a*d)=0.1 m/s, duration=2*sqrt(d/a)=0.2 s.
+    // If it incorrectly used 1.5 rad/s as 1.5 m/s, duration would be ~0.01 s (too fast).
+    Assert.True(retimed.DurationSeconds > 0.02, 
+      $"Stewart leg retime duration {retimed.DurationSeconds:F4} s is too short; " +
+      $"likely using radian velocity default (1.5) as m/s instead of meter default.");
+    Assert.True(retimed.DurationSeconds <= 0.25,
+      $"Retimed duration {retimed.DurationSeconds:F4} s unexpectedly high (expected ~0.2 s triangular profile).");
+  }
+
   private static Trajectory DemoTrajectory()
   {
     var preset = new RobotPreset
