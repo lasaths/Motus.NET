@@ -61,6 +61,13 @@ public static partial class PlanDiff
                         if (Math.Abs(x - y) > CounterRelTol * Math.Max(1, Math.Abs(x))) diffs.Add($"{path}.{n}: {x} vs {y}");
                         continue;
                     }
+                    if (path == "$" && n == "Fingerprint" && pa.ValueKind == JsonValueKind.String && pb.ValueKind == JsonValueKind.String)
+                    {
+                        // Shipped plans may carry a legacy planner-version name (same behaviour).
+                        if (!Motus.Construction.BambooTrussMotion.FingerprintMatches(pa.GetString()!, pb.GetString()!))
+                            diffs.Add($"{path}.{n}: fingerprint differs");
+                        continue;
+                    }
                     Walk(pa, pb, $"{path}.{n}", diffs, liveRoot);
                 }
                 break;

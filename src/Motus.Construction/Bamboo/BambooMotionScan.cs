@@ -1,6 +1,6 @@
 using Motus.Core;
 
-namespace Motus.Viewer.Services;
+namespace Motus.Construction;
 
 /// <summary>
 /// Incremental Motus collision scan along a sampled bamboo motion (play / scrub / tests share it).

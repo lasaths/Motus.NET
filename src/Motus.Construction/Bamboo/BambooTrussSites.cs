@@ -1,7 +1,8 @@
-namespace Motus.Viewer.Services;
+namespace Motus.Construction;
 
 /// <summary>
-/// Sites (cane length + node gap + supports + stock + walk) for /bamboo-truss. <see cref="Chosen"/> is the shipped one.
+/// The Warren truss example input: its structure (<see cref="WarrenTruss"/>) and sites (cane length + node gap +
+/// supports + stock + walk). <see cref="Chosen"/> is the shipped one.
 /// </summary>
 public static class SiteDefaults
 {
@@ -31,4 +32,27 @@ public static class SiteDefaults
     /// triangle 1 from the A column in the order A–T1, T1–M, A–M.
     /// </summary>
     public static BambooTrussLayout.Site Chosen { get; } = Make(0.24, 0.03, 0.19, 0.09, 60, -0.06, 0.32);
+
+    /// <summary>The example structure: the three-triangle Warren truss A–M–D / T1–T2 with panel <paramref name="panel"/>.</summary>
+    public static BambooTrussLayout.StructureDefinition WarrenTruss(double panel, double nodeY, double planeZ = BambooTrussLayout.PlaneZ)
+    {
+        var h = panel * Math.Sqrt(3) / 2;
+        return new BambooTrussLayout.StructureDefinition(
+            [
+                new("A", -panel, nodeY, planeZ),
+                new("M", 0, nodeY, planeZ),
+                new("D", panel, nodeY, planeZ),
+                new("T1", -panel / 2, nodeY + h, planeZ),
+                new("T2", panel / 2, nodeY + h, planeZ)
+            ],
+            [
+                new("AM", "bottom chord A–M", "_", "A", "M"),
+                new("AT1", "diagonal A–T1", "/", "A", "T1"),
+                new("T1M", "diagonal T1–M", "\\", "T1", "M"),
+                new("MT2", "diagonal M–T2", "/", "M", "T2"),
+                new("T1T2", "top chord T1–T2", "‾", "T1", "T2"),
+                new("MD", "bottom chord M–D", "_", "M", "D"),
+                new("T2D", "diagonal T2–D", "\\", "T2", "D")
+            ]);
+    }
 }

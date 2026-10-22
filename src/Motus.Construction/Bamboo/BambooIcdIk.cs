@@ -1,6 +1,6 @@
 using Motus.Core;
 
-namespace Motus.Viewer.Services;
+namespace Motus.Construction;
 
 /// <summary>
 /// Motus <see cref="IInverseKinematics"/> for the hung bamboo arm: converts a Motus Z-up TCP frame to the

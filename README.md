@@ -176,7 +176,7 @@ Benchmarks: `benchmarks/Motus.Benchmarks` (BenchmarkDotNet).
 
 ### Shipped bamboo-truss plan (viewer)
 
-The viewer embeds a pre-computed default plan (`src/Motus.Viewer/Services/BambooTrussDefaultPlan.json`). The
+The viewer embeds a pre-computed default plan (`src/Motus.Construction/Bamboo/BambooTrussDefaultPlan.json`). The
 planner is a sampling search over dense collision checks, and last-ulp differences between platform math
 libraries (glibc / Windows CRT / Apple libm) can lead it to a different, equally valid plan. So:
 

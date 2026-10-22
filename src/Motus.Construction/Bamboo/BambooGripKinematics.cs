@@ -1,4 +1,4 @@
-namespace Motus.Viewer.Services;
+namespace Motus.Construction;
 
 /// <summary>
 /// Full-pose kinematics of the two-gripper bamboo arm for brachiation. Either gripper can be the base:
@@ -23,8 +23,8 @@ public static class BambooGripKinematics
     public const double GripAxisTolDeg = 0.5;
 
     const double Deg = Math.PI / 180.0;
-    static readonly double[] Seg = BambooIcdMotion.Seg;
-    static readonly char[] Axes = { 'Y', 'X', 'X', 'X', 'Y' };
+    static double[] Seg => BambooIcdMotion.Seg;
+    static readonly char[] Axes = RobotDefinition.SupportedAxes;
 
     public enum Gripper { L, R }
 

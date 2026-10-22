@@ -1,6 +1,6 @@
 using Motus.Core;
 using Motus.Geometry;
-using Motus.Viewer.Services;
+using Motus.Construction;
 using Xunit.Abstractions;
 
 namespace Motus.Core.Tests;

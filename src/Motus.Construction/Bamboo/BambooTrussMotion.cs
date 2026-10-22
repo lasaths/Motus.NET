@@ -1,7 +1,7 @@
 using Motus.Core;
-using K = Motus.Viewer.Services.BambooGripKinematics;
+using K = Motus.Construction.BambooGripKinematics;
 
-namespace Motus.Viewer.Services;
+namespace Motus.Construction;
 
 /// <summary>
 /// Motus string-identity tasks and motion keys for /bamboo-truss. Each member is a pick (single store feed) →
@@ -53,6 +53,19 @@ public static class BambooTrussMotion
         BambooTrussLayout.Configure(cell);
         lock (CellGate) MotusCell = cell;
         cell.SetMountViewer(BambooTrussLayout.StartBase);
+    }
+
+    /// <summary>The bound Motus cell, or the fixture URDF cell when none is bound (null if unavailable).</summary>
+    internal static BambooIcdCell? CurrentCell => TryCell();
+
+    /// <summary>The explicitly bound cell (null when none), for scoping a binding (<see cref="RestoreCell"/>).</summary>
+    internal static BambooIcdCell? BoundCell { get { lock (CellGate) return MotusCell; } }
+
+    /// <summary>Re-bind <paramref name="cell"/> (configured for the current site), or unbind when null.</summary>
+    internal static void RestoreCell(BambooIcdCell? cell)
+    {
+        if (cell is not null) { UseCell(cell); return; }
+        lock (CellGate) MotusCell = null;
     }
 
     static BambooIcdCell? TryCell()
@@ -245,7 +258,7 @@ public static class BambooTrussMotion
             using var stream = typeof(BambooTrussMotion).Assembly.GetManifestResourceStream(DefaultPlanResource);
             if (stream is null) return null;
             var c = System.Text.Json.JsonSerializer.Deserialize<PlanCache>(stream);
-            return c is not null && c.Fingerprint == fp && c.Tasks.Count > 0 ? c.Tasks : null;
+            return c is not null && FingerprintMatches(c.Fingerprint, fp) && c.Tasks.Count > 0 ? c.Tasks : null;
         }
         catch (System.Text.Json.JsonException) { return null; }
     }
@@ -448,8 +461,22 @@ public static class BambooTrussMotion
     /// <summary>L side-grasp IK solutions (rolls about the clamped cane) tried per brachiation clamp point.</summary>
     public const int BrachiateLSolutions = 4;
 
-    public const string PlannerVersion = "warren-pit-3-search";
-    public const string DefaultPlanResource = "Motus.Viewer.Services.BambooTrussDefaultPlan.json";
+    public const string PlannerVersion = "assembly-planner-1";
+    /// <summary>Earlier names of <see cref="PlannerVersion"/> for the same planner behaviour (shipped plans keep reading).</summary>
+    public static readonly IReadOnlyList<string> LegacyPlannerVersions = ["warren-pit-3-search"];
+
+    /// <summary>
+    /// True when a stored fingerprint describes the same inputs as <paramref name="live"/>: equal, or equal after its
+    /// leading planner version is a legacy name of the current one.
+    /// </summary>
+    public static bool FingerprintMatches(string stored, string? live = null)
+    {
+        live ??= LayoutFingerprint;
+        if (stored == live) return true;
+        var cut = stored.IndexOf(';');
+        return cut > 0 && LegacyPlannerVersions.Contains(stored[..cut]) && PlannerVersion + stored[cut..] == live;
+    }
+    public const string DefaultPlanResource = "Motus.Construction.BambooTrussDefaultPlan.json";
 
     /// <summary>Everything the planner's output depends on (layout, tolerances, version), invariant-formatted.</summary>
     public static string LayoutFingerprint
@@ -483,6 +510,15 @@ public static class BambooTrussMotion
                 $"{F(mc.SearchStepDeg)},{F(mc.VerifyStepDeg)},{F(mc.ScanStepDeg)},{F(mc.ScanOversample)},{F(mc.JawStepMm)},{F(mc.SearchJawStepMm)}");
             parts.Add($"tune:{BambooTrussPlanner.LandTries},{string.Join("/", BambooTrussPlanner.LandOffsets.Select(F))},{string.Join("/", BambooTrussPlanner.BrachiateOffsets.Select(F))}," +
                 $"{BambooTrussPlanner.GraspSolutionsPerOffset},{BrachiateLSolutions},{K.SeedScale}");
+            // Inputs beyond the shipped example enter only when set (the shipped fingerprint is unchanged).
+            if (BambooTrussLayout.Members.Any(m => m.CaneLength is not null))
+                parts.Add("lengths:" + string.Join("/", BambooTrussLayout.Members.Select(m => $"{m.Id}:{F(m.Length)}")));
+            if (site.Obstacles is { Count: > 0 } obs)
+                parts.Add("obstacles:" + string.Join("/", obs.Select(o =>
+                    $"{o.Name}:{o.Shape}:{F(o.Pose.X)},{F(o.Pose.Y)},{F(o.Pose.Z)},{F(o.Pose.Qw)},{F(o.Pose.Qx)},{F(o.Pose.Qy)},{F(o.Pose.Qz)},{F(o.ExtentX)},{F(o.ExtentY)},{F(o.ExtentZ)}")));
+            if (!RobotDefinition.Current.SameAs(RobotDefinition.BambooIcd) || !BambooIcdMotion.IsBambooIcdChain(BambooIcdMotion.Seg, BambooIcdMotion.LimitsDeg))
+                parts.Add($"robot:{RobotDefinition.Current.L.Link},{RobotDefinition.Current.R.Link}," + string.Join("/", BambooIcdMotion.Seg.Select(F))
+                    + "," + string.Join("/", BambooIcdMotion.LimitsDeg.Select(l => $"{F(l.Min)}:{F(l.Max)}")));
             return string.Join(";", parts);
         }
     }
@@ -534,7 +570,7 @@ public static class BambooTrussMotion
             if (c is null) return Miss("deserialised null");
             if (c.Keys.Count == 0) return Miss("no keys");
             var fp = LayoutFingerprint;
-            if (c.Fingerprint != fp)
+            if (!FingerprintMatches(c.Fingerprint, fp))
             {
                 var i = 0;
                 while (i < Math.Min(fp.Length, c.Fingerprint.Length) && fp[i] == c.Fingerprint[i]) i++;

@@ -1,4 +1,4 @@
-namespace Motus.Viewer.Services;
+namespace Motus.Construction;
 
 /// <summary>
 /// Task blocks for the /bamboo-truss bottom timeline: one block per pick / place / walk / park-relay / swap, with its

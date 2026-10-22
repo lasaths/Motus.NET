@@ -4,7 +4,7 @@ using Motus.Core;
 using Motus.Geometry;
 using Motus.Presets;
 
-namespace Motus.Viewer.Services;
+namespace Motus.Construction;
 
 /// <summary>
 /// The ICD/LIS bamboo work cell as Motus.NET sees it: the hung arm loaded from <c>bamboo_icd.urdf</c>
@@ -36,8 +36,9 @@ public sealed class BambooIcdCell
     public const string Strut = "strut";
     public const string Ground = "ground";
 
-    public static readonly string[] RGripPlates = { "R-grip jaw-", "R-grip jaw+" };
-    public static readonly string[] LGripPlates = { "L-grip jaw-", "L-grip jaw+" };
+    /// <summary>R / L jaw plate part names of the current robot (<see cref="RobotDefinition.Current"/>).</summary>
+    public static string[] RGripPlates => RobotDefinition.Current.R.Plates;
+    public static string[] LGripPlates => RobotDefinition.Current.L.Plates;
 
     /// <summary>Motus world ← viewer world (Rx(+90°)).</summary>
     public static readonly double[] ViewerToMotus = Transforms.FromAxisAngle(1, 0, 0, Math.PI / 2);
@@ -55,6 +56,10 @@ public sealed class BambooIcdCell
     public IReadOnlyList<CellPart> Parts { get; }
     /// <summary>Joint offsets along viewer −Y (pole→θ1, θ1→θ2, …, θ5→jaw) read from the URDF.</summary>
     public double[] Seg { get; }
+    /// <summary>Joint limits (degrees) read from the URDF.</summary>
+    public (double Min, double Max)[] LimitsDeg { get; }
+    /// <summary>Robot (grippers, chain) this cell was loaded with.</summary>
+    public RobotDefinition Robot { get; }
     /// <summary>Length of the strut (bamboo cane) this cell picks, holds and places (metres).</summary>
     public double StrutLen { get; }
 
@@ -71,7 +76,8 @@ public sealed class BambooIcdCell
     /// no hang rod). Default true for /bamboo.
     /// </summary>
     public bool IncludePole { get; set; } = true;
-    private readonly Dictionary<(int gR, bool held, (double, double, double, double, double, double, double) off), RobotMeshCollisionChecker> _checkers = new();
+    private readonly Dictionary<(int gR, bool held, (double, double, double, double, double, double, double) off, double len), RobotMeshCollisionChecker> _checkers = new();
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<double, (List<double[]> Verts, List<int> Idx)> _strutMeshes = new();
 
     public sealed record CellPart(string Name, string Link, double[] Size, double[] Pos);
 
@@ -85,7 +91,7 @@ public sealed class BambooIcdCell
         public (double X, double Y, double Z) Axis => BambooIcdMotion.StrutAxis(PitchDeg, YawDeg);
     }
 
-    private BambooIcdCell(UrdfRobot urdf, XElement root, double strutLength)
+    private BambooIcdCell(UrdfRobot urdf, XElement root, double strutLength, RobotDefinition robot)
     {
         if (!(strutLength > 2 * StrutRadius)) throw new ArgumentOutOfRangeException(nameof(strutLength));
         StrutLen = strutLength;
@@ -97,29 +103,24 @@ public sealed class BambooIcdCell
         var tree = urdf.Tree ?? throw new InvalidOperationException("bamboo URDF: kinematic tree missing.");
         KinematicJoint? hang = null;
         foreach (var j in tree.Joints)
-            if (string.Equals(tree.Links[j.ChildLinkIndex].Name, "mount", StringComparison.OrdinalIgnoreCase)) hang = j;
-        if (hang is null) throw new InvalidOperationException("bamboo URDF: no joint into 'mount'.");
+            if (string.Equals(tree.Links[j.ChildLinkIndex].Name, robot.L.Link, StringComparison.OrdinalIgnoreCase)) hang = j;
+        if (hang is null) throw new InvalidOperationException($"bamboo URDF: no joint into '{robot.L.Link}'.");
         _defaultMountWorld = Transforms.FromRpy(hang.OriginX, hang.OriginY, hang.OriginZ, hang.Roll, hang.Pitch, hang.Yaw);
         MountWorld = (double[])_defaultMountWorld.Clone();
         Hang = BambooIcdMotion.HangPose.Pole;
         _mountKey = MountKeyOf(MountWorld);
 
-        _mountGeometry = UrdfCollisionLoader.Load(root, new[] { "mount" }, ".")?.Links
+        _mountGeometry = UrdfCollisionLoader.Load(root, new[] { robot.L.Link }, ".")?.Links
                          ?? throw new InvalidOperationException("bamboo URDF: mount has no collision.");
 
         var parts = new List<CellPart>();
-        foreach (var g in _mountGeometry) parts.Add(ToPart(g.LocalGeometry, "mount"));
+        foreach (var g in _mountGeometry) parts.Add(ToPart(g.LocalGeometry, robot.L.Link));
         foreach (var g in Model.CollisionModel?.Links ?? Array.Empty<LinkCollisionGeometry>())
             parts.Add(ToPart(g.LocalGeometry, g.LinkName));
         Parts = parts;
 
-        var seg = new List<double>();
-        foreach (var name in new[] { "joint_1", "joint_2", "joint_3", "joint_4", "joint_5", "tool_joint" })
-        {
-            var j = tree.Joints.First(x => x.Name == name);
-            seg.Add(-j.OriginY);
-        }
-        Seg = seg.ToArray();
+        Robot = robot;
+        (Seg, LimitsDeg) = robot.ReadChain(tree);
 
         (_strutVerts, _strutIdx) = CylinderMesh(StrutRadius, StrutLen, StrutSegments, alongZ: true);
         var (pv, pi) = CylinderMesh(PoleRadius, PoleLength, PoleSegments, alongZ: false);
@@ -134,11 +135,13 @@ public sealed class BambooIcdCell
 
     /// <param name="urdfXml">bamboo_icd.urdf contents.</param>
     /// <param name="strutLength">Strut (cane) length for this cell; defaults to the ICD strut (<see cref="StrutLength"/>).</param>
-    public static BambooIcdCell Load(string urdfXml, double strutLength = StrutLength)
+    /// <param name="robot">Grippers and chain (default <see cref="RobotDefinition.Current"/>).</param>
+    public static BambooIcdCell Load(string urdfXml, double strutLength = StrutLength, RobotDefinition? robot = null)
     {
+        robot ??= RobotDefinition.Current;
         var doc = XDocument.Parse(urdfXml);
-        var urdf = UrdfRobotLoader.Load(doc, new UrdfLoadOptions { BaseLink = "base_link", TipLink = "tool0" });
-        return new BambooIcdCell(urdf, doc.Root!, strutLength) { _urdfXml = urdfXml };
+        var urdf = UrdfRobotLoader.Load(doc, new UrdfLoadOptions { BaseLink = robot.BaseLink, TipLink = robot.R.Link });
+        return new BambooIcdCell(urdf, doc.Root!, strutLength, robot) { _urdfXml = urdfXml };
     }
 
     public static BambooIcdCell LoadFile(string path, double strutLength = StrutLength) =>
@@ -288,14 +291,20 @@ public sealed class BambooIcdCell
                 Transforms.FromAxisAngle(0, 1, 0, p.YawDeg * Math.PI / 180.0),
                 Transforms.FromAxisAngle(1, 0, 0, p.PitchDeg * Math.PI / 180.0))));
 
-    /// <summary>Strut mesh at a Motus world pose (scene obstacle).</summary>
-    public CollisionObject StrutAt(double[] motusWorld, string? name = null) => StrutShape(name ?? Strut, Transforms.ToFrame(motusWorld));
+    /// <summary>Strut mesh (scene obstacle) of <c>length</c> metres (null = <see cref="StrutLen"/>) at a Motus world pose.</summary>
+    public CollisionObject StrutAt(double[] motusWorld, string? name = null, double? length = null) =>
+        StrutShape(name ?? Strut, Transforms.ToFrame(motusWorld), length);
 
-    CollisionObject StrutShape(string name, Frame pose) => CollisionObject.Mesh(name, pose, _strutVerts, _strutIdx);
+    CollisionObject StrutShape(string name, Frame pose, double? length = null)
+    {
+        if (length is not { } len || len == StrutLen) return CollisionObject.Mesh(name, pose, _strutVerts, _strutIdx);
+        var (v, i) = _strutMeshes.GetOrAdd(len, l => CylinderMesh(StrutRadius, l, StrutSegments, alongZ: true));
+        return CollisionObject.Mesh(name, pose, v, i);
+    }
 
     /// <summary>Strut held in the R-grip at its true jaw-local offset (captured when the jaws close).</summary>
-    public AttachedBody HeldStrut(Frame tcpLocal) =>
-        new(Strut, tcpLocal, StrutShape(Strut, Frame.Identity), Strut);
+    public AttachedBody HeldStrut(Frame tcpLocal, double? length = null) =>
+        new(Strut, tcpLocal, StrutShape(Strut, Frame.Identity, length), Strut);
 
     /// <summary>Motus world TCP (jaw) matrix from Motus FK.</summary>
     public double[] JawWorld(IReadOnlyList<double> qDeg) =>
@@ -433,12 +442,12 @@ public sealed class BambooIcdCell
     }
 
     /// <summary>Checker for an R-grip opening (jaw plates moved to match the drawing) and optional held strut.</summary>
-    public RobotMeshCollisionChecker Checker(double gRmm, Frame? heldOffset)
+    public RobotMeshCollisionChecker Checker(double gRmm, Frame? heldOffset, double? heldLength = null)
     {
         // Keyed by the exact held offset, and the base is set to the exact current mount on every call: the checker's
         // geometry no longer depends on which pose first created it (was: rounded keys, first-seen base / offset).
         var offKey = heldOffset is { } o ? (o.X, o.Y, o.Z, o.Qw, o.Qx, o.Qy, o.Qz) : default;
-        var key = ((int)Math.Round(gRmm * 10), heldOffset is not null, offKey);
+        var key = ((int)Math.Round(gRmm * 10), heldOffset is not null, offKey, heldOffset is null ? 0 : heldLength ?? StrutLen);
         if (_checkers.TryGetValue(key, out var c)) { c.SetBase(HangBaseFrame); return c; }
         var baseModel = Model.CollisionModel!;
         var links = baseModel.Links.Select(l =>
@@ -454,7 +463,7 @@ public sealed class BambooIcdCell
         }).ToList();
         var model = Model.WithTool(null, HangBaseFrame);
         model = new RobotModel(model.Preset, new RobotCollisionModel(links), Urdf.JointNames);
-        var attached = heldOffset is { } off ? new[] { HeldStrut(off) } : Array.Empty<AttachedBody>();
+        var attached = heldOffset is { } off ? new[] { HeldStrut(off, heldLength) } : Array.Empty<AttachedBody>();
         c = new RobotMeshCollisionChecker(model, Chain, attached, SelfCollisionMinLinkGap);
         c.SetBase(HangBaseFrame);
         if (_checkers.Count > 512) _checkers.Clear();
@@ -518,7 +527,8 @@ public sealed class BambooIcdCell
     /// </summary>
     public IReadOnlyList<CollisionContact> PoseContacts(
         IReadOnlyList<double> qDeg, double gRmm, double gLmm, Frame? heldOffset,
-        IReadOnlyList<CollisionObject> environment, IReadOnlyList<(string A, string B)> allowed, int maxContacts = 32)
+        IReadOnlyList<CollisionObject> environment, IReadOnlyList<(string A, string B)> allowed, int maxContacts = 32,
+        double? heldLength = null)
     {
         // The scene (environment + mount parts at the current mount pose and jaw, allowed pairs) is rebuilt only when one
         // of those changes; with a static mount consecutive poses share it (same objects, so the same verdicts).
@@ -528,7 +538,8 @@ public sealed class BambooIcdCell
             var objects = new List<CollisionObject>(environment.Count + 6);
             objects.AddRange(environment);
             objects.AddRange(MountObjects(gLmm));
-            var allowList = new List<(string, string)>(allowed.Count + 2) { ("θ1", "base tube"), ("θ1", "L-grip body") };
+            var allowList = new List<(string, string)>(allowed.Count + 2) { };
+            allowList.AddRange(Robot.MechanismContacts);
             foreach (var a in allowed) allowList.Add((a.A, a.B));
             _scene = new CollisionScene(objects, allowList);
             _sceneAllow = allowList;
@@ -536,7 +547,7 @@ public sealed class BambooIcdCell
         }
         var scene = _scene!;
         var allow = _sceneAllow!;
-        var contacts = new List<CollisionContact>(Checker(gRmm, heldOffset).FindContacts(new JointState(RadFromDeg(qDeg)), scene, maxContacts));
+        var contacts = new List<CollisionContact>(Checker(gRmm, heldOffset, heldLength).FindContacts(new JointState(RadFromDeg(qDeg)), scene, maxContacts));
         if (contacts.Count < maxContacts)
             contacts.AddRange(MountEnvironmentContacts(gLmm, environment, allow));
         return contacts;
@@ -549,7 +560,7 @@ public sealed class BambooIcdCell
     /// thread with <see cref="BambooTrussCollision.Contacts"/>: the environment is passed in, so the answers are
     /// identical. Null when this cell was not loaded from URDF text.
     /// </summary>
-    public BambooIcdCell? CollisionTwin() => _urdfXml is null ? null : Load(_urdfXml, StrutLen);
+    public BambooIcdCell? CollisionTwin() => _urdfXml is null ? null : Load(_urdfXml, StrutLen, Robot);
 
     MountMemoKey? _sceneKey;
     CollisionScene? _scene;

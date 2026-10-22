@@ -1,4 +1,4 @@
-namespace Motus.Viewer.Services;
+namespace Motus.Construction;
 
 /// <summary>
 /// Fail-fast scene check, before any planning: for every member there must be a clamp site whose free gripper reaches
@@ -46,7 +46,6 @@ public static class BambooSceneCheck
         var clock = System.Diagnostics.Stopwatch.StartNew();
         var o = options ?? new Options();
         var list = (members ?? BambooTrussLayout.Members).ToList();
-        var half = BambooTrussLayout.StrutLength / 2 - 0.03;
         var map = new BambooReachMap(cell) { Collision = o.Collision && cell is not null };
 
         // Sites: every anchor column, and every member (optimistic: any of them may be fixed by then).
@@ -55,7 +54,7 @@ public static class BambooSceneCheck
         foreach (var a in BambooTrussLayout.Stakes)
             foreach (var s in BambooReachMap.AnchorSites(a.Name, o.AnchorHeadingStepDeg)) { sites.Add(s); siteOwner.Add(a.Name); }
         foreach (var m in BambooTrussLayout.Members)
-            foreach (var s in BambooReachMap.CaneSites("placed-" + m.Id, m.Place, o.CaneOffsets.Select(f => f * half), o.Rolls)) { sites.Add(s); siteOwner.Add(m.Id); }
+            foreach (var s in BambooReachMap.CaneSites("placed-" + m.Id, m.Place, o.CaneOffsets.Select(f => f * (m.Length / 2 - 0.03)), o.Rolls)) { sites.Add(s); siteOwner.Add(m.Id); }
 
         // Lines: stock, each member's place, and the parked poses relays may use.
         var lines = new List<BambooReachMap.TargetLine> { BambooReachMap.Stock() };

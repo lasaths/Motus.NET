@@ -1,4 +1,4 @@
-namespace Motus.Viewer.Services;
+namespace Motus.Construction;
 
 /// <summary>
 /// The truss as a graph: nodes (with connectors), members (edges between nodes) and anchors (nodes fixed to the

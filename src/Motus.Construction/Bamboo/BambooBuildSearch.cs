@@ -1,6 +1,6 @@
 using Motus.Core;
 
-namespace Motus.Viewer.Services;
+namespace Motus.Construction;
 
 /// <summary>
 /// Derives the build order and the walk / relay sequence from the structure graph and the reach map, instead of a
@@ -204,11 +204,10 @@ public static class BambooBuildSearch
     static Grid BuildGrid(Options o, IEnumerable<string> relays)
     {
         var g = new Grid();
-        var half = BambooTrussLayout.StrutLength / 2 - 0.03;
         foreach (var a in BambooTrussLayout.Stakes)
             foreach (var s in BambooReachMap.AnchorSites(a.Name)) { g.Sites.Add(s); g.Owner.Add(a.Name); }
         foreach (var m in BambooTrussLayout.Members)
-            foreach (var s in BambooReachMap.CaneSites("placed-" + m.Id, m.Place, o.CaneOffsets.Select(f => f * half), o.Rolls)) { g.Sites.Add(s); g.Owner.Add(m.Id); }
+            foreach (var s in BambooReachMap.CaneSites("placed-" + m.Id, m.Place, o.CaneOffsets.Select(f => f * (m.Length / 2 - 0.03)), o.Rolls)) { g.Sites.Add(s); g.Owner.Add(m.Id); }
         var targets = new List<BambooReachMap.TargetLine> { BambooReachMap.Stock() };
         g.Line["stock"] = 0;
         foreach (var m in BambooTrussLayout.Members) { g.Line[m.Id] = targets.Count; targets.Add(BambooReachMap.PlaceOf(m)); }

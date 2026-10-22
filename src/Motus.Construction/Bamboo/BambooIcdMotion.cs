@@ -1,6 +1,6 @@
 using Motus.Core;
 
-namespace Motus.Viewer.Services;
+namespace Motus.Construction;
 
 /// <summary>
 /// ICD/LIS bamboo-arm planar IK and pick/place motion keys for the Motus.Viewer page.
@@ -20,11 +20,26 @@ public static class BambooIcdMotion
         public static HangPose Pole { get; } = new(0, PoleY, 0);
         public bool IsPole => Math.Abs(X) < 1e-12 && Math.Abs(Y - PoleY) < 1e-12 && Math.Abs(Z) < 1e-12;
     }
-    public static readonly double[] Seg = { 0.030, 0.080, 0.088, 0.088, 0.088, 0.046 };
-    public static readonly (double Min, double Max)[] LimitsDeg =
+    /// <summary>bamboo_icd joint offsets along −Y (base → θ1, …, θ5 → tool).</summary>
+    public static readonly double[] BambooIcdSeg = { 0.030, 0.080, 0.088, 0.088, 0.088, 0.046 };
+    /// <summary>bamboo_icd joint limits (degrees).</summary>
+    public static readonly (double Min, double Max)[] BambooIcdLimitsDeg =
     {
         (-170, 170), (-90, 90), (-135, 135), (-90, 90), (-170, 170)
     };
+    /// <summary>
+    /// True when a chain equals the bamboo_icd one by value: offsets within 1e-9 m, limits within 1e-4° (a URDF stores
+    /// limits in radians to 6 decimals, ≤ 3e-5° off the round degree values).
+    /// </summary>
+    public static bool IsBambooIcdChain(IReadOnlyList<double> seg, IReadOnlyList<(double Min, double Max)> limitsDeg) =>
+        seg.Count == BambooIcdSeg.Length && limitsDeg.Count == BambooIcdLimitsDeg.Length
+        && seg.Select((v, i) => Math.Abs(v - BambooIcdSeg[i]) <= 1e-9).All(x => x)
+        && limitsDeg.Select((l, i) => Math.Abs(l.Min - BambooIcdLimitsDeg[i].Min) <= 1e-4 && Math.Abs(l.Max - BambooIcdLimitsDeg[i].Max) <= 1e-4).All(x => x);
+
+    /// <summary>Joint offsets the kinematics use (default bamboo_icd; <see cref="AssemblyPlanner"/> swaps in a custom robot's).</summary>
+    public static double[] Seg { get; internal set; } = BambooIcdSeg;
+    /// <summary>Joint limits the kinematics use (default bamboo_icd).</summary>
+    public static (double Min, double Max)[] LimitsDeg { get; internal set; } = BambooIcdLimitsDeg;
     public static readonly double[] HomeDeg = { -90, -72, -80, -24, 0 };
     public static readonly (double X, double Y, double Z) Pick = (0, 0.00778, 0.09194);
     public static readonly (double X, double Y, double Z) Place = (0, 0.1506, 0.2000);

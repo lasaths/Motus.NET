@@ -1,7 +1,7 @@
 using Motus.Core;
 using Motus.Geometry;
 
-namespace Motus.Viewer.Services;
+namespace Motus.Construction;
 
 /// <summary>
 /// The one collision check of /bamboo-truss, shared by the planner (segment checks) and <see cref="BambooTrussScan"/>
@@ -39,7 +39,7 @@ public static class BambooTrussCollision
         var placedList = placed.ToList();
         var env = new List<CollisionObject>(cell.GroundObjects);
         env.AddRange(BambooTrussLayout.FixtureObjects);
-        foreach (var (name, w) in placedList) env.Add(cell.StrutAt(w, name));
+        foreach (var (name, w) in placedList) env.Add(cell.StrutAt(w, name, BambooTrussLayout.LengthOf(name)));
         var hubIds = placedList.Select(p => p.Name["placed-".Length..]).ToList();
         if (activeId is not null && hold == 2 && released is not null) hubIds.Add(activeId);
         env.AddRange(BambooTrussLayout.HubObjects(hubIds));
@@ -48,9 +48,10 @@ public static class BambooTrussCollision
             env.Add(cell.StrutAt(rest ?? BambooIcdCell.PlacementWorld(BambooTrussLayout.Store), BambooIcdCell.Strut));
             return env;
         }
-        if (hold == 0 && rest is not null) env.Add(cell.StrutAt(rest, BambooIcdCell.Strut));
-        else if (hold == 2 && released is not null) env.Add(cell.StrutAt(released, "placed-" + activeId));
-        else if (hold == 1 && !heldTracked && rest is not null) env.Add(cell.StrutAt(rest, BambooIcdCell.Strut));
+        var len = BambooTrussLayout.LengthOf(activeId);
+        if (hold == 0 && rest is not null) env.Add(cell.StrutAt(rest, BambooIcdCell.Strut, len));
+        else if (hold == 2 && released is not null) env.Add(cell.StrutAt(released, "placed-" + activeId, len));
+        else if (hold == 1 && !heldTracked && rest is not null) env.Add(cell.StrutAt(rest, BambooIcdCell.Strut, len));
         return env;
     }
 
@@ -76,11 +77,11 @@ public static class BambooTrussCollision
     /// </summary>
     public static IReadOnlyList<CollisionContact> Contacts(BambooIcdCell cell, string? baseGripper, double[] baseWorld,
         IReadOnlyList<double> qDeg, double gR, double gL, Frame? held, IReadOnlyList<CollisionObject> env,
-        string? lOn, string? rOn, int max, double marginM = 0)
+        string? lOn, string? rOn, int max, double marginM = 0, double? heldLength = null)
     {
         cell.SetMountViewer(BambooTrussPlanner.LWorld(baseGripper, baseWorld, qDeg));
         var allowed = Allowed(lOn, rOn);
-        if (marginM <= 0) return cell.PoseContacts(qDeg, gR, gL, held, env, allowed, max);
+        if (marginM <= 0) return cell.PoseContacts(qDeg, gR, gL, held, env, allowed, max, heldLength);
         var clamped = $"{lOn}|{rOn}".Split('|', StringSplitOptions.RemoveEmptyEntries);
         // Grasp zone: a gripper whose slot axis lies on an object's axis (within the margin) is grasping / releasing /
         // sliding on it — its own parts may be closer than the margin to that object (still never in exact contact).
@@ -92,20 +93,20 @@ public static class BambooTrussCollision
         bool Exempt(CollisionContact c) => (IsPegRest(c) && held is not null) || InZone(c.BodyA, c.BodyB, zoneL, zoneR) || InZone(c.BodyB, c.BodyA, zoneL, zoneR);
         // Pass 1 (early-out): everything grown except clamped objects and exemption candidates, which are exact here.
         var pass1 = env.Select(o => clamped.Contains(o.Name) || Candidate(o) ? o : Inflate(o, marginM)).ToList();
-        var hits = cell.PoseContacts(qDeg, gR, gL, held, pass1, allowed, max);
+        var hits = cell.PoseContacts(qDeg, gR, gL, held, pass1, allowed, max, heldLength);
         if (hits.Count >= max) return hits;
         // Pass 2: the candidates grown, keeping the margin for every pair that is not an intended contact.
         var cands = env.Where(o => !clamped.Contains(o.Name) && Candidate(o)).Select(o => Inflate(o, marginM)).ToList();
         if (cands.Count == 0) return hits;
         var kept = hits.ToList();
-        foreach (var c in cell.PoseContacts(qDeg, gR, gL, held, cands, allowed, 64))
+        foreach (var c in cell.PoseContacts(qDeg, gR, gL, held, cands, allowed, 64, heldLength))
             if (!Exempt(c) && kept.Count < max) kept.Add(c);
         return kept;
     }
 
-    static bool IsRPart(string n) => n == "neck" || n.StartsWith("R-grip", StringComparison.Ordinal);
+    static bool IsRPart(string n) => RobotDefinition.Current.R.Owns(n);
     // The base tube is rigid with the L-grip body (fixed mount parts) and sits beside the object the L-grip clamps.
-    static bool IsLPart(string n) => n == "base tube" || n.StartsWith("L-grip", StringComparison.Ordinal);
+    static bool IsLPart(string n) => RobotDefinition.Current.L.Owns(n);
 
     static bool InZone(string part, string obj, HashSet<string> zoneL, HashSet<string> zoneR) =>
         (IsLPart(part) && zoneL.Contains(obj)) || (IsRPart(part) && zoneR.Contains(obj));
