@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Motus.Construction** (new library, target 2.1.0): the bamboo work cell, truss layout, planner, build search, scan and
+  playback moved out of Motus.Viewer into `Motus.Construction.Bamboo`; `AssemblyPlanner` plans an assembly for the
+  bound/fixture cell or a custom URDF (`RobotDefinition`), reusing the shipped Warren plan when the robot chain matches
+  `bamboo_icd` by value. Build search can checkpoint and resume (`BAMBOO_SEARCH_CHECKPOINT`).
+
 - Robot-independent `TaskInstance` / `TaskPath`, typed pick/place/walk/park views, sequence rules, and task-path reachability and sampled collision validation.
 - Experimental Motus.Viewer `/bamboo-truss`: Warren truss preview, shared planner/scan collision rules, reach-map scene checks, structure graph, and bounded planner-confirmed build search with targeted landings and relay placement.
 - `ICollisionContactReporter` / `CollisionContact`: `RobotMeshCollisionChecker.FindContacts` names every colliding
@@ -21,6 +26,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Collision clearance: bamboo planner/scan checks grow every obstacle by `MotionConstraints.ClearanceMarginM`
+  (default 2 mm); grasped/clamped contacts stay exempt. Verdicts still come from exact shapes; bounding volumes are
+  used only as a conservative broad phase.
+- Exact capsule tests: capsule vs sphere/capsule/box/plane/mesh use exact segment distances (BVH-culled for meshes),
+  OR-ed with the previous inner-sphere chain so no verdict becomes less conservative; grazing contacts stay exact.
 - Exact narrow phase in `CollisionGeometry`: box–box (OBB SAT), box/mesh (triangle–OBB SAT), mesh vs
   box/sphere/capsule/plane per triangle, denser capsule sampling. Previously boxes were a corner/centre sphere
   cloud (over-reporting by up to a half-extent) and meshes vs primitives sampled vertices with 1 cm spheres.
@@ -31,6 +41,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Retiming defaults follow each joint's coordinate unit: meters use m/s and m/s² defaults; revolute joints keep rad/s and rad/s² defaults. Two-point rest-to-rest timing observes velocity as well as acceleration limits.
 - Deep bamboo planner checkpoints restore the random stream across independently explored branches; edited task data invalidates the shipped plan cache.
 - Task validation rejects unsupported frame overrides and invalid/non-finite inputs instead of silently validating a different problem.
+- Hardening: build-search options are validated and bounded by a confirmation budget (best confirmed prefix and stop
+  reason reported when incomplete); the shipped plan cache is structurally validated before reuse; viewer diagnostics
+  surface planner errors instead of falling back silently; degenerate triangles fall back to edge distances.
 
 ## [2.0.0] - 2026-09-19
 
