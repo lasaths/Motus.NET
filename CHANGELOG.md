@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.1.0] - 2026-10-22
+
 ### Added
 
 - **Motus.Construction** (new library, target 2.1.0): the bamboo work cell, truss layout, planner, build search, scan and

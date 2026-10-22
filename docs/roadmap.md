@@ -177,9 +177,10 @@ Offline dual-agent tower demo: HolonomicSE3 drone delivers a brick; serial arm f
 - [x] Motus.NET `AerialArmPassOffTests` (hover → PickPlace + ExpandMany mini-tower ×4)
 - [x] GH example `11_aerial_arm_pass_off` (generated mini-tower ×4 + One Play scrub; `layout.cs` for full 5×4)
 - [x] Docs: `aerial.md` pass-off; METHODS; ADRs 0002 / GH 0006
-- [ ] Coordinated **2.1.0** NuGet / GH / tags when green (Yak GA still explicit product call); **Rhino Auto Plan pass on example 11**
+- [x] Motus.NET package identity / CHANGELOG prepared for **2.1.0**; NuGet + GitHub release on the `v2.1.0` tag
+- [ ] Coordinated Motus.Grasshopper **2.1.0** tag (Yak GA still explicit product call); **Rhino Auto Plan pass on example 11**
 
-### 2.1.0 — tasks and construction (integrated on `master`, not released)
+### 2.1.0 — tasks and construction (integrated on `master`; Motus.NET 2.1.0 package cut)
 
 - [x] Robot-independent task model (`TaskInstance` / `TaskPath`, typed pick/place/walk/park, sequence rules, reachability + sampled collision validation; see [tasks.md](tasks.md))
 - [x] `Motus.Construction` library: bamboo work cell, Warren truss planner, build search with checkpoint/resume, `AssemblyPlanner` + `RobotDefinition`
