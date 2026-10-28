@@ -92,7 +92,7 @@ Public package SemVer is **aligned** across Motus.NET (NuGet), Motus.Grasshopper
 
 After **0.17.0**, the next public package versions are **1.8.0 → 1.9.0 → 2.0.0**. There is no empty 1.0–1.7 NuGet/Yak upload series; those numbers are not published package lines. Milestone names match the coordinated release tags.
 
-First public Yak Package Manager release is **2.0.0** (identity + pack path ready; Package Manager push still open).
+First public Yak Package Manager release is **2.0.0** (live on yak.rhino3d.com since 2026-09-19).
 
 ## Milestone 11 — Trust & polish · 1.8.0
 
@@ -117,10 +117,10 @@ Prove 0.17-class behavior is shippable. Few new features — polish and hardenin
 
 - [x] Align Motus.NET + Motus.Grasshopper package / tag identity to **2.0.0** ([v2.0.0](https://github.com/lasaths/Motus.NET/releases/tag/v2.0.0); sibling GH [v2.0.0](https://github.com/lasaths/Motus.Grasshopper/releases/tag/v2.0.0)); yak `motus` manifest identity **2.0.0** in-repo
 - [x] Motus.NET NuGet **2.0.0** flat-container live + Grasshopper NuGet-default restore proven (all six packages)
-- [ ] First public Yak Package Manager push (`motus` **2.0.0**)
+- [x] First public Yak Package Manager push (`motus` **2.0.0**)
 - [x] Declare supported vs advanced surface — [supported-surface.md](supported-surface.md)
 - [x] SemVer major cut = supported-product identity (breaking changes only if banked from 1.8/1.9); Yak GA still gated on Package Manager push + Rhino matrix
-- [x] Dual-TFM pack / yak build path + docs for **2.0.0** identity (pack scripts ready; production yak push open)
+- [x] Dual-TFM pack / yak build path + docs for **2.0.0** identity (pack scripts ready; `motus` 2.0.0 pushed)
 - [ ] Rhino regression matrix green on host (serial, Stewart, SE2, Tool, Walk/Plan, Example 10) — soft until local Rhino pass
 
 ## Related repos
@@ -155,7 +155,7 @@ Honest Motus meanings (planning / preview / export only):
 Phasing vs Supported / Yak GA (does **not** shrink the 2.0 product goal):
 
 - **Tip-shipped experimental (2.0.0 tree):** SE(3) aerial Motus-honest path; H2 upper-body / arm-group fixture; Go2 stance FK fixture — see [supported-surface.md](supported-surface.md) Experimental
-- **Still open for M13 completion:** first Yak Package Manager push; Rhino matrix host pass
+- **Still open for M13 completion:** Rhino matrix host pass
 - **Post-Yak deepen (optional):** richer aerial fixtures (Crazyflie / Skydio), mammal foot IK, kinematic biped preview — still not balance / flight stack
 
 Fixtures ([awesome-robot-descriptions](https://github.com/robot-descriptions/awesome-robot-descriptions) / Unitree):
@@ -187,4 +187,4 @@ Offline dual-agent tower demo: HolonomicSE3 drone delivers a brick; serial arm f
 - [x] Exact collision with a 2 mm clearance margin (grasp/clamp exempt); exact-shape speed-ups with shipped-plan identity tests
 - [x] Retimer unit fix (prismatic m/s defaults) and validation/retiming hardening
 - [ ] Motus.Construction stays **experimental** (not in the supported surface / Yak headline) until the coordinated 2.1.0 cut above
-- [ ] Motus.Grasshopper `12_bamboo_truss_assembly` on NuGet (needs a published 2.1.0 package)
+- [x] Motus.Grasshopper `12_bamboo_truss_assembly` on NuGet (Motus.Construction 2.1.0 published)
