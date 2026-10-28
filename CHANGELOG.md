@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Motus.Construction build search: opt-in physics-aware sequencing (`BambooBuildSearch.Options.Stability`, `BambooFrameStability`), a linear frame check of each partial structure under self-weight and robot clamp load.
+- Motus.Construction planner: opt-in certified segments (`MotionConstraints.CertifiedSegments`, `BambooSegmentCertifier`), proving robot ↔ environment clearance between samples by conservative advancement; `BambooTrussScan.UncertifiedSegments()`.
+
 ## [2.1.0] - 2026-10-22
 
 ### Added

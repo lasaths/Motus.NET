@@ -591,6 +591,7 @@ public static class BambooTrussMotion
             parts.Add($"tune:{BambooTrussPlanner.LandTries},{string.Join("/", BambooTrussPlanner.LandOffsets.Select(F))},{string.Join("/", BambooTrussPlanner.BrachiateOffsets.Select(F))}," +
                 $"{BambooTrussPlanner.GraspSolutionsPerOffset},{BrachiateLSolutions},{K.SeedScale}");
             // Inputs beyond the shipped example enter only when set (the shipped fingerprint is unchanged).
+            if (mc.CertifiedSegments) parts.Add($"certify:{mc.CertifyMaxDepth},{mc.CertifyMaxChecks}");
             if (BambooTrussLayout.Members.Any(m => m.CaneLength is not null))
                 parts.Add("lengths:" + string.Join("/", BambooTrussLayout.Members.Select(m => $"{m.Id}:{F(m.Length)}")));
             if (site.Obstacles is { Count: > 0 } obs)

@@ -266,6 +266,29 @@ public sealed class BambooTrussScan
             BambooTrussLayout.LengthOf(world?.ActiveId));
     }
 
+    /// <summary>
+    /// Labels of the key segments that cannot be proven free of robot ↔ environment contact between their samples
+    /// (<see cref="BambooSegmentCertifier"/>, same base, hold, environment and clamps as the samples); empty = all proven.
+    /// </summary>
+    public List<string> UncertifiedSegments()
+    {
+        var bad = new List<string>();
+        for (var i = 0; i + 1 < _keys.Count; i++)
+        {
+            var a = _keys[i]; var b = _keys[i + 1];
+            if (b.T <= a.T) continue;
+            var t = (a.T + b.T) / 2;
+            var s = BambooTrussMotion.SampleState(_keys, t);
+            var (g, w, _) = BaseAt(t);
+            var world = _cycles.Count > 0 ? _world[BambooTrussMotion.CycleIndexAt(_keys, _cycles, t)] : null;
+            if (!BambooSegmentCertifier.Certify(_cell, g, w, a.Q, b.Q, a.GR, b.GR, a.GL, b.GL, s.Hold == 1 ? world?.HeldOffset : null,
+                    EnvironmentAt(t, s.Hold), b.LOn, b.ROn, BambooTrussLayout.LengthOf(world?.ActiveId),
+                    Constraints.CertifyMaxDepth, Constraints.CertifyMaxChecks, out _))
+                bad.Add(b.Label);
+        }
+        return bad;
+    }
+
     void CheckNext()
     {
         var t = _ts[_next];

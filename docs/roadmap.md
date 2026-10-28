@@ -194,3 +194,4 @@ Offline dual-agent tower demo: HolonomicSE3 drone delivers a brick; serial arm f
 Opt-in steps on the bamboo build search; the defaults keep the shipped Warren plan identical.
 
 - [x] Physics-aware build sequencing: linear frame check of the partial structure (self-weight + robot clamp load) as a frontier filter and ranking term in `BambooBuildSearch` (`Options.Stability`, off by default)
+- [x] Exact collision between samples: conservative-advancement certificate for each joint-space segment (per-link motion bound + exact test against obstacles grown by the bound, bisected), `MotionConstraints.CertifiedSegments`, off by default

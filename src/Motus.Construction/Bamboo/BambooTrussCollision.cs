@@ -159,19 +159,15 @@ public static class BambooTrussCollision
         (c.BodyA == BambooIcdCell.Strut && c.BodyB.StartsWith(PegPrefix, StringComparison.Ordinal)) ||
         (c.BodyB == BambooIcdCell.Strut && c.BodyA.StartsWith(PegPrefix, StringComparison.Ordinal));
 
-    static readonly System.Runtime.CompilerServices.ConditionalWeakTable<CollisionObject, Tuple<double, CollisionObject>> _grown = new();
+    static readonly System.Runtime.CompilerServices.ConditionalWeakTable<CollisionObject, System.Collections.Concurrent.ConcurrentDictionary<double, CollisionObject>> _grown = new();
 
     /// <summary>
     /// Obstacle grown by <paramref name="d"/>: primitives exactly (box corners conservatively); meshes by moving each
-    /// vertex along its normal far enough that every adjacent face plane moves out by at least d. Cached per object.
+    /// vertex along its normal far enough that every adjacent face plane moves out by at least d. Cached per object and
+    /// growth (thread-safe; the same object comes back for the same d).
     /// </summary>
-    public static CollisionObject Inflate(CollisionObject o, double d)
-    {
-        if (_grown.TryGetValue(o, out var c) && c.Item1 == d) return c.Item2;
-        var g = InflateCore(o, d);
-        _grown.AddOrUpdate(o, Tuple.Create(d, g));
-        return g;
-    }
+    public static CollisionObject Inflate(CollisionObject o, double d) =>
+        _grown.GetValue(o, _ => new()).GetOrAdd(d, dd => InflateCore(o, dd));
 
     static CollisionObject InflateCore(CollisionObject o, double d)
     {
