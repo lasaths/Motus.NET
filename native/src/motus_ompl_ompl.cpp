@@ -17,6 +17,8 @@
 #include <algorithm>
 #include <cmath>
 #include <memory>
+#include <type_traits>
+#include <utility>
 #include <vector>
 
 #if __has_include(<ompl/geometric/planners/informedtrees/AITstar.h>)
@@ -181,6 +183,21 @@ static ob::OptimizationObjectivePtr PathLengthObjective(const ob::SpaceInformati
     return std::make_shared<ob::PathLengthOptimizationObjective>(si);
 }
 
+template <typename T, typename = void>
+struct HasSetGoalBias : std::false_type {};
+template <typename T>
+struct HasSetGoalBias<T, std::void_t<decltype(std::declval<T&>().setGoalBias(0.0))>> : std::true_type {};
+
+// RRTConnect::setGoalBias only exists in some OMPL builds (absent in 1.6.0 and 1.7.0), so detect the member.
+template <typename P>
+static void TrySetGoalBias(P& planner, double goal_bias)
+{
+    if constexpr (HasSetGoalBias<P>::value)
+        planner.setGoalBias(std::clamp(goal_bias, 0.0, 1.0));
+    else
+        (void)planner, (void)goal_bias;
+}
+
 static ob::PlannerPtr CreatePlanner(
     int planner_id,
     const ob::SpaceInformationPtr& si,
@@ -263,12 +280,7 @@ static ob::PlannerPtr CreatePlanner(
         planner->setProblemDefinition(pdef);
         planner->setup();
         planner->setRange(step_size);
-#if defined(OMPL_MAJOR_VERSION) && defined(OMPL_MINOR_VERSION) && \
-    (OMPL_MAJOR_VERSION > 1 || (OMPL_MAJOR_VERSION == 1 && OMPL_MINOR_VERSION >= 6))
-        planner->setGoalBias(std::clamp(goal_bias, 0.0, 1.0));
-#else
-        (void)goal_bias;
-#endif
+        TrySetGoalBias(*planner, goal_bias);
         return planner;
     }
     }
