@@ -193,4 +193,4 @@ Offline dual-agent tower demo: HolonomicSE3 drone delivers a brick; serial arm f
 
 Opt-in steps on the bamboo build search; the defaults keep the shipped Warren plan identical.
 
-- [ ] Physics-aware build sequencing: linear frame check of the partial structure (self-weight + robot clamp load) as a frontier filter and ranking term in `BambooBuildSearch` (`Options.Stability`, off by default)
+- [x] Physics-aware build sequencing: linear frame check of the partial structure (self-weight + robot clamp load) as a frontier filter and ranking term in `BambooBuildSearch` (`Options.Stability`, off by default)
