@@ -195,4 +195,4 @@ Opt-in steps on the bamboo build search; the defaults keep the shipped Warren pl
 
 - [x] Physics-aware build sequencing: linear frame check of the partial structure (self-weight + robot clamp load) as a frontier filter and ranking term in `BambooBuildSearch` (`Options.Stability`, off by default)
 - [x] Exact collision between samples: conservative-advancement certificate for each joint-space segment (per-link motion bound + exact test against obstacles grown by the bound, bisected), `MotionConstraints.CertifiedSegments`, off by default
-- [ ] TAMP layer on the build search: lazy reach preconditions (clamp sites, landings, relays), failure / dead-end memory, a JSONL outcome log and a confirm-rate prior from earlier logs; every kept choice still planner-confirmed (`BambooBuildSearch.Options.Tamp`, off by default)
+- [x] TAMP layer on the build search: lazy reach preconditions (clamp sites, landings, relays), failure / dead-end memory, a JSONL outcome log and a confirm-rate prior from earlier logs; every kept choice still planner-confirmed (`BambooBuildSearch.Options.Tamp`, off by default)
