@@ -7,8 +7,9 @@ namespace Motus.Construction;
 /// <remarks>
 /// Rules that are structural in the planner (one clamped base, swaps at rest) cannot be switched off; a profile that
 /// asks for that is rejected by <see cref="Validate"/>. <see cref="ClearanceMarginM"/> is the extra distance a pose
-/// must keep from every obstacle; collision checks in Motus.Core are exact-contact tests today, so only 0 is
-/// supported (see <see cref="Validate"/>).
+/// must keep from every obstacle at every sample: obstacles are grown by it before the exact Motus contact test, so any
+/// margin in [0, 20 mm] is supported (see <see cref="Validate"/>). Between samples a segment is only sampled unless
+/// <see cref="CertifiedSegments"/> is on.
 /// </remarks>
 public sealed record MotionConstraints
 {
@@ -38,6 +39,14 @@ public sealed record MotionConstraints
     /// <summary>Jaw stroke per coarse (search) sample, mm.</summary>
     public double SearchJawStepMm { get; init; } = 1.0;
 
+    /// <summary>Also prove every verified segment free of robot ↔ environment contact between its samples
+    /// (<see cref="BambooSegmentCertifier"/>); a segment that cannot be proven is rejected. Off: sampled only.</summary>
+    public bool CertifiedSegments { get; init; }
+    /// <summary>Bisection depth limit of a segment proof (deeper = uncertified).</summary>
+    public int CertifyMaxDepth { get; init; } = 18;
+    /// <summary>Pose-check budget of one segment proof (exceeded = uncertified).</summary>
+    public int CertifyMaxChecks { get; init; } = 20000;
+
     /// <summary>The bamboo-truss profile (Lassie's rules).</summary>
     public static MotionConstraints Bamboo { get; } = new();
 
@@ -51,6 +60,8 @@ public sealed record MotionConstraints
         if (ClearanceMarginM < 0 || ClearanceMarginM > 0.02) throw new ArgumentException("Clearance margin must be in [0, 20 mm].");
         if (SearchStepDeg <= 0 || VerifyStepDeg <= 0 || ScanStepDeg <= 0 || ScanOversample < 1 || JawStepMm <= 0 || SearchJawStepMm <= 0)
             throw new ArgumentException("Sample resolutions must be positive (oversample ≥ 1).");
+        if (CertifyMaxDepth < 1 || CertifyMaxDepth > 40 || CertifyMaxChecks < 1)
+            throw new ArgumentException("Certification limits: depth in [1, 40], at least one check.");
         return this;
     }
 }

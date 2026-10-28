@@ -227,15 +227,23 @@ public sealed class BambooTrussPlanner
             samples.RemoveRange(w, samples.Count - w);
         }
         if (VerdictLog is null && VerifyWorkers > 1 && samples.Count >= ParallelMinSamples && Twins() is { } twins)
-            return SamplesOkParallel(samples, twins, qa, qb, gRa, gRb, gLa, gLb, holdA, holdB, lOn, rOn);
-        var q = new double[5];
-        foreach (var i in BisectionOrder(samples.Count))
         {
-            var (u, hold) = samples[i];
-            for (var k = 0; k < 5; k++) q[k] = qa[k] + (qb[k] - qa[k]) * u;
-            if (!PoseOk(q, gRa + (gRb - gRa) * u, gLa + (gLb - gLa) * u, hold, lOn, rOn)) return false;
+            if (!SamplesOkParallel(samples, twins, qa, qb, gRa, gRb, gLa, gLb, holdA, holdB, lOn, rOn)) return false;
         }
-        return true;
+        else
+        {
+            var q = new double[5];
+            foreach (var i in BisectionOrder(samples.Count))
+            {
+                var (u, hold) = samples[i];
+                for (var k = 0; k < 5; k++) q[k] = qa[k] + (qb[k] - qa[k]) * u;
+                if (!PoseOk(q, gRa + (gRb - gRa) * u, gLa + (gLb - gLa) * u, hold, lOn, rOn)) return false;
+            }
+        }
+        // Opt-in: prove the verified segment clear between its samples (intermediate state: holdA, as sampled above).
+        return step > VerifyStepDeg || !Constraints.CertifiedSegments ||
+            BambooSegmentCertifier.Certify(_cell, BaseName, _baseWorld, qa, qb, gRa, gRb, gLa, gLb, holdA == 1 ? _held : null,
+                Env(holdA), lOn, rOn, BambooTrussLayout.LengthOf(_activeId), Constraints.CertifyMaxDepth, Constraints.CertifyMaxChecks, out _);
     }
 
     /// <summary>Threads for the samples of one segment (1 = sequential). Verdicts and <see cref="Checks"/> are identical.</summary>
