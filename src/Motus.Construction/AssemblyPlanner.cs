@@ -40,6 +40,12 @@ public sealed record AssemblyPlanRequest
     /// <summary>Task sequence to run. Null: the searched default sequence (<see cref="BambooTrussMotion.ShippedTasks"/>).</summary>
     public IReadOnlyList<BambooIcdMotion.TaskEdit>? Tasks { get; init; }
 
+    /// <summary>
+    /// Build-search options (e.g. <see cref="BambooBuildSearch.Options.Stability"/>, <see cref="BambooBuildSearch.Options.Tamp"/>).
+    /// Null (default): unchanged. Set and <see cref="Tasks"/> null: the sequence is searched live with these options.
+    /// </summary>
+    public BambooBuildSearch.Options? Search { get; init; }
+
     /// <summary>Return the embedded pre-computed plan when the input matches it (fast) instead of planning live.</summary>
     public bool UseShippedPlan { get; init; }
 }
@@ -117,9 +123,18 @@ public static class AssemblyPlanner
                 else cell = oldCell ?? BambooTrussMotion.CurrentCell;
                 // Bind for this call, configured for this site (ground pads, start clamp).
                 if (cell is not null) BambooTrussMotion.UseCell(cell);
-                var tasks = request.Tasks ?? BambooTrussMotion.ShippedTasks();
+                var tasks = request.Tasks;
+                var searchError = "";
+                if (tasks is null && request.Search is not null && cell is not null)
+                {
+                    var r = BambooBuildSearch.Run(cell, request.Search);
+                    if (r.Complete) tasks = r.Tasks;
+                    else searchError = $"build search incomplete — {r.Order.Count}/{BambooTrussLayout.Members.Count} members; {r.StopReason}";
+                }
+                tasks ??= BambooTrussMotion.ShippedTasks();
                 // Live: the sequence runner (pick / place / park / walk, structure-graph rules), as for the shipped sequence.
-                var build = request.UseShippedPlan
+                var build = searchError.Length > 0 ? new BambooTrussMotion.TrussBuild { Error = searchError, Tasks = tasks.ToList() }
+                    : request.UseShippedPlan
                     ? BambooTrussMotion.BuildAsync(tasks, null, useCache: true).GetAwaiter().GetResult()
                     : BambooTrussMotion.RunSequence(tasks);
                 var members = BambooTrussLayout.Members.ToList();

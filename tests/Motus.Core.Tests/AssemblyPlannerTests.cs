@@ -38,6 +38,19 @@ public class AssemblyPlannerTests
         Assert.Equal(plan.Build.Tasks.Count, plan.Tasks.Count);
     }
 
+    /// <summary>Request.Search: the Warren sequence searched with the stability check still plans 7/7 collision-free.</summary>
+    [Fact]
+    public void WarrenExample_SearchWithStability_IsCollisionFree()
+    {
+        var plan = AssemblyPlanner.Plan(AssemblyPlanner.WarrenTrussExample with
+        {
+            UseShippedPlan = true,
+            Search = new BambooBuildSearch.Options { Stability = new BambooFrameStability.Settings() }
+        });
+        Assert.True(plan.CollisionFree, plan.Verdict);
+        Assert.Equal(plan.Members.Select(m => m.Id).OrderBy(x => x), plan.Build.Built.OrderBy(x => x));
+    }
+
     /// <summary>Scene generation from a non-Warren input: ground, relay frames, per-member lengths, obstacles.</summary>
     [Fact]
     public void SceneGeneration_FollowsTheStructureInput()
