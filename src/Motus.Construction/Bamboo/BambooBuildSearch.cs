@@ -58,6 +58,13 @@ public static class BambooBuildSearch
         /// recorded prefix is re-confirmed without re-trying the alternatives that were rejected before it.
         /// </summary>
         public IReadOnlyList<Choice>? ResumeAt { get; init; }
+        /// <summary>
+        /// Physics-aware sequencing (null = off, the default): drop frontier members whose partial structure fails
+        /// <see cref="BambooFrameStability.Check"/> under self-weight, demote candidates by their sag
+        /// (<see cref="BambooFrameStability.Settings.RankPerMetre"/>), and reject a confirmed choice when a member the
+        /// robot clamps on during it fails under the robot load.
+        /// </summary>
+        public BambooFrameStability.Settings? Stability { get; init; }
     }
 
     /// <summary>A saved search state: the layout it belongs to and the confirmed choices in order.</summary>
@@ -101,6 +108,7 @@ public static class BambooBuildSearch
         var lines = new List<string>();
         void Log(string s) { lines.Add(s); log?.Invoke(s); }
 
+        var stability = o.Stability?.Validate();
         if (o.MaxRejected == 0 || o.MaxConfirmations == 0)
         {
             const string reason = "planner confirmation budget is zero";
@@ -170,12 +178,26 @@ public static class BambooBuildSearch
                         options.Add((id, Mode.Relay, r, 20 - far));
                 }
             }
+            if (stability is not null)
+            {
+                var sag = new Dictionary<string, BambooFrameStability.Report>(StringComparer.Ordinal);
+                foreach (var id in options.Select(x => x.Id).Distinct())
+                {
+                    var r = sag[id] = BambooFrameStability.Check(graph, placed.Append(id), stability);
+                    if (!r.Ok) Log($"  {id}: dropped by the stability check — {r.Note}");
+                }
+                options = options.Where(x => sag[x.Id].Ok)
+                    .Select(x => x with { Rank = x.Rank + stability.RankPerMetre * sag[x.Id].MaxDeflectionM }).ToList();
+            }
             var resume = o.ResumeAt is { } ra && placed.Count < ra.Count ? ra[placed.Count] : null;
             foreach (var (id, mode, relay, _) in options.OrderBy(x => resume is not null && x.Id == resume.MemberId && x.Mode == resume.Mode && x.Relay == resume.Relay ? 0 : 1).ThenBy(x => x.Rank))
             {
                 if (BudgetReached()) break;
                 var cp = p.SaveDeep();
+                var firstKey = p.Keys.Count;
                 var choice = Confirm(p, id, mode, relay, Log);
+                if (choice is not null && stability is not null && RobotLoadFailure(graph, placed, id, p, firstKey, stability) is { } why)
+                { Log($"  {id} {mode}: rejected by the stability check — {why}"); choice = null; }
                 if (choice is null) { rejected++; p.RollbackDeep(cp); continue; }
                 confirmed++;
                 placed.Add(id); order.Add(choice);
@@ -227,6 +249,25 @@ public static class BambooBuildSearch
                 return new Choice(id, mode, relay, toPark.Walked, toPlace.Walked, $"{id}: relay via {relay} — {toPark.Note}; {toPlace.Note}");
             }
         }
+    }
+
+    /// <summary>
+    /// Robot load on every structure member the robot clamps on in keys [firstKey..]: checked on the structure before
+    /// the choice (the member being built is not there yet), or with it when the clamp is on that member. Null = ok.
+    /// </summary>
+    static string? RobotLoadFailure(BambooStructureGraph graph, List<string> placed, string id, BambooTrussPlanner p, int firstKey,
+        BambooFrameStability.Settings s)
+    {
+        var payload = s.MassPerMetre * (BambooTrussLayout.Def(id)?.Length ?? 0);
+        var members = graph.Edges.Select(e => e.Id).ToHashSet(StringComparer.Ordinal);
+        foreach (var on in p.Keys.Skip(firstKey).Select(k => k.BaseOn?.StartsWith("placed-", StringComparison.Ordinal) == true ? k.BaseOn["placed-".Length..] : k.BaseOn)
+                     .Where(b => b is not null && members.Contains(b)).Distinct())
+        {
+            var structure = placed.Contains(on!) ? placed : placed.Append(id).ToList();
+            var r = BambooFrameStability.Check(graph, structure, s, on, payload);
+            if (!r.Ok) return r.Note;
+        }
+        return null;
     }
 
     static IEnumerable<BambooIcdMotion.TaskEdit> TasksFor(Choice c)

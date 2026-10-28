@@ -188,3 +188,9 @@ Offline dual-agent tower demo: HolonomicSE3 drone delivers a brick; serial arm f
 - [x] Retimer unit fix (prismatic m/s defaults) and validation/retiming hardening
 - [ ] Motus.Construction stays **experimental** (not in the supported surface / Yak headline) until the coordinated 2.1.0 cut above
 - [x] Motus.Grasshopper `12_bamboo_truss_assembly` on NuGet (Motus.Construction 2.1.0 published)
+
+## Milestone 15 — Construction planning toward TAMP (in progress)
+
+Opt-in steps on the bamboo build search; the defaults keep the shipped Warren plan identical.
+
+- [x] Physics-aware build sequencing: linear frame check of the partial structure (self-weight + robot clamp load) as a frontier filter and ranking term in `BambooBuildSearch` (`Options.Stability`, off by default)
