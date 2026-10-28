@@ -22,7 +22,6 @@ const fixtureHero = document.getElementById('fixture-hero');
 const dofCount = document.getElementById('dof-count');
 const testSummary = document.getElementById('test-summary');
 const testCaseSelect = document.getElementById('test-case');
-const themeBtn = document.getElementById('theme-btn');
 
 const THEME_KEY = 'motus-viewer-theme';
 const SCENE_THEMES = {
@@ -133,8 +132,6 @@ function applyTheme(theme) {
   fill.intensity = t.fill;
   if (pathLine) pathLine.material.color.setHex(t.path);
   styleRobotMaterials();
-  themeBtn.textContent = currentTheme === 'light' ? 'Dark' : 'Light';
-  themeBtn.title = currentTheme === 'light' ? 'Switch to dark mode' : 'Switch to light mode';
   try {
     localStorage.setItem(THEME_KEY, currentTheme);
   } catch {
@@ -143,15 +140,8 @@ function applyTheme(theme) {
 }
 
 function initTheme() {
-  let theme = 'dark';
-  try {
-    const stored = localStorage.getItem(THEME_KEY);
-    if (stored === 'light' || stored === 'dark') theme = stored;
-    else if (window.matchMedia('(prefers-color-scheme: light)').matches) theme = 'light';
-  } catch {
-    /* ignore */
-  }
-  applyTheme(theme);
+  // ANDURA is dark only; the light scene theme is kept but no longer offered.
+  applyTheme('dark');
 }
 
 function setDropState(hint, state = '') {
@@ -748,9 +738,6 @@ recenterBtn.addEventListener('click', () => {
   setStatus('[RECENTERED]', 'ok');
 });
 playBtn.addEventListener('click', playTrajectory);
-themeBtn.addEventListener('click', () => {
-  applyTheme(currentTheme === 'light' ? 'dark' : 'light');
-});
 
 dropZone.addEventListener('dragover', (e) => {
   e.preventDefault();

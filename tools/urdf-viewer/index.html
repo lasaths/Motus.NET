@@ -7,49 +7,36 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      href="https://fonts.googleapis.com/css2?family=Doto:wght@400;700&family=Space+Grotesk:wght@300;400;500&family=Space+Mono:wght@400;700&display=swap"
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500&display=swap"
       rel="stylesheet"
     />
     <style>
       :root {
-        --black: #000000;
-        --surface: #111111;
-        --surface-raised: #1a1a1a;
-        --border: #222222;
-        --border-visible: #333333;
-        --text-disabled: #666666;
-        --text-secondary: #999999;
-        --text-primary: #e8e8e8;
-        --text-display: #ffffff;
-        --accent: #d71921;
-        --success: #4a9e5c;
-        --interactive: #5b9bf6;
+        --black: #000000; /* andura void */
+        --surface: #090A0C;
+        --surface-raised: #1A1B1E;
+        --border: #3C3D41;
+        --border-visible: #3C3D41;
+        --text-disabled: #8A8C91;
+        --text-secondary: #8A8C91;
+        --text-primary: #DADADD;
+        --text-display: #DADADD;
+        --accent: #F45536; /* andura emergency */
+        --success: #DADADD; /* nominal = no colour */
+        --interactive: #3A3CFF; /* andura ultramarine */
         --space-xs: 4px;
         --space-sm: 8px;
         --space-md: 16px;
         --space-lg: 24px;
         --space-xl: 32px;
         --space-2xl: 48px;
-        --font-body: "Space Grotesk", "DM Sans", system-ui, sans-serif;
-        --font-data: "Space Mono", "JetBrains Mono", monospace;
-        --font-display: "Doto", "Space Mono", monospace;
+        --font-body: "IBM Plex Sans", sans-serif;
+        --font-data: "IBM Plex Mono", monospace;
+        --font-display: "IBM Plex Sans", sans-serif;
         --ease: cubic-bezier(0.25, 0.1, 0.25, 1);
       }
 
-      :root[data-theme="light"] {
-        --black: #f0f0f2;
-        --surface: #ffffff;
-        --surface-raised: #f8f8fa;
-        --border: #e4e4e8;
-        --border-visible: #d0d0d6;
-        --text-disabled: #9a9aa4;
-        --text-secondary: #6b6b76;
-        --text-primary: #2a2a30;
-        --text-display: #111114;
-        --accent: #c4121a;
-        --success: #2d7a42;
-        --interactive: #1d5bb8;
-      }
+
 
       * { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -102,24 +89,10 @@
         pointer-events: auto;
       }
 
-      .theme-toggle {
-        width: auto;
-        padding: var(--space-xs) var(--space-sm);
-        font-size: 10px;
-        background: var(--surface);
-        border-color: var(--border-visible);
-        color: var(--text-secondary);
-      }
-
-      .theme-toggle:hover:not(:disabled) {
-        color: var(--text-display);
-        border-color: var(--text-secondary);
-      }
-
       .fixture-hero {
         font-family: var(--font-display);
         font-size: clamp(2rem, 4vw, 3.5rem);
-        font-weight: 700;
+        font-weight: 500;
         letter-spacing: -0.03em;
         line-height: 1;
         color: var(--text-display);
@@ -139,7 +112,7 @@
 
       .dof-badge span {
         color: var(--text-display);
-        font-weight: 700;
+        font-weight: 500;
       }
 
       #status-line {
@@ -241,7 +214,7 @@
       .joint-val {
         font-family: var(--font-data);
         font-size: 14px;
-        font-weight: 700;
+        font-weight: 500;
         color: var(--text-display);
         font-variant-numeric: tabular-nums;
         grid-column: 2;
@@ -378,7 +351,7 @@
       }
       #test-summary[data-state="ok"] { color: var(--success); }
       #test-summary[data-state="err"] { color: var(--accent); }
-      #test-summary[data-state="warn"] { color: var(--interactive); }
+      #test-summary[data-state="warn"] { color: #FBB636; /* andura caution */ }
 
       @media (max-width: 720px) {
         #app {
@@ -397,7 +370,6 @@
           <div class="overlay-top">
             <div class="fixture-hero" id="fixture-hero">—</div>
             <div class="overlay-actions">
-              <button id="theme-btn" type="button" class="theme-toggle" title="Toggle light/dark mode">Light</button>
               <div class="dof-badge"><span id="dof-count">0</span> joints</div>
             </div>
           </div>

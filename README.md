@@ -1,6 +1,10 @@
 # Motus.NET
 
-.NET 8 **host-agnostic** motion-planning core: models, FK/IK, collision, sampling/Cartesian planners, retiming, and export.
+.NET 8 **host-agnostic** motion-planning core: models, FK/IK, collision, sampling/Cartesian planners, retiming, export, and robotic assembly planning. **Version 2.1.0.**
+
+![Bamboo arm placing the 7 members of a Warren truss over a pit, replayed from the shipped AssemblyPlanner plan](docs/media/bamboo-truss-assembly.gif)
+
+*The shipped `AssemblyPlanner` plan for the 7-member bamboo Warren truss (21 tasks, collision-free), replayed in [Motus.Viewer](src/Motus.Viewer/README.md) at `/bamboo-truss`.*
 
 | Motus.NET | [Motus.Grasshopper](https://github.com/lasaths/Motus.Grasshopper) |
 |-----------|-------------------------------------------------------------------|
@@ -17,6 +21,8 @@ Licensed under [MIT](LICENSE).
 
 - [Packages](#packages)
 - [Quick start](#quick-start)
+- [Assembly planning](#assembly-planning)
+- [Experimental surface](#experimental-surface)
 - [Planners](#planners)
 - [Algorithms and references](#algorithms-and-references)
 - [Context: attach, groups, SRDF](#context-attach-groups-srdf)
@@ -33,6 +39,7 @@ dotnet add package Motus.Core
 dotnet add package Motus.Geometry
 dotnet add package Motus.OMPL.NET
 dotnet add package Motus.Presets
+dotnet add package Motus.Construction   # assembly planning (experimental)
 ```
 
 | Package | Role |
@@ -42,6 +49,7 @@ dotnet add package Motus.Presets
 | `Motus.OMPL.NET` | Sampling planners (managed RRT-Connect by default; native OMPL when built) |
 | `Motus.Presets` | JSON presets + `UrdfRobotLoader` / xacro |
 | `Motus.Native` | Optional P/Invoke to `motus_native` (OMPL + FCL) |
+| `Motus.Construction` | `AssemblyPlanner`: pick / carry / place / walk sequence for a member structure, replay-checked for collisions (experimental) |
 
 **Rhino / desktop:** managed planning and C# mesh collision are the default — no Linux `.so` required. See [docs/rhino-host.md](docs/rhino-host.md). Stub/NuGet builds often expose only `RrtConnect` in the planner registry; extra OMPL IDs need a full native build. Check `MotusCapabilities.Describe()`.
 
@@ -79,6 +87,32 @@ var robot = UrdfRobotLoader.Load("robot.urdf", new UrdfLoadOptions {
 });
 var fk = KinematicsResolver.CreateFkSolver(robot.Preset, robot.Chain);
 ```
+
+## Assembly planning
+
+`Motus.Construction` plans how a robot builds a structure of members (nodes + member lines) on a site, then replays the plan through Motus collision checks.
+
+```csharp
+using Motus.Construction;
+
+// The shipped example: a 7-member bamboo Warren truss over a pit, built by the bamboo_icd cell
+// (tests/fixtures/bamboo_icd/bamboo_icd.urdf). UseShippedPlan returns the embedded plan when the
+// input matches it; otherwise it plans live (minutes).
+var plan = AssemblyPlanner.Plan(AssemblyPlanner.WarrenTrussExample with
+{
+    RobotUrdfXml = File.ReadAllText("bamboo_icd.urdf"),
+    UseShippedPlan = true,
+});
+// 21 tasks, collision-free: True (collision-free)
+
+Console.WriteLine($"{plan.Tasks.Count} tasks, collision-free: {plan.CollisionFree} ({plan.Verdict})");
+```
+
+Pass your own `Structure`, `Site`, `Obstacles` or `RobotUrdfXml` on `AssemblyPlanRequest`; every field is optional. Motus.Grasshopper wraps this as the **Assembly** panel (Structure / Site / Plan / Preview).
+
+## Experimental surface
+
+Not GA; APIs may change: `Motus.Construction` assembly planning; aerial free-flyer (`Family=aerial`, HolonomicSE3, [docs/aerial.md](docs/aerial.md)); humanoid (Unitree H2) and quadruped (Unitree Go2) fixtures. Tiers: [docs/supported-surface.md](docs/supported-surface.md).
 
 ## Planners
 
@@ -192,7 +226,7 @@ libraries (glibc / Windows CRT / Apple libm) can lead it to a different, equally
 
 Tag `vX.Y.Z` → [release workflow](.github/workflows/release.yml) builds, tests, packs, publishes to [nuget.org](https://www.nuget.org/profiles/lasaths), and creates a GitHub Release.
 
-Changelog: [CHANGELOG.md](CHANGELOG.md). Package/`Directory.Build.props` targets **2.1.0** (NuGet publish on the `v2.1.0` tag). Development changes remain unreleased until a coordinated version/tag cut; merging a branch does not publish packages.
+Changelog: [CHANGELOG.md](CHANGELOG.md). Current release: **2.1.0** on nuget.org (`Directory.Build.props`). Merging a branch does not publish packages; only a version tag does.
 
 ## Safety
 

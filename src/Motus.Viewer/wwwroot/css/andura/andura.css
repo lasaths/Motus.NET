@@ -193,9 +193,10 @@
   --andura-size-row-desktop: 32px;
   --andura-size-row-tablet: 56px;
   --andura-size-row-phone: 64px;
-  --andura-size-topline-desktop: 56px;
-  --andura-size-topline-tablet: 56px;
-  --andura-size-topline-phone: 48px;
+  --andura-size-header-desktop: 72px;
+  --andura-size-header-tablet: 72px;
+  --andura-size-header-phone: 64px;
+  --andura-size-logo: 32px;
   --andura-size-alarm-row-desktop: 48px;
   --andura-size-alarm-row-tablet: 56px;
   --andura-size-alarm-row-phone: 64px;
@@ -219,7 +220,7 @@
   --andura-size-column-desktop: 400px;
   --andura-size-column-tablet: 444px;
   --andura-size-stroke-rim: 2.5px;
-  --andura-size-content-top: 176px;
+  --andura-size-content-top: 192px;
   --andura-size-chart-h: 120px;
   --andura-size-gantt-bar: 12px;
   --andura-breakpoint-phone: 0px;

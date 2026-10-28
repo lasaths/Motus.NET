@@ -10,28 +10,27 @@
 
 <PageTitle>ICD / LIS bamboo arm</PageTitle>
 
-<div class="viewer-container">
+@* ANDURA L1 "3D dominant". One question: does the arm's pick/place motion stay clear of contact?
+   Persistent zones: top line, footer = timeline bar (same frame as /bamboo-truss). *@
+<div class="andura viewer-container" data-motus="@_motusState">
+    <header class="top">
+        <span class="brand"><svg class="mark" viewBox="0 0 32 32" role="img" aria-label="ANDURA"><title>ANDURA</title><path d="M3 29 16 3l13 26h-7.5L16 17.5 10.5 29Z M13.5 29 16 24l2.5 5Z" style="fill:currentColor"/></svg></span>
+        <h1 class="h1 trunc" tabindex="-1" title="ICD / LIS bamboo arm">ICD / LIS bamboo arm</h1>
+        <span class="facts">
+            <span class="label">CONTROL <span class="text">LOCAL</span></span>
+            <span class="label live">DATA <span class="text">PLAN REPLAY</span></span>
+            <span class="label text value" id="andura-clock"></span>
+        </span>
+    </header>
+
+    <main class="main">
     <div class="viewport-wrap">
         <div id="viewport"></div>
     </div>
 
     <aside class="controls">
-        <h1>ICD / LIS bamboo arm</h1>
-        <p class="sub">5-DoF kinematic preview. Parallel-jaw grippers. Left jaw stays closed on the support pole during the task. Motus.NET owns FK/tasks/collision; Three.js only draws.</p>
+        <p class="muted">5-DoF kinematic preview. Parallel-jaw grippers. Left jaw stays closed on the support pole during the task. Motus.NET owns FK/tasks/collision; Three.js only draws.</p>
         <div class="phase @(!string.IsNullOrEmpty(_motionError) || _collision ? "err" : "")" data-motus="@_motusState">@_phase</div>
-
-        <div class="row">
-            <label>Motion <span>@_scrubPct%</span></label>
-            <input type="range" min="0" max="1000" step="1" value="@_scrub"
-                   disabled="@(!IsRobotReady)"
-                   @oninput="OnScrub" />
-        </div>
-        <div class="btns">
-            <button type="button" class="@(_isPlaying ? "active" : "")" disabled="@(!IsRobotReady)" @onclick="TogglePlay">
-                @(_isPlaying ? "Pause" : "Play")
-            </button>
-            <button type="button" disabled="@(!IsRobotReady)" @onclick="ResetAll">Reset</button>
-        </div>
 
         <div id="tasks">
             @for (var ti = 0; ti < _tasks.Count; ti++)
@@ -126,6 +125,27 @@
             clear sample before the first Motus contact; hit parts are named by Motus and tinted red.
         </p>
     </aside>
+    </main>
+
+    <footer class="timeline foot" data-motus="@_motusState">
+        <div class="tl-controls">
+            <button type="button" class="btn hit @(_isPlaying ? "active" : "")" disabled="@(!IsRobotReady)" @onclick="TogglePlay">
+                @(_isPlaying ? "PAUSE" : "PLAY")
+            </button>
+            <button type="button" class="btn hit" disabled="@(!IsRobotReady)" @onclick="ResetAll">RESET</button>
+            <div class="tl-readout">
+                <span class="tl-pct value">@_scrubPct<span class="muted"> %</span></span>
+            </div>
+        </div>
+        <div class="tl-body solo">
+            <div class="tl-track">
+                <div class="tl-fill" style="width:@((_scrub / 10.0).ToString("F1", System.Globalization.CultureInfo.InvariantCulture))%"></div>
+                <input type="range" class="tl-scrub hit" min="0" max="1000" step="1" value="@_scrub"
+                       disabled="@(!IsRobotReady)" @oninput="OnScrub" aria-label="Motion" />
+            </div>
+        </div>
+        <span class="estop label">E-STOP: PHYSICAL ONLY</span>
+    </footer>
 </div>
 
 @code {
