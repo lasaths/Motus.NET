@@ -3,7 +3,7 @@
 /* andura.css and andura-fonts.css are linked before this sheet in index.html. */
 
 :root { --s: var(--andura-text-scale-100);
-  --m: var(--andura-size-margin-desktop); --top: var(--andura-size-topline-desktop); --row: var(--andura-size-alarm-row-desktop);
+  --m: var(--andura-size-margin-desktop); --top: var(--andura-size-header-desktop); --row: var(--andura-size-alarm-row-desktop);
   --foot: var(--andura-size-footer-desktop); --btn: var(--andura-size-button-band); --col: var(--andura-size-column-desktop);
   --gap: var(--andura-space-48); --list-row: var(--andura-size-row-desktop); --tgt: var(--andura-size-button-mouse);
   --body: var(--andura-type-body-desktop-fontSize); --body-lh: var(--andura-type-body-desktop-lineHeight);
@@ -11,7 +11,7 @@
   --h1: var(--andura-type-h1-desktop-fontSize); --title: var(--andura-type-title-desktop-fontSize);
   --vm: var(--andura-type-value-m-desktop-fontSize); --display: var(--andura-type-display-desktop-fontSize); }
 @media (max-width: 1279px) { /* tablet: below breakpoint.desktop */
-  :root { --m: var(--andura-size-margin-tablet); --top: var(--andura-size-topline-tablet); --row: var(--andura-size-alarm-row-tablet);
+  :root { --m: var(--andura-size-margin-tablet); --top: var(--andura-size-header-tablet); --row: var(--andura-size-alarm-row-tablet);
     --foot: var(--andura-size-footer-tablet); --btn: var(--andura-size-touch-min); --col: var(--andura-size-column-desktop);
     --gap: var(--andura-space-32); --list-row: var(--andura-size-row-tablet); --tgt: var(--andura-size-touch-min);
     --body: var(--andura-type-body-tablet-fontSize); --body-lh: var(--andura-type-body-tablet-lineHeight);
@@ -20,7 +20,7 @@
     --vm: var(--andura-type-value-m-tablet-fontSize); --display: var(--andura-type-value-l-tablet-fontSize); }
 }
 @media (max-width: 599px) { /* phone: below breakpoint.tablet */
-  :root { --m: var(--andura-size-margin-phone); --top: var(--andura-size-topline-phone); --row: var(--andura-size-alarm-row-phone);
+  :root { --m: var(--andura-size-margin-phone); --top: var(--andura-size-header-phone); --row: var(--andura-size-alarm-row-phone);
     --foot: var(--andura-size-footer-phone); --list-row: var(--andura-size-row-phone);
     --body: var(--andura-type-body-phone-fontSize); --body-lh: var(--andura-type-body-phone-lineHeight);
     --label: var(--andura-type-label-phone-fontSize); --label-lh: var(--andura-type-label-phone-lineHeight);
@@ -59,6 +59,8 @@ body { display: flex; overflow: hidden; font-family: var(--andura-font-family-sa
 /* page frame: top line · band · main · footer (fixed zones never move) */
 .viewer-container { display: flex; flex-direction: column; width: 100%; height: 100vh; overflow: hidden; }
 .top { height: calc(var(--top) * var(--s)); flex: none; display: flex; align-items: center; gap: var(--andura-space-24); padding: 0 var(--m); min-width: 0; }
+.brand { display: flex; align-items: center; flex: none; color: var(--andura-color-text); }
+.brand .mark { width: var(--andura-size-logo); height: var(--andura-size-logo); display: block; }
 .top .facts { margin-left: auto; display: flex; gap: var(--andura-space-24); flex: none; }
 
 .band { flex: none; background: var(--andura-color-surface); }
@@ -151,6 +153,7 @@ input[type="range"]:disabled { opacity: var(--andura-opacity-dim); }
 .tl-readout { min-width: calc(var(--andura-space-48) * 2); text-align: right; }
 .tl-pct { font-size: calc(var(--vm) * var(--s)); }
 .tl-body { flex: 1; min-width: 0; align-self: stretch; display: flex; flex-direction: column; gap: var(--andura-space-4); }
+.tl-body.solo { justify-content: center; }
 .tl-blocks { position: relative; flex: 1; background: var(--andura-color-surface); overflow: hidden; }
 .tl-block { position: absolute; top: 0; bottom: 0; cursor: pointer; overflow: hidden; border-right: 1px solid var(--andura-color-void);
   background: var(--andura-color-surface-lift); }
@@ -210,8 +213,4 @@ input[type="range"]:disabled { opacity: var(--andura-opacity-dim); }
 }
 .tl-block span { padding: 0 0 0 1px; text-indent: 0; }
 .tl-block { padding: 0; }
-/* /bamboo (legacy ICD page) shares this sheet: keep its row layout (viewport | controls) on the same tokens. */
-.viewer-container:not(.andura) { flex-direction: row; }
-.viewer-container:not(.andura) .controls { padding: var(--andura-space-24); border-left: 1px solid var(--andura-color-line); }
-.viewer-container:not(.andura) .controls h1 { font-weight: var(--andura-font-weight-medium); letter-spacing: var(--andura-type-label-tracking); text-transform: uppercase; }
 .controls h1:focus { outline: none; }
