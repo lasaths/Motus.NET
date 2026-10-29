@@ -1,6 +1,6 @@
 # Motus.NET
 
-.NET 8 **host-agnostic** motion-planning core: models, FK/IK, collision, sampling/Cartesian planners, retiming, export, and robotic assembly planning. **Version 2.1.0.**
+.NET 8 **host-agnostic** motion-planning core: models, FK/IK, collision, sampling/Cartesian planners, retiming, export, and robotic assembly planning. **Version 2.2.0.**
 
 ![Bamboo arm placing the 7 members of a Warren truss over a pit, replayed from the shipped AssemblyPlanner plan](docs/media/bamboo-truss-assembly.gif)
 
@@ -8,7 +8,7 @@
 
 | Motus.NET | [Motus.Grasshopper](https://github.com/lasaths/Motus.Grasshopper) |
 |-----------|-------------------------------------------------------------------|
-| Versioned libraries on [nuget.org](https://www.nuget.org/profiles/lasaths) (package identity **2.1.0**) | Rhino/GH UI that calls these APIs |
+| Versioned libraries on [nuget.org](https://www.nuget.org/profiles/lasaths) (package identity **2.2.0**) | Rhino/GH UI that calls these APIs |
 | Owns math, units, Status contracts, method DOIs | Thin components + examples |
 
 The libraries have no UI or vendor runtime dependencies and no live robot I/O. The optional [Motus.Viewer](src/Motus.Viewer/README.md) Blazor app exercises the same libraries in the browser with bamboo-arm and truss previews. Algorithm catalog: [docs/METHODS.md](docs/METHODS.md) · citations: [docs/REFERENCES.bib](docs/REFERENCES.bib).
@@ -226,7 +226,7 @@ libraries (glibc / Windows CRT / Apple libm) can lead it to a different, equally
 
 Tag `vX.Y.Z` → [release workflow](.github/workflows/release.yml) builds, tests, packs, publishes to [nuget.org](https://www.nuget.org/profiles/lasaths), and creates a GitHub Release.
 
-Changelog: [CHANGELOG.md](CHANGELOG.md). Current release: **2.1.0** on nuget.org (`Directory.Build.props`). Merging a branch does not publish packages; only a version tag does.
+Changelog: [CHANGELOG.md](CHANGELOG.md). Current release: **2.2.0** on nuget.org (`Directory.Build.props`). Merging a branch does not publish packages; only a version tag does.
 
 ## Safety
 

@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.2.0] - 2026-10-29
+
 ### Added
 
 - Motus.Construction build search: opt-in physics-aware sequencing (`BambooBuildSearch.Options.Stability`, `BambooFrameStability`), a linear frame check of each partial structure under self-weight and robot clamp load.
