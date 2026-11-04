@@ -830,6 +830,21 @@ public partial class BambooTrussTests
         Assert.Throws<ArgumentException>(() => new BambooStructureGraph(g.Nodes, new[] { new BambooStructureGraph.Edge("X", "A", "nowhere") }));
     }
 
+    /// <summary>Non-planar graph: 3D rule — a node is fixed once three non-coplanar members tie it to anchors (two only hinge it).</summary>
+    [Fact]
+    public void StructureGraph_Spatial_TripodFixesANodeTwoMembersDoNot()
+    {
+        static BambooStructureGraph.Node N(string n, double x, double y, double z, bool a = false) => new(n, x, y, z, a, a ? "anchor-" + n : null);
+        var g = new BambooStructureGraph(
+            new[] { N("A", 0, 0, 0, true), N("B", 1, 0, 0, true), N("C", 0, 1, 0, true), N("T", 0.3, 0.3, 0.8), N("U", 0.3, 1.3, 0.8) },
+            new[] { new BambooStructureGraph.Edge("AT", "A", "T"), new("BT", "B", "T"), new("CT", "C", "T"), new("TU", "T", "U"), new("CU", "C", "U") });
+        Assert.False(g.IsPlanar);
+        Assert.True(BambooStructureGraph.FromLayout().IsPlanar); // Warren keeps the 2D rule
+        Assert.Empty(g.Fixed(new[] { "AT", "BT" }));
+        Assert.Equal(new[] { "AT", "BT", "CT" }, g.Fixed(new[] { "AT", "BT", "CT" }).OrderBy(x => x));
+        Assert.DoesNotContain("TU", g.Fixed(new[] { "AT", "BT", "CT", "TU", "CU" })); // U on two bars: hinged
+    }
+
     /// <summary>
     /// The default sequence is derived, not hand-ordered: the build search (structure graph + reach map with the real
     /// fixed set of each build state, relay candidates = the scene check's single-park options, every choice confirmed

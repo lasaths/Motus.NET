@@ -447,7 +447,7 @@ public static class BambooTrussMotion
             if (BambooTrussLayout.IsSupport(target) && BambooTrussLayout.IsSupport(p.LStake))
             {
                 if (p.LStake == target) continue;
-                var ok = p.Walk(site.WalkRAnchor, BambooTrussLayout.StakeNamed(target));
+                var ok = p.WalkToAnchor(target);
                 notes.Add(ok ? $"walk → {target}: stake walk" : $"walk → {target}: not planned — {p.Error}");
                 continue;
             }
