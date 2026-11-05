@@ -13,8 +13,11 @@ namespace Motus.Construction;
 /// </summary>
 public static class BambooBuildSearch
 {
-    public enum Mode { Direct, Land, Relay }
+    /// <summary>How a member is built: from where the robot stands, after a targeted landing, via a relay park, or after an
+    /// anchor-to-anchor walk (<see cref="Options.AnchorWalks"/>).</summary>
+    public enum Mode { Direct, Land, Relay, Walk }
 
+    /// <summary>One confirmed choice. <paramref name="Relay"/>: the relay id (<see cref="Mode.Relay"/>) or the anchor walked to (<see cref="Mode.Walk"/>).</summary>
     public sealed record Choice(string MemberId, Mode Mode, string? Relay, bool WalkToPark, bool WalkToPlace, string Note);
 
     public sealed record Result(List<BambooIcdMotion.TaskEdit> Tasks, List<Choice> Order, List<string> Log, bool Complete,
@@ -70,6 +73,11 @@ public static class BambooBuildSearch
         /// log and a confirm-rate prior from earlier logs. Every kept choice is still confirmed by the planner.
         /// </summary>
         public TampSettings? Tamp { get; init; }
+        /// <summary>
+        /// Also try walking L from the anchor it stands on to another anchor (<see cref="BambooTrussPlanner.WalkToAnchor"/>)
+        /// and building from there, for anchors whose reach-map sites reach the stock and the member. Off by default.
+        /// </summary>
+        public bool AnchorWalks { get; init; }
     }
 
     /// <summary>Settings for <see cref="Options.Tamp"/>.</summary>
@@ -211,6 +219,10 @@ public static class BambooBuildSearch
                 options.Add((id, Mode.Direct, null, -far,
                     () => map.Query(stand, BambooReachMap.Stock()).Ik && map.Query(stand, BambooReachMap.PlaceOf(m)).Ik));
                 options.Add((id, Mode.Land, null, 10 - far, () => usable.Any(s => grid.Ok(s, "stock") && grid.Ok(s, id))));
+                if (o.AnchorWalks && BambooTrussLayout.IsSupport(p.LStake))
+                    foreach (var a in BambooTrussLayout.Stakes.Where(a => a.Name != p.LStake))
+                        options.Add((id, Mode.Walk, a.Name, 15 - far + Dist(m.Place, a),
+                            () => Enumerable.Range(0, grid.Sites.Count).Any(s => grid.Owner[s] == a.Name && grid.Ok(s, "stock") && grid.Ok(s, id))));
                 foreach (var r in relayOptions.GetValueOrDefault(id) ?? new List<string>())
                 {
                     if (!graph.ExistingNodes(placed).Contains(BambooTrussLayout.RelayNode(r))) continue;
@@ -296,6 +308,10 @@ public static class BambooBuildSearch
                 if (!p.BuildMember(m)) { log($"  {id} land: build after landing rejected — {p.Error}"); return null; }
                 return new Choice(id, mode, null, false, true, $"{id}: {land.Note}");
             }
+            case Mode.Walk:
+                if (!p.WalkToAnchor(relay!)) { log($"  {id} walk → {relay}: rejected — {p.Error}"); return null; }
+                if (!p.BuildMember(m)) { log($"  {id} walk → {relay}: build after the walk rejected — {p.Error}"); return null; }
+                return new Choice(id, mode, relay, false, false, $"{id}: walk {relay} then direct");
             default:
             {
                 var park = BambooTrussLayout.Def(relay!)!;
@@ -333,6 +349,7 @@ public static class BambooBuildSearch
         var member = BambooTrussMotion.DefaultTasks(new[] { m });
         if (c.Mode == Mode.Direct) return member;
         if (c.Mode == Mode.Land) return new[] { BambooTrussMotion.LandTask(c.MemberId) }.Concat(member);
+        if (c.Mode == Mode.Walk) return new[] { BambooTrussMotion.WalkTask(c.Relay!) }.Concat(member);
         var list = new List<BambooIcdMotion.TaskEdit>();
         if (c.WalkToPark) list.Add(BambooTrussMotion.LandTask(c.Relay!));
         list.Add(member[0]);

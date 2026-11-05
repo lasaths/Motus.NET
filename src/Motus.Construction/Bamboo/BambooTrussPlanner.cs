@@ -874,7 +874,8 @@ public sealed class BambooTrussPlanner
     /// Walk with base swaps to another outboard stake. R clamps <paramref name="anchor"/> — a placed cane fixed at both
     /// ends (brachiation onto the built structure) or a stake — the base swaps to R, L slides up off its stake's free
     /// top, transits over <paramref name="target"/> and slides down onto it, L clamps, the base swaps back to L, and R
-    /// opens, backs off and parks.
+    /// opens, backs off and parks. When that fails, an anchor column (node connector above its top) is left sideways out
+    /// of the L-grip's open side and/or clamped from the side instead.
     /// </summary>
     public bool Walk(string anchor, BambooTrussLayout.Stake target)
     {
@@ -910,17 +911,57 @@ public sealed class BambooTrussPlanner
                 Restore(snap, startKeys);
                 if (!RGrasp(g, g.On, 0, pickActive: false, solutionIndex: idx)) continue;
                 if (!SwapTo(K.Gripper.R, g.On)) continue;
-                if (!LSlide(from, up: true)) continue;
-                if (!LOnto(target)) continue;
-                if (!SwapTo(K.Gripper.L, target.Name)) continue;
-                if (!RRetreat(g)) continue;
-                if (!RPark()) continue;
-                _lStake = target.Name;
-                Notes.Add($"{_cycle}: R clamps {g.On} at ({g.X:F3},{g.Y:F3},{g.Z:F3}); L {from.Name} → {target.Name}; R parks");
-                return true;
+                var k1 = Keys.Count; var s1 = Snapshot();
+                // Over the free tops first; an anchor column (connector above, as in WalkStep) may instead be left
+                // sideways out of the L-grip's open side and clamped from the side.
+                foreach (var sideways in new[] { false, true })
+                {
+                    Restore(s1, k1);
+                    if (!sideways) { if (!LSlide(from, up: true)) continue; }
+                    else
+                    {
+                        if (!IsColumn(from) && !IsColumn(target)) continue;
+                        var lf0 = K.Free(_base, _baseWorld, _q);
+                        if (IsColumn(from) ? !LBackOff(new K.GripTarget(lf0[3], lf0[7], lf0[11], 0, 1, 0, from.Name)) : !LSlide(from, up: true)) continue;
+                    }
+                    if (!LOnto(target) && !(sideways && IsColumn(target) && LSideGrasp(target.Grip, target.Name))) continue;
+                    if (!SwapTo(K.Gripper.L, target.Name)) continue;
+                    if (!RRetreat(g)) continue;
+                    if (!RPark()) continue;
+                    _lStake = target.Name;
+                    Notes.Add($"{_cycle}: R clamps {g.On} at ({g.X:F3},{g.Y:F3},{g.Z:F3}); L {from.Name} → {target.Name}{(sideways ? " (sideways)" : "")}; R parks");
+                    return true;
+                }
             }
         Restore(snap, startKeys);
         return Fail(string.IsNullOrEmpty(Error) ? $"walk: no Motus-clear {from.Name}→{target.Name} swap via {anchor}" : "walk: " + Error);
+    }
+
+    static bool IsColumn(BambooTrussLayout.Stake s) => s.Name.StartsWith("anchor-", StringComparison.Ordinal);
+
+    /// <summary>
+    /// Anchor-to-anchor walk: L moves from the anchor it stands on to anchor <paramref name="target"/> with
+    /// <see cref="Walk"/>, R clamping the first that works of: the site's walk anchor, then clampable placed members and
+    /// other anchors, nearest the midpoint of the two anchors first (at most <paramref name="maxRAnchors"/>).
+    /// </summary>
+    public bool WalkToAnchor(string target, int maxRAnchors = 6)
+    {
+        if (!BambooTrussLayout.IsSupport(_lStake)) return Fail($"walk → {target}: L is not on an anchor ({_lStake})");
+        var (from, to) = (BambooTrussLayout.StakeNamed(_lStake), BambooTrussLayout.StakeNamed(target));
+        double mx = (from.X + to.X) / 2, my = (from.ClampY + to.ClampY) / 2, mz = (from.Z + to.Z) / 2;
+        double D(double x, double y, double z) => Math.Sqrt((x - mx) * (x - mx) + (y - my) * (y - my) + (z - mz) * (z - mz));
+        var members = Clampable(PlacedIds).Select(id => BambooTrussLayout.Members.First(m => m.Id == id))
+            .Select(m => ("placed-" + m.Id, D(m.Place.X, m.Place.Y, m.Place.Z)));
+        var stakes = BambooTrussLayout.Stakes.Where(st => st.Name != from.Name && st.Name != to.Name).Select(st => (st.Name, D(st.X, st.ClampY, st.Z)));
+        var anchors = new[] { BambooTrussLayout.Current.WalkRAnchor }
+            .Concat(members.Concat(stakes).OrderBy(x => x.Item2).Select(x => x.Item1)).Distinct().Take(maxRAnchors);
+        var errors = new List<string>();
+        foreach (var a in anchors)
+        {
+            if (Walk(a, to)) return true;
+            errors.Add($"via {a}: {Error}");
+        }
+        return Fail($"walk {from.Name} → {target}: " + string.Join("; ", errors));
     }
 
     /// <summary>Placed member as a StrutPlacement-equivalent grip line (uses the actual released pose).</summary>
