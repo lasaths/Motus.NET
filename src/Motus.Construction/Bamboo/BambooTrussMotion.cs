@@ -186,7 +186,7 @@ public static class BambooTrussMotion
     {
         if (BambooTrussLayout.IsSupport(w.Target) || w.Mode == Motus.Core.WalkMode.Land || !w.Frames.TryGetValue("target", out var pl)) return 0;
         var m = BambooTrussLayout.Members.First(x => "placed-" + x.Id == w.Target).Place; var u = m.Axis;
-        return Math.Round(((pl.X - m.X) * u.X + (pl.Y - m.Y) * u.Y + (pl.Z - m.Z) * u.Z) / BambooWalk.Half * 4) / 4;
+        return Math.Round(((pl.X - m.X) * u.X + (pl.Y - m.Y) * u.Y + (pl.Z - m.Z) * u.Z) / BambooWalk.HalfOf(w.Target) * 4) / 4;
     }
 
     /// <summary>Target parameter of a walk block: its "target" plane projected on the cane, as a fraction of half − 3 cm.</summary>
@@ -196,7 +196,7 @@ public static class BambooTrussMotion
         var pl = t.Planes.FirstOrDefault(x => x.Name == "target");
         if (pl is null) return 0;
         var m = BambooTrussLayout.Members.First(x => "placed-" + x.Id == t.Object).Place; var u = m.Axis;
-        return Math.Round(((pl.X - m.X) * u.X + (pl.Y0 + pl.YMm / 1000 - m.Y) * u.Y + (pl.Z - m.Z) * u.Z) / BambooWalk.Half * 4) / 4;
+        return Math.Round(((pl.X - m.X) * u.X + (pl.Y0 + pl.YMm / 1000 - m.Y) * u.Y + (pl.Z - m.Z) * u.Z) / BambooWalk.HalfOf(t.Object) * 4) / 4;
     }
 
     /// <summary>The walking benchmark at the shipped site: walk to S3, build the chord, then S3 → baseL B end → across B

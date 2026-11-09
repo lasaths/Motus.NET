@@ -1,0 +1,80 @@
+using Motus.Construction;
+
+namespace Motus.Core.Tests;
+
+public partial class BambooTrussTests
+{
+    /// <summary>Staged confirmation and walk-only reposition are opt-in; their settings are validated.</summary>
+    [Fact]
+    public void BuildSearch_StagedConfirmAndReposition_AreOptIn()
+    {
+        var o = new BambooBuildSearch.Options();
+        Assert.False(o.StagedConfirm);
+        Assert.False(o.Reposition);
+        Assert.Equal(150, o.StagedRrtIters);
+        Assert.Throws<ArgumentOutOfRangeException>(() => BambooBuildSearch.Run(Cell, o with { StagedConfirm = true, StagedRrtIters = 0 }));
+        Assert.Throws<ArgumentOutOfRangeException>(() => BambooBuildSearch.Run(Cell, o with { Reposition = true, MaxRepositions = -1 }));
+    }
+
+    /// <summary>
+    /// The short RRT stage: when no transit runs out it plans exactly the motion the full budget plans (same random
+    /// stream, same first attempt); when a transit runs out it is counted ("not yet"), and the full budget still plans
+    /// the member — a short timeout is not a proof that there is no path.
+    /// </summary>
+    [Fact]
+    public void Planner_ShortRrtStage_SameMotionWhenItPasses_NotYetWhenItRunsOut()
+    {
+        BambooTrussMotion.UseCell(Cell);
+        var p = new BambooTrussPlanner(Cell);
+        Assert.True(p.Start(), p.Error);
+        string Keys() => System.Text.Json.JsonSerializer.Serialize(p.Keys);
+        void Short(int iters) { p.RrtAttempts = 1; p.RrtIters = iters; p.StagedIters = iters; }
+        void Full() { p.RrtAttempts = 3; p.RrtIters = 1500; p.StagedIters = 0; }
+
+        var cp = p.SaveDeep();
+        Short(150);
+        var miss0 = p.StagedMisses;
+        Assert.True(p.BuildMember(BambooTrussLayout.Def("AT1")!), p.Error);
+        Assert.Equal(miss0, p.StagedMisses);
+        var shortKeys = Keys();
+        p.RollbackDeep(cp);
+        Full();
+        Assert.True(p.BuildMember(BambooTrussLayout.Def("AT1")!), p.Error);
+        Assert.Equal(shortKeys, Keys());
+
+        var cp2 = p.SaveDeep();
+        Short(1);
+        miss0 = p.StagedMisses;
+        p.BuildMember(BambooTrussLayout.Def("T1M")!);
+        Assert.True(p.StagedMisses > miss0, "one RRT iteration should run out on T1M");
+        p.RollbackDeep(cp2);
+        Full();
+        Assert.True(p.BuildMember(BambooTrussLayout.Def("T1M")!), p.Error);
+    }
+
+    /// <summary>
+    /// Reposition targets come from the foothold graph (only anchors before anything is fixed), never the stand itself,
+    /// nearest route first; a reposition is replayed as a walk block in front of the next member's tasks.
+    /// </summary>
+    [Fact]
+    public void BuildSearch_Reposition_TargetsAndWalkBlock()
+    {
+        var graph = BambooStructureGraph.FromLayout();
+        var grid = BambooBuildSearch.BuildGrid(new BambooBuildSearch.Options(), Array.Empty<string>(), lazy: true);
+        var start = BambooTrussLayout.Current.StartStake;
+        var stand = BambooReachMap.AnchorSites(start)[0];
+        var targets = BambooBuildSearch.RepositionTargets(graph, new List<string>(), new HashSet<string>(), stand, grid,
+            new BambooReachMap { IkSeeds = 12 }, new()).ToList();
+        Assert.DoesNotContain(targets, t => t.To == start);
+        Assert.All(targets, t => Assert.True(BambooTrussLayout.IsSupport(t.To)));
+        Assert.Equal(targets.Select(t => t.Travel).Order(), targets.Select(t => t.Travel));
+
+        var c = new BambooBuildSearch.Choice("T1M", BambooBuildSearch.Mode.Direct, null, false, false, "") { RepositionTo = "AM", RepositionF = 1 };
+        var with = BambooBuildSearch.TasksFor(c).ToList();
+        var without = BambooBuildSearch.TasksFor(c with { RepositionTo = null }).ToList();
+        Assert.Equal(without.Count + 1, with.Count);
+        Assert.Equal("walk", with[0].Identity);
+        Assert.Equal("placed-AM", with[0].Object);
+        Assert.Equal(1, BambooTrussMotion.WalkTargetF(with[0]));
+    }
+}

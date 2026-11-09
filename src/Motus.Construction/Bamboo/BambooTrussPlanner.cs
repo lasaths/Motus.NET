@@ -391,8 +391,14 @@ public sealed class BambooTrussPlanner
         // Up to three RRT-Connect attempts (the shared seeded RNG moves on, so each attempt explores differently).
         for (var i = 0; i < RrtAttempts; i++)
             if (Rrt(qa, qb) is { } path) return path;
+        if (StagedIters > 0 && RrtAttempts == 1 && RrtIters == StagedIters) StagedMisses++;
         return null;
     }
+
+    /// <summary>Staged confirmation (<see cref="BambooBuildSearch.Options.StagedRrtIters"/>): the short-stage RRT budget
+    /// (0 = off) and how many transits ran out of it. A transit that ran out says "not yet", never "no path".</summary>
+    internal int StagedIters { get; set; }
+    internal int StagedMisses { get; private set; }
 
     /// <summary>RRT-Connect attempts per transit (walk searches lower it: a failing candidate step costs every attempt).</summary>
     public int RrtAttempts { get; set; } = 3;
