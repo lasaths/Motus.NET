@@ -77,4 +77,30 @@ public partial class BambooTrussTests
         Assert.Equal("placed-AM", with[0].Object);
         Assert.Equal(1, BambooTrussMotion.WalkTargetF(with[0]));
     }
+
+    /// <summary>A doomed reposition walk (the target is never placed) stops at the search's clock cap, well under the
+    /// 90 s replay walk, and leaves the planner where it stood. On Warren the walk graph is exhausted after 24 steps
+    /// (~8 s), so the cap is lowered to show that it, not the graph, ends the walk.</summary>
+    [Fact]
+    public void BuildSearch_DoomedRepositionWalk_StopsAtTheCap()
+    {
+        Assert.True(BambooBuildSearch.RepositionWalkSeconds < 90);
+        BambooTrussMotion.UseCell(Cell);
+        var p = new BambooTrussPlanner(Cell, MotionConstraints.Current with { FixedMemberRule = false });
+        Assert.True(p.Start(), p.Error);
+        foreach (var id in new[] { "AM", "AT1" }) Assert.True(p.BuildMember(BambooTrussLayout.Def(id)!), p.Error);
+        var keys = p.Keys.Count;
+        var log = new List<string>();
+        var cap = BambooBuildSearch.RepositionWalkSeconds;
+        BambooBuildSearch.RepositionWalkSeconds = 1;
+        try
+        {
+            Assert.Null(BambooBuildSearch.Reposition(p, "nowhere", 1, log.Add));
+        }
+        finally { BambooBuildSearch.RepositionWalkSeconds = cap; }
+        _out.WriteLine(string.Join("; ", log));
+        var tried = int.Parse(System.Text.RegularExpressions.Regex.Match(log.Single(), @"\((\d+) steps tried\)").Groups[1].Value);
+        Assert.InRange(tried, 1, 23);
+        Assert.Equal(keys, p.Keys.Count);
+    }
 }

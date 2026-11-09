@@ -296,7 +296,8 @@ public static class BambooBuildSearch
                         && usable.Any(s => grid.Ok(s, r) && grid.Ok(s, id))));
                 }
             }
-            if (o.Reposition && pending is null && o.MaxRepositions > 0)
+            // Only on the deepest branch: shallower states still have siblings, and backtracking is cheaper than a walk.
+            if (o.Reposition && pending is null && o.MaxRepositions > 0 && placed.Count == bestOrder.Count)
                 foreach (var (to, f, travel) in RepositionTargets(graph, placed, fixedIds, stand, grid, map, gap).Take(o.MaxRepositions))
                     options.Add((to, Mode.Reposition, f.ToString("R", System.Globalization.CultureInfo.InvariantCulture), 30 + travel, () => true));
             if (tamp?.LazyPreconditions != true)
@@ -452,7 +453,7 @@ public static class BambooBuildSearch
     /// <paramref name="f"/> and nothing is placed — the same calls <see cref="BambooTrussMotion.RunSequence"/> makes for a
     /// walk block (anchor → anchor stake walk, else <see cref="BambooWalk.Explore"/> with the default gait).
     /// </summary>
-    static Choice? Reposition(BambooTrussPlanner p, string to, double f, Action<string> log)
+    internal static Choice? Reposition(BambooTrussPlanner p, string to, double f, Action<string> log)
     {
         var target = BambooTrussLayout.IsSupport(to) ? to : "placed-" + to;
         if (BambooTrussLayout.IsSupport(to) && BambooTrussLayout.IsSupport(p.LStake))
@@ -463,11 +464,14 @@ public static class BambooBuildSearch
         var gait = BambooWalk.GaitNamed(null);
         var label = BambooTrussLayout.IsSupport(to) ? to : $"{to}@{f:+0.00;-0.00}";
         bool Goal(BambooWalk.Site s) => s.On == target && (s.IsStake || Math.Abs(s.F - f) < 1e-9);
-        var res = BambooWalk.Explore(p, gait, BambooTrussLayout.Current.WalkRAnchor, Goal, ReplayWalkSteps, null, cycleName: $"walk ({gait.Id}) → {label}");
+        var res = BambooWalk.Explore(p, gait, BambooTrussLayout.Current.WalkRAnchor, Goal, ReplayWalkSteps, null, RepositionWalkSeconds, $"walk ({gait.Id}) → {label}");
         if (res.Reached is { } r) return new Choice(to, Mode.Reposition, null, false, false, $"reposition → {label}: {res.PathTo(r).Count} steps");
         log($"  reposition → {label}: rejected — not reachable ({res.Tried} steps tried)");
         return null;
     }
+
+    /// <summary>Search-time cap (s) of a reposition walk: successful ones took seconds, doomed ones 50–70 s (the replay keeps 90 s).</summary>
+    internal static double RepositionWalkSeconds { get; set; } = 20;
 
     /// <summary>Walk steps per walk block, as in <see cref="BambooTrussMotion.RunSequence"/> (the replay must find the same walk).</summary>
     const int ReplayWalkSteps = 150;
