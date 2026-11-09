@@ -78,6 +78,11 @@ public static class BambooBuildSearch
         /// and building from there, for anchors whose reach-map sites reach the stock and the member. Off by default.
         /// </summary>
         public bool AnchorWalks { get; init; }
+        /// <summary>
+        /// Rank candidates nearest the robot first (place + stock distance from the stand) instead of farthest from the
+        /// start support first. Off by default; helps structures the robot must walk across (grid shells, many stock spots).
+        /// </summary>
+        public bool NearestFirst { get; init; }
     }
 
     /// <summary>Settings for <see cref="Options.Tamp"/>.</summary>
@@ -214,8 +219,10 @@ public static class BambooBuildSearch
                 var m = BambooTrussLayout.Def(id)!;
                 var usable = Enumerable.Range(0, grid.Sites.Count)
                     .Where(s => grid.Owner[s] != id && (BambooTrussLayout.IsSupport(grid.Owner[s]) || fixedIds.Contains(grid.Owner[s]))).ToList();
-                // Far members first: what is built later must not block reaching what is built earlier.
-                var far = Dist(m.Place, start);
+                // Far members first: what is built later must not block reaching what is built earlier. NearestFirst: members
+                // whose place and stock lie nearest the stand first, so the robot finishes an area before it moves on.
+                var far = o.NearestFirst ? -(Dist(stand.Origin, (m.Place.X, m.Place.Y, m.Place.Z)) + Dist(stand.Origin, (m.Store.X, m.Store.Y, m.Store.Z)))
+                    : Dist(m.Place, start);
                 var stock = BambooReachMap.Stock(m);
                 options.Add((id, Mode.Direct, null, -far,
                     () => map.Query(stand, stock).Ik && map.Query(stand, BambooReachMap.PlaceOf(m)).Ik));
@@ -398,6 +405,9 @@ public static class BambooBuildSearch
         var (p, q) = (a.Origin, b.Origin);
         return Math.Sqrt((p.X - q.X) * (p.X - q.X) + (p.Y - q.Y) * (p.Y - q.Y) + (p.Z - q.Z) * (p.Z - q.Z)) <= 2 * BambooReachMap.MaxReachM;
     }
+
+    static double Dist((double X, double Y, double Z) a, (double X, double Y, double Z) b) =>
+        Math.Sqrt((a.X - b.X) * (a.X - b.X) + (a.Y - b.Y) * (a.Y - b.Y) + (a.Z - b.Z) * (a.Z - b.Z));
 
     static double Dist(BambooIcdCell.StrutPlacement m, BambooTrussLayout.Stake s) =>
         Math.Sqrt((m.X - s.X) * (m.X - s.X) + (m.Y - s.ClampY) * (m.Y - s.ClampY) + (m.Z - s.Z) * (m.Z - s.Z));
