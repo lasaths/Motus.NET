@@ -235,7 +235,7 @@ public static class BambooBuildSearch
         var deadEnds = new HashSet<string>(StringComparer.Ordinal);
 
         if (o.PlacedFootholds) Log("placed footholds: every placed member may be clamped (approximate for pin-joint mechanisms)");
-        var p = new BambooTrussPlanner(cell, o.PlacedFootholds ? MotionConstraints.Current with { FixedMemberRule = false } : null);
+        var p = new BambooTrussPlanner(cell, o.PlacedFootholds ? MotionConstraints.Current with { FixedMemberRule = false } : null) { TransitCache = new() };
         if (!p.Start()) { Log("planner start failed: " + p.Error); return new Result(new(), new(), lines, false, 0, 0, clock.Elapsed.TotalSeconds) { StopReason = "planner start failed: " + p.Error }; }
         var start = BambooTrussLayout.StakeNamed(BambooTrussLayout.Current.StartStake);
         var placed = new List<string>();

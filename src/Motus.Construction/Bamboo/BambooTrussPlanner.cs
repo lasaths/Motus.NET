@@ -113,6 +113,9 @@ public sealed class BambooTrussPlanner
         public double NextDouble() { _log.Add(-1); return _r.NextDouble(); }
         public int Next(int max) { _log.Add(max); return _r.Next(max); }
         public int[] Save() => _log.ToArray();
+        public int Count => _log.Count;
+        public int[] Since(int n) => _log.GetRange(n, _log.Count - n).ToArray();
+        public void Advance(IEnumerable<int> calls) { foreach (var c in calls) { if (c < 0) NextDouble(); else Next(c); } }
         public void Restore(IReadOnlyList<int> history)
         {
             _r = new Random(seed);
@@ -388,12 +391,44 @@ public sealed class BambooTrussPlanner
             if (!PoseOk(v, _gR, _gL, _hold, _lOn, _rOn)) continue;
             if (Seg(qa, v) && Seg(v, qb)) return new List<double[]> { v };
         }
+        var key = TransitCache is null ? null : TransitKey(qa, qb);
+        if (key is not null && TransitCache!.TryGetValue(key, out var cached))
+        {
+            var ok = true;
+            for (var i = 0; ok && i <= cached.Path.Count; i++)
+                ok = Seg(i == 0 ? qa : cached.Path[i - 1], i == cached.Path.Count ? qb : cached.Path[i]);
+            if (ok)
+            {
+                TransitCacheHits++;
+                _rng.Advance(cached.Rng); // the random stream moves on as the RRT did, so a re-run from the same state is identical
+                return cached.Path.Select(v => v.ToArray()).ToList();
+            }
+        }
+        var rng0 = _rng.Count;
         // Up to three RRT-Connect attempts (the shared seeded RNG moves on, so each attempt explores differently).
         for (var i = 0; i < RrtAttempts; i++)
-            if (Rrt(qa, qb) is { } path) return path;
+        {
+            RrtRuns++;
+            if (Rrt(qa, qb) is { } path)
+            {
+                if (key is not null) TransitCache![key] = (path.Select(v => v.ToArray()).ToList(), _rng.Since(rng0));
+                return path;
+            }
+        }
         if (StagedIters > 0 && RrtAttempts == 1 && RrtIters == StagedIters) StagedMisses++;
         return null;
     }
+
+    /// <summary>RRT paths by stand, hold, clamps and start / goal rounded to 1° (null = off; on in the build search).
+    /// A hit is used only if every edge from the actual start to the actual goal passes the exact check now.</summary>
+    internal Dictionary<string, (List<double[]> Path, int[] Rng)>? TransitCache { get; set; }
+    internal int TransitCacheHits { get; private set; }
+    internal int RrtRuns { get; private set; }
+
+    string TransitKey(double[] qa, double[] qb) =>
+        string.Join(",", new[] { BaseName, _hold.ToString(), _lOn ?? "-", _rOn ?? "-" }
+            .Concat(_baseWorld.Select(v => Math.Round(v, 3).ToString("R", System.Globalization.CultureInfo.InvariantCulture)))
+            .Concat(qa.Concat(qb).Select(v => Math.Round(v).ToString(System.Globalization.CultureInfo.InvariantCulture))));
 
     /// <summary>Staged confirmation (<see cref="BambooBuildSearch.Options.StagedRrtIters"/>): the short-stage RRT budget
     /// (0 = off) and how many transits ran out of it. A transit that ran out says "not yet", never "no path".</summary>
