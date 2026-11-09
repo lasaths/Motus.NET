@@ -83,6 +83,14 @@ public static class BambooBuildSearch
         /// start support first. Off by default; helps structures the robot must walk across (grid shells, many stock spots).
         /// </summary>
         public bool NearestFirst { get; init; }
+        /// <summary>
+        /// Let the grippers land and walk on every placed member, not only on members the rigidity test calls fixed
+        /// (<see cref="BambooStructureGraph.Fixed"/>); the planner runs with <see cref="MotionConstraints.FixedMemberRule"/>
+        /// off. Off by default. Approximate: with pin joints a placed ring can still be a first-order mechanism (e.g. the
+        /// interior of a diagrid grid shell), and this option treats it as a rigid foothold. Collision checking is unchanged.
+        /// Replay the result with the same rule (<see cref="AssemblyPlanner"/> does this when the option is on).
+        /// </summary>
+        public bool PlacedFootholds { get; init; }
     }
 
     /// <summary>Settings for <see cref="Options.Tamp"/>.</summary>
@@ -184,7 +192,8 @@ public static class BambooBuildSearch
         var failed = new HashSet<string>(StringComparer.Ordinal);
         var deadEnds = new HashSet<string>(StringComparer.Ordinal);
 
-        var p = new BambooTrussPlanner(cell);
+        if (o.PlacedFootholds) Log("placed footholds: every placed member may be clamped (approximate for pin-joint mechanisms)");
+        var p = new BambooTrussPlanner(cell, o.PlacedFootholds ? MotionConstraints.Current with { FixedMemberRule = false } : null);
         if (!p.Start()) { Log("planner start failed: " + p.Error); return new Result(new(), new(), lines, false, 0, 0, clock.Elapsed.TotalSeconds) { StopReason = "planner start failed: " + p.Error }; }
         var start = BambooTrussLayout.StakeNamed(BambooTrussLayout.Current.StartStake);
         var placed = new List<string>();
@@ -207,7 +216,7 @@ public static class BambooBuildSearch
             if (placed.Count == graph.Edges.Count) return true;
             if (BudgetReached()) return false;
 
-            var fixedIds = graph.Fixed(placed).ToHashSet(StringComparer.Ordinal);
+            var fixedIds = Footholds(graph, placed, o);
             var stand = Stand(p);
             var state = tamp is null ? "" : StateKey(placed, stand);
             if (tamp?.DeadEndMemory == true && deadEnds.Contains(state)) { Log("  tamp: build state already found to be a dead end — skipped"); return false; }
@@ -303,6 +312,10 @@ public static class BambooBuildSearch
         return new Result(complete ? tasks : bestTasks, complete ? order : bestOrder, lines, complete, confirmed, rejected, clock.Elapsed.TotalSeconds)
         { StopReason = complete ? "complete" : stopReason };
     }
+
+    /// <summary>Placed members whose reach-map sites the search may land on (<see cref="Options.PlacedFootholds"/>).</summary>
+    internal static HashSet<string> Footholds(BambooStructureGraph graph, IReadOnlyList<string> placed, Options o) =>
+        (o.PlacedFootholds ? placed : graph.Fixed(placed)).ToHashSet(StringComparer.Ordinal);
 
     /// <summary>Confirm one choice with the real planner (the same calls <see cref="BambooTrussMotion.RunSequence"/> makes).</summary>
     static Choice? Confirm(BambooTrussPlanner p, string id, Mode mode, string? relay, Action<string> log)
