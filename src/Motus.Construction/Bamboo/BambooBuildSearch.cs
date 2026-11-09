@@ -216,20 +216,25 @@ public static class BambooBuildSearch
                     .Where(s => grid.Owner[s] != id && (BambooTrussLayout.IsSupport(grid.Owner[s]) || fixedIds.Contains(grid.Owner[s]))).ToList();
                 // Far members first: what is built later must not block reaching what is built earlier.
                 var far = Dist(m.Place, start);
+                var stock = BambooReachMap.Stock(m);
                 options.Add((id, Mode.Direct, null, -far,
-                    () => map.Query(stand, BambooReachMap.Stock()).Ik && map.Query(stand, BambooReachMap.PlaceOf(m)).Ik));
-                options.Add((id, Mode.Land, null, 10 - far, () => usable.Any(s => grid.Ok(s, "stock") && grid.Ok(s, id))));
+                    () => map.Query(stand, stock).Ik && map.Query(stand, BambooReachMap.PlaceOf(m)).Ik));
+                // A landing puts L on a fixed member one node-transfer step away (BambooTrussPlanner.LandingCandidates):
+                // only member sites within two arm reaches of the stand can be landed on.
+                var landable = usable.Where(s => !BambooTrussLayout.IsSupport(grid.Owner[s]) && Near(stand, grid.Sites[s])).ToList();
+                options.Add((id, Mode.Land, null, 10 - far, () => landable.Any(s => grid.Ok(s, stock.Name) && grid.Ok(s, id))));
                 if (o.AnchorWalks && BambooTrussLayout.IsSupport(p.LStake))
                     foreach (var a in BambooTrussLayout.Stakes.Where(a => a.Name != p.LStake))
                         options.Add((id, Mode.Walk, a.Name, 15 - far + Dist(m.Place, a),
-                            () => Enumerable.Range(0, grid.Sites.Count).Any(s => grid.Owner[s] == a.Name && grid.Ok(s, "stock") && grid.Ok(s, id))));
+                            // The walk is at most two steps (R on a via point, then L on the anchor): within two arm reaches.
+                            () => Enumerable.Range(0, grid.Sites.Count).Any(s => grid.Owner[s] == a.Name && Near(stand, grid.Sites[s]) && grid.Ok(s, stock.Name) && grid.Ok(s, id))));
                 foreach (var r in relayOptions.GetValueOrDefault(id) ?? new List<string>())
                 {
                     if (!graph.ExistingNodes(placed).Contains(BambooTrussLayout.RelayNode(r))) continue;
                     // Stock → park from where the robot stands or one landing; park → place from one landing.
                     options.Add((id, Mode.Relay, r, 20 - far, () =>
-                        ((map.Query(stand, BambooReachMap.Stock()).Ik && map.Query(stand, BambooReachMap.PlaceOf(BambooTrussLayout.Def(r)!)).Ik)
-                            || usable.Any(s => grid.Ok(s, "stock") && grid.Ok(s, r)))
+                        ((map.Query(stand, stock).Ik && map.Query(stand, BambooReachMap.PlaceOf(BambooTrussLayout.Def(r)!)).Ik)
+                            || usable.Any(s => grid.Ok(s, stock.Name) && grid.Ok(s, r)))
                         && usable.Any(s => grid.Ok(s, r) && grid.Ok(s, id))));
                 }
             }
@@ -366,8 +371,8 @@ public static class BambooBuildSearch
             foreach (var s in BambooReachMap.AnchorSites(a.Name)) { g.Sites.Add(s); g.Owner.Add(a.Name); }
         foreach (var m in BambooTrussLayout.Members)
             foreach (var s in BambooReachMap.CaneSites("placed-" + m.Id, m.Place, o.CaneOffsets.Select(f => f * (m.Length / 2 - 0.03)), o.Rolls)) { g.Sites.Add(s); g.Owner.Add(m.Id); }
-        var targets = new List<BambooReachMap.TargetLine> { BambooReachMap.Stock() };
-        g.Line["stock"] = 0;
+        var targets = new List<BambooReachMap.TargetLine>();
+        foreach (var k in BambooTrussLayout.FeedSpotsInUse.Prepend(0).Distinct()) { var st = BambooReachMap.Stock(k); g.Line[st.Name] = targets.Count; targets.Add(st); }
         foreach (var m in BambooTrussLayout.Members) { g.Line[m.Id] = targets.Count; targets.Add(BambooReachMap.PlaceOf(m)); }
         foreach (var r in relays.Distinct()) { g.Line[r] = targets.Count; targets.Add(BambooReachMap.PlaceOf(BambooTrussLayout.Def(r)!)); }
         g.Targets = targets;
@@ -385,6 +390,13 @@ public static class BambooBuildSearch
     {
         var k = p.Keys[^1];
         return new BambooReachMap.ClampSite(k.BaseOn ?? p.LStake, 0, 0, k.BaseWorld!);
+    }
+
+    /// <summary>Clamp site <paramref name="b"/> lies within two arm reaches of <paramref name="a"/> (sound IK prefilter for one step).</summary>
+    static bool Near(BambooReachMap.ClampSite a, BambooReachMap.ClampSite b)
+    {
+        var (p, q) = (a.Origin, b.Origin);
+        return Math.Sqrt((p.X - q.X) * (p.X - q.X) + (p.Y - q.Y) * (p.Y - q.Y) + (p.Z - q.Z) * (p.Z - q.Z)) <= 2 * BambooReachMap.MaxReachM;
     }
 
     static double Dist(BambooIcdCell.StrutPlacement m, BambooTrussLayout.Stake s) =>

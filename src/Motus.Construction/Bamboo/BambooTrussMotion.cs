@@ -594,6 +594,8 @@ public static class BambooTrussMotion
             if (mc.CertifiedSegments) parts.Add($"certify:{mc.CertifyMaxDepth},{mc.CertifyMaxChecks}");
             if (BambooTrussLayout.Members.Any(m => m.CaneLength is not null))
                 parts.Add("lengths:" + string.Join("/", BambooTrussLayout.Members.Select(m => $"{m.Id}:{F(m.Length)}")));
+            if (BambooTrussLayout.UsesFeedSpots)
+                parts.Add("feeds:" + string.Join("/", BambooTrussLayout.Members.Select(m => $"{m.Id}:{P(m.Store)}")));
             if (site.Obstacles is { Count: > 0 } obs)
                 parts.Add("obstacles:" + string.Join("/", obs.Select(o =>
                     $"{o.Name}:{o.Shape}:{F(o.Pose.X)},{F(o.Pose.Y)},{F(o.Pose.Z)},{F(o.Pose.Qw)},{F(o.Pose.Qx)},{F(o.Pose.Qy)},{F(o.Pose.Qz)},{F(o.ExtentX)},{F(o.ExtentY)},{F(o.ExtentZ)}")));

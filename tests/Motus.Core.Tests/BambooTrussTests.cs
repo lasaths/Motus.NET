@@ -1067,6 +1067,41 @@ public partial class BambooTrussTests
         }
     }
 
+    /// <summary>
+    /// Stock spots (opt-in per member): Warren keeps its one stock; with member feeds each spot has its own pegs, a cane
+    /// lies only on the active cane's spot, and only that spot's pegs are a rest exemption.
+    /// </summary>
+    [Fact]
+    public void Layout_FeedSpots_OptIn_PerSpotPegs_CaneOnlyOnTheActiveSpot()
+    {
+        Assert.False(BambooTrussLayout.UsesFeedSpots);
+        Assert.All(BambooTrussLayout.Members, m => Assert.Equal(0, m.FeedIndex));
+        Assert.Equal(new[] { "store-peg-1", "store-peg-2" }, BambooTrussLayout.Racks.Select(r => r.Name));
+        var keep = BambooTrussLayout.Current;
+        try
+        {
+            var s = BambooTrussLayout.Structure;
+            var f1 = new BambooTrussLayout.FeedSpot(keep.FeedX, keep.FeedZ + 0.4, 0);
+            var members = s.Members.Select((m, i) => i < 2 ? m with { Feed = f1 } : m).ToList();
+            BambooTrussLayout.Use(keep with { Structure = s with { Members = members } });
+            Assert.True(BambooTrussLayout.UsesFeedSpots);
+            var (a, b, c) = (BambooTrussLayout.Members[0], BambooTrussLayout.Members[1], BambooTrussLayout.Members[2]);
+            Assert.Equal((1, 1, 0), (a.FeedIndex, b.FeedIndex, c.FeedIndex));
+            Assert.Equal(f1.Z, a.Store.Z, 9);
+            Assert.Equal(new[] { 0, 1 }, BambooTrussLayout.FeedSpotsInUse);
+            Assert.DoesNotContain(BambooTrussLayout.FixtureObjects, o => o.Name.Contains("peg"));
+            Assert.Equal(1, BambooTrussLayout.Def(BambooTrussLayout.RelayId(b.Id, b.NodeA, "z+"))!.FeedIndex);
+            var env = BambooTrussCollision.Environment(Cell, [], a.Id, BambooIcdCell.PlacementWorld(a.Store), null, true, 0).Select(o => o.Name).ToList();
+            Assert.Contains("store-peg-1-1", env);   // the active cane's own pegs (rest exemption)
+            Assert.Contains("rack-peg-0-1", env);    // the other spot's pegs: plain obstacles
+            Assert.Equal(1, env.Count(n => n == BambooIcdCell.Strut)); // one cane: the active one, on its own spot
+            var between = BambooTrussCollision.Environment(Cell, [], null, null, null, true, 0).Select(o => o.Name).ToList();
+            Assert.DoesNotContain(BambooIcdCell.Strut, between); // between members no cane is laid out yet
+        }
+        finally { BambooTrussLayout.Use(keep); }
+        Assert.False(BambooTrussLayout.UsesFeedSpots);
+    }
+
     /// <summary>Fail fast: with the stock out of every site's reach, planning is refused before any key is planned, with numbers.</summary>
     [Fact]
     public void SceneCheck_FailsFast_BeforePlanning_WhenTheStockIsOutOfReach()
