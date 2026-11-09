@@ -54,12 +54,13 @@ public static class BambooBuildSearch
         /// <list type="bullet">
         /// <item>Short stage succeeds and no transit ran out: kept. The motion is the one the full budget plans (same
         /// random stream, same first attempt), so the replay plans it too.</item>
-        /// <item>Short stage succeeds only after a transit ran out (a planner fallback): re-confirmed at the full budget
-        /// before it is kept, so the kept motion is the one the replay plans.</item>
         /// <item>Short stage fails and no transit ran out: rejected (the full budget fails the same way).</item>
-        /// <item>Short stage fails after a transit ran out: "not yet", not rejected — RRT cannot prove there is no path.
-        /// It is retried once at the full budget after the other candidates of the same build state.</item>
+        /// <item>A transit ran out (whether or not a planner fallback then passed): "not yet", neither confirmed nor
+        /// rejected, and no full budget in the same confirmation — RRT cannot prove there is no path.</item>
         /// </list>
+        /// A "not yet" candidate gets the full budget only while its build state is on the deepest branch (the current
+        /// best prefix), after the other candidates of that state. If the search ends exhausted with candidates left
+        /// off the deepest branch, one more pass gives every "not yet" candidate the full budget.
         /// A resumed choice (<see cref="ResumeAt"/>) is confirmed at the full budget. Collision checking is unchanged.
         /// </summary>
         public bool StagedConfirm { get; init; }
@@ -242,7 +243,8 @@ public static class BambooBuildSearch
         var tasks = new List<BambooIcdMotion.TaskEdit>();
         var bestOrder = new List<Choice>();
         var bestTasks = new List<BambooIcdMotion.TaskEdit>();
-        int confirmed = 0, rejected = 0, deferred = 0;
+        int confirmed = 0, rejected = 0, deferred = 0, parked = 0;
+        var escalateAll = false;
         var gap = new Dictionary<(string, string), double>();
         string stopReason = "search exhausted";
 
@@ -325,7 +327,7 @@ public static class BambooBuildSearch
             var notYet = new List<(string Id, Mode Mode, string? Relay, double Rank)>();
 
             // One confirmation; true when the search completes below it. shortStage: one RRT attempt of
-            // StagedRrtIters; if any transit ran out the choice is rolled back and kept as "not yet".
+            // StagedRrtIters; if any transit ran out the choice is rolled back and kept as "not yet" (no full budget here).
             bool Try(string id, Mode mode, string? relay, double rank, bool shortStage)
             {
                 var tried = $"{state}#{id}|{mode}|{relay}";
@@ -345,14 +347,9 @@ public static class BambooBuildSearch
                 if (shortStage && p.StagedMisses > miss0)
                 {
                     p.RollbackDeep(cp);
-                    if (choice is not null)
-                    {
-                        Log($"  {id} {mode}: short stage passed after a planner fallback — re-confirmed at the full budget");
-                        return Try(id, mode, relay, rank, false);
-                    }
                     deferred++;
                     notYet.Add((id, mode, relay, rank));
-                    Log($"  {id} {mode}: not yet — the short RRT stage ({o.StagedRrtIters} iterations) ran out after {clock.Elapsed.TotalSeconds - t0:F1} s; retried at the full budget if this state needs it");
+                    Log($"  {id} {mode}: not yet — the short RRT stage ({o.StagedRrtIters} iterations) ran out{(choice is null ? "" : " (a planner fallback passed)")} after {clock.Elapsed.TotalSeconds - t0:F1} s");
                     return false;
                 }
                 if (choice is not null && stability is not null
@@ -393,18 +390,27 @@ public static class BambooBuildSearch
                 if (tamp?.FailureMemory == true && failed.Contains($"{state}#{id}|{mode}|{relay}")) { Log($"  {id} {mode}: already rejected in this build state — skipped"); continue; }
                 if (Try(id, mode, relay, rank, staged && !Resumed(mode, id, relay))) return true;
             }
-            // "Not yet" candidates: RRT cannot prove there is no path, so each one gets the full budget once.
+            // "Not yet" candidates: the full budget only on the deepest branch (LazySP: evaluate only the current best plan).
+            var parkedHere = false;
             foreach (var (id, mode, relay, rank) in notYet.ToList())
             {
+                if (!escalateAll && placed.Count < bestOrder.Count)
+                { parked++; parkedHere = true; Log($"  {id} {mode}: not yet, off the deepest branch — left for a later pass"); continue; }
                 if (BudgetReached()) break;
                 Log($"  {id} {mode}: retry at the full RRT budget");
                 if (Try(id, mode, relay, rank, false)) return true;
             }
-            if (tamp is not null && !BudgetReached()) deadEnds.Add(state);
+            if (tamp is not null && !parkedHere && !BudgetReached()) deadEnds.Add(state);
             return false;
         }
 
         var complete = Dfs();
+        if (!complete && parked > 0 && !BudgetReached())
+        {
+            Log($"build search: second pass — {parked} \"not yet\" candidates off the deepest branch get the full budget");
+            escalateAll = true;
+            complete = Dfs();
+        }
         Log(complete ? $"build search: {string.Join(" → ", order.Select(c => c.MemberId + (c.Mode == Mode.Direct ? "" : c.Mode == Mode.Land ? " (land)" : $" (relay {c.Relay})")))} — {confirmed} confirmed, {rejected} rejected, {deferred} deferred, {clock.Elapsed.TotalSeconds:F0} s"
             : $"build search: incomplete — best confirmed prefix {bestOrder.Count}/{graph.Edges.Count} placed, {confirmed} confirmed, {rejected} rejected, {deferred} deferred; {stopReason}");
         cell.SetMountViewer(BambooTrussLayout.StartBase);

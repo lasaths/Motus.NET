@@ -53,6 +53,41 @@ public partial class BambooTrussTests
     }
 
     /// <summary>
+    /// Staged confirmation on Warren with a one-iteration short stage (every RRT transit runs out): a run-out is "not
+    /// yet", never a rejection, and is not re-run at the full budget in the same confirmation; the full budget runs
+    /// only on the deepest branch (the current best prefix), and "not yet" candidates off it are left for later.
+    /// </summary>
+    [Fact]
+    public void BuildSearch_StagedConfirm_NotYetIsNotARejection_FullBudgetOnlyOnTheDeepestBranch()
+    {
+        BambooTrussMotion.UseCell(Cell);
+        var r = BambooBuildSearch.Run(Cell, new BambooBuildSearch.Options { StagedConfirm = true, StagedRrtIters = 1, MaxConfirmations = 3 });
+        _out.WriteLine(string.Join("\n", r.Log));
+        Assert.Equal(3, r.Confirmed);
+        Assert.Equal(0, r.Rejected);
+        Assert.True(r.Deferred > 0);
+
+        int depth = 0, best = 0, retries = 0, parked = 0;
+        string? lastNotYet = null;
+        foreach (var line in r.Log)
+        {
+            if (System.Text.RegularExpressions.Regex.Match(line, @"^(\d+)/7 ") is { Success: true } m) { depth = int.Parse(m.Groups[1].Value); best = Math.Max(best, depth); }
+            else if (line.StartsWith("backtrack:")) depth--;
+            else if (line.Contains(": retry at the full RRT budget"))
+            {
+                retries++;
+                Assert.Equal(best, depth);
+                Assert.NotEqual(lastNotYet, line.Split(':')[0]); // not the very next step after its own short miss
+            }
+            else if (line.Contains("off the deepest branch")) { parked++; Assert.True(depth < best, line); }
+            lastNotYet = line.Contains(": not yet — ") ? line.Split(':')[0] : null;
+        }
+        Assert.True(retries > 0);
+        Assert.True(parked > 0);
+        Assert.True(retries < r.Deferred, "the full budget must not run on every deferred candidate");
+    }
+
+    /// <summary>
     /// Reposition targets come from the foothold graph (only anchors before anything is fixed), never the stand itself,
     /// nearest route first; a reposition is replayed as a walk block in front of the next member's tasks.
     /// </summary>
