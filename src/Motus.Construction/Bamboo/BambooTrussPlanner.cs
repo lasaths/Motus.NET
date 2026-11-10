@@ -419,16 +419,30 @@ public sealed class BambooTrussPlanner
         return null;
     }
 
-    /// <summary>RRT paths by stand, hold, clamps and start / goal rounded to 1° (null = off; on in the build search).
-    /// A hit is used only if every edge from the actual start to the actual goal passes the exact check now.</summary>
+    /// <summary>RRT paths keyed by every input of <see cref="TransitPath"/> (null = off; on in the build search): stand,
+    /// hold, clamps, jaws, held cane, scene (placed members, active cane), exact start / goal, RRT budget and the
+    /// random-stream position. A hit is exactly what a fresh run from this state computes, so a search with the cache
+    /// confirms only what a replay without it rebuilds (a path from a rolled-back branch is never reused). A hit is
+    /// still re-checked in the current scene.</summary>
     internal Dictionary<string, (List<double[]> Path, int[] Rng)>? TransitCache { get; set; }
     internal int TransitCacheHits { get; private set; }
     internal int RrtRuns { get; private set; }
 
-    string TransitKey(double[] qa, double[] qb) =>
-        string.Join(",", new[] { BaseName, _hold.ToString(), _lOn ?? "-", _rOn ?? "-" }
-            .Concat(_baseWorld.Select(v => Math.Round(v, 3).ToString("R", System.Globalization.CultureInfo.InvariantCulture)))
-            .Concat(qa.Concat(qb).Select(v => Math.Round(v).ToString(System.Globalization.CultureInfo.InvariantCulture))));
+    string TransitKey(double[] qa, double[] qb)
+    {
+        var sb = new System.Text.StringBuilder(1024);
+        void N(double v) => sb.Append(v.ToString("R", System.Globalization.CultureInfo.InvariantCulture)).Append(',');
+        void A(IEnumerable<double>? v) { if (v is null) sb.Append('-'); else foreach (var x in v) N(x); sb.Append('|'); }
+        sb.Append(BaseName).Append('|').Append(_hold).Append('|').Append(_lOn ?? "-").Append('|').Append(_rOn ?? "-").Append('|');
+        N(_gR); N(_gL);
+        sb.Append(_rng.Count).Append('|').Append(RrtIters).Append('|').Append(RrtAttempts).Append('|').Append(StagedIters).Append('|');
+        A(_baseWorld); A(qa); A(qb);
+        sb.Append(_activeId ?? "-").Append('|');
+        A(_activeRest); A(_activeReleased);
+        A(_held is { } h ? new[] { h.X, h.Y, h.Z, h.Qw, h.Qx, h.Qy, h.Qz } : null);
+        foreach (var (name, w) in _placed) { sb.Append(name).Append(':'); A(w); }
+        return sb.ToString();
+    }
 
     /// <summary>Staged confirmation (<see cref="BambooBuildSearch.Options.StagedRrtIters"/>): the short-stage RRT budget
     /// (0 = off) and how many transits ran out of it. A transit that ran out says "not yet", never "no path".</summary>

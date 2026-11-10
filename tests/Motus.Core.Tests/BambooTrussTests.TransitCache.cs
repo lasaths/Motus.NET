@@ -42,3 +42,38 @@ public partial class BambooTrussTests
         Assert.True(p.RrtRuns > rrt2);
     }
 }
+
+public partial class BambooTrussTests
+{
+    /// <summary>
+    /// A path cached in a rolled-back branch is not reused in another state: with a cache filled by building AM first
+    /// (then rolled back), building T1M then AM gives exactly the motion of a fresh planner without a cache, so whatever
+    /// the build search confirms with the cache, a replay without it rebuilds.
+    /// </summary>
+    [Fact]
+    public void Planner_TransitCache_RolledBackBranch_ReplaysLikeAFreshPlanner()
+    {
+        BambooTrussMotion.UseCell(Cell);
+        string Run(BambooTrussPlanner p, bool pollute)
+        {
+            Assert.True(p.Start(), p.Error);
+            Assert.True(p.BuildMember(BambooTrussLayout.Def("AT1")!), p.Error);
+            if (pollute)
+            {
+                var cp = p.SaveDeep();
+                Assert.True(p.BuildMember(BambooTrussLayout.Def("AM")!), p.Error);
+                p.RollbackDeep(cp);
+            }
+            var okT1M = p.BuildMember(BambooTrussLayout.Def("T1M")!);
+            var okAm = okT1M && p.BuildMember(BambooTrussLayout.Def("AM")!);
+            return $"{okT1M},{okAm},{p.Error}|" + System.Text.Json.JsonSerializer.Serialize(p.Keys);
+        }
+        var cached = new BambooTrussPlanner(Cell) { TransitCache = new() };
+        var withCache = Run(cached, pollute: true);
+        var fresh = Run(new BambooTrussPlanner(Cell), pollute: false);
+        _out.WriteLine($"cache: {cached.TransitCache!.Count} entries, {cached.TransitCacheHits} hits; {withCache[..Math.Min(80, withCache.Length)]}");
+        Assert.NotEmpty(cached.TransitCache!);
+        Assert.Equal(0, cached.TransitCacheHits); // the AM paths were planned in another scene and random-stream position
+        Assert.Equal(fresh, withCache);
+    }
+}
