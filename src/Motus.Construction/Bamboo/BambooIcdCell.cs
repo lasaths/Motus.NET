@@ -532,8 +532,18 @@ public sealed class BambooIcdCell
     {
         // The scene (environment + mount parts at the current mount pose and jaw, allowed pairs) is rebuilt only when one
         // of those changes; with a static mount consecutive poses share it (same objects, so the same verdicts).
-        if (RobotMeshCollisionChecker.ReferencePath || _sceneKey is null || !_sceneKey.Matches(MountWorld, gLmm, environment, allowed, 0))
+        // Two slots: the clearance-margin check alternates pass-1 and pass-2 environments on every pose, so the other
+        // slot usually holds the scene it needs (same exact key match, so the same objects and verdicts).
+        if (!RobotMeshCollisionChecker.ReferencePath && _sceneKey is not null && !_sceneKey.Matches(MountWorld, gLmm, environment, allowed, 0) &&
+            _altSceneKey is not null && _altSceneKey.Matches(MountWorld, gLmm, environment, allowed, 0))
         {
+            (_sceneKey, _altSceneKey) = (_altSceneKey, _sceneKey);
+            (_scene, _altScene) = (_altScene, _scene);
+            (_sceneAllow, _altSceneAllow) = (_altSceneAllow, _sceneAllow);
+        }
+        else if (RobotMeshCollisionChecker.ReferencePath || _sceneKey is null || !_sceneKey.Matches(MountWorld, gLmm, environment, allowed, 0))
+        {
+            (_altSceneKey, _altScene, _altSceneAllow) = (_sceneKey, _scene, _sceneAllow);
             var key = new MountMemoKey(MountWorld, gLmm, environment, allowed, 0);
             var objects = new List<CollisionObject>(environment.Count + 6);
             objects.AddRange(environment);
@@ -565,6 +575,9 @@ public sealed class BambooIcdCell
     MountMemoKey? _sceneKey;
     CollisionScene? _scene;
     List<(string, string)>? _sceneAllow;
+    MountMemoKey? _altSceneKey;
+    CollisionScene? _altScene;
+    List<(string, string)>? _altSceneAllow;
 
     public bool PoseClear(IReadOnlyList<double> qDeg, double gRmm, double gLmm, Frame? heldOffset,
         IReadOnlyList<CollisionObject> environment, IReadOnlyList<(string A, string B)> allowed) =>

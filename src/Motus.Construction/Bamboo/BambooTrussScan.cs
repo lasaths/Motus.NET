@@ -68,7 +68,8 @@ public sealed class BambooTrussScan
             if (member is null)
             {
                 // start / walk: nothing new in hand, the stock is full (next cane on the pegs).
-                _world.Add(new CycleWorld { Placed = placed.ToList(), Rest = BambooIcdCell.PlacementWorld(BambooTrussLayout.Store) });
+                // With stock spots no cane is laid out until its member is next.
+                _world.Add(new CycleWorld { Placed = placed.ToList(), Rest = BambooTrussLayout.UsesFeedSpots ? null : BambooIcdCell.PlacementWorld(BambooTrussLayout.Store) });
                 continue;
             }
             var rest = BambooIcdCell.PlacementWorld(member.Store);

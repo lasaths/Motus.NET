@@ -57,7 +57,11 @@ public static class BambooSceneCheck
             foreach (var s in BambooReachMap.CaneSites("placed-" + m.Id, m.Place, o.CaneOffsets.Select(f => f * (m.Length / 2 - 0.03)), o.Rolls)) { sites.Add(s); siteOwner.Add(m.Id); }
 
         // Lines: stock, each member's place, and the parked poses relays may use.
-        var lines = new List<BambooReachMap.TargetLine> { BambooReachMap.Stock() };
+        // Stock lines first (S of them: the spots the members are picked from; the site stock alone without feed spots).
+        var spots = list.Select(m => m.FeedIndex).Distinct().Order().ToList();
+        var S = spots.Count;
+        var lines = spots.Select(BambooReachMap.Stock).ToList();
+        int StockLine(BambooTrussLayout.MemberDef m) => spots.IndexOf(m.FeedIndex);
         lines.AddRange(list.Select(BambooReachMap.PlaceOf));
         var relayLines = new List<(string Node, string Dir, int Line)>();
         foreach (var n in BambooTrussLayout.FootNodes)
@@ -68,14 +72,14 @@ public static class BambooSceneCheck
                 lines.Add(new BambooReachMap.TargetLine($"park {n.Name}/{d}", def.Place, BambooTrussLayout.StockGraspOffsets));
             }
         // Stock + place columns first; the relay columns only if some member has no direct site.
-        var direct = map.Matrix(sites, lines.Take(1 + list.Count).ToList());
+        var direct = map.Matrix(sites, lines.Take(S + list.Count).ToList());
         var anyMissing = Enumerable.Range(0, list.Count).Any(mi =>
-            !Enumerable.Range(0, sites.Count).Any(si => siteOwner[si] != list[mi].Id && direct[si, 0].Ik && direct[si, 1 + mi].Ik));
-        var relay = anyMissing ? map.Matrix(sites, lines.Skip(1 + list.Count).ToList()) : null;
-        if (!anyMissing) lines.RemoveRange(1 + list.Count, lines.Count - 1 - list.Count);
+            !Enumerable.Range(0, sites.Count).Any(si => siteOwner[si] != list[mi].Id && direct[si, StockLine(list[mi])].Ik && direct[si, S + mi].Ik));
+        var relay = anyMissing ? map.Matrix(sites, lines.Skip(S + list.Count).ToList()) : null;
+        if (!anyMissing) lines.RemoveRange(S + list.Count, lines.Count - S - list.Count);
         bool R(int site, int line)
         {
-            var r = line <= list.Count ? direct[site, line] : relay![site, line - 1 - list.Count];
+            var r = line < S + list.Count ? direct[site, line] : relay![site, line - S - list.Count];
             return r.Ik && r.Clear;
         }
 
@@ -83,22 +87,23 @@ public static class BambooSceneCheck
         for (var mi = 0; mi < list.Count; mi++)
         {
             var m = list[mi];
-            var place = 1 + mi;
+            var place = S + mi;
+            var st = StockLine(m);
             // A member is not a site for its own placement.
             var usable = Enumerable.Range(0, sites.Count).Where(s => siteOwner[s] != m.Id).ToList();
-            var nStock = usable.Count(s => R(s, 0));
+            var nStock = usable.Count(s => R(s, st));
             var nPlace = usable.Count(s => R(s, place));
-            var nBoth = usable.Count(s => R(s, 0) && R(s, place));
+            var nBoth = usable.Count(s => R(s, st) && R(s, place));
             var chain = new List<string>();
             var options1 = new List<string>();
             if (nBoth == 0 && relay is not null)
             {
                 // BFS over target lines: hop a → b when one usable site reaches both. Parks must not sit on the member.
                 bool Hop(int a, int b) => usable.Any(s => R(s, a) && R(s, b));
-                var nodes = new List<int> { 0 };
+                var nodes = new List<int> { st };
                 nodes.AddRange(relayLines.Select(r => r.Line));
-                var prev = new Dictionary<int, int> { [0] = -1 };
-                var frontier = new List<int> { 0 };
+                var prev = new Dictionary<int, int> { [st] = -1 };
+                var frontier = new List<int> { st };
                 for (var depth = 0; depth <= o.MaxRelays && !prev.ContainsKey(place); depth++)
                 {
                     var next = new List<int>();
@@ -112,10 +117,10 @@ public static class BambooSceneCheck
                     frontier = next;
                 }
                 if (prev.ContainsKey(place))
-                    for (var x = prev[place]; x > 0; x = prev[x]) chain.Insert(0, lines[x].Name["park ".Length..]);
+                    for (var x = prev[place]; x >= S + list.Count; x = prev[x]) chain.Insert(0, lines[x].Name["park ".Length..]);
                 // Every single-park relay that works (stock → park and park → place each have a site).
                 foreach (var r in relayLines)
-                    if (Hop(0, r.Line) && Hop(r.Line, place)) options1.Add($"{r.Node}/{r.Dir}");
+                    if (Hop(st, r.Line) && Hop(r.Line, place)) options1.Add($"{r.Node}/{r.Dir}");
             }
             var verdict = nBoth > 0 ? $"direct — {nBoth} sites reach stock + place (stock {nStock}, place {nPlace} of {usable.Count})"
                 : chain.Count > 0 ? $"relay via {string.Join(" → ", chain)} — no single site reaches both (stock {nStock}, place {nPlace} of {usable.Count}); single-park options: {(options1.Count > 0 ? string.Join(", ", options1) : "none")}"

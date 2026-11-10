@@ -106,6 +106,8 @@ public static class AssemblyPlanner
                 if (request.Scene is not null) BambooTrussLayout.UseScene(request.Scene);
                 BambooTrussLayout.Use(site);
                 if (request.Settings is not null) MotionConstraints.Current = request.Settings;
+                // The replay must use the same clamp rule as the search.
+                if (request.Search?.PlacedFootholds == true) MotionConstraints.Current = MotionConstraints.Current with { FixedMemberRule = false };
                 if (request.SeedScale is { } s) BambooGripKinematics.SeedScale = s;
                 BambooIcdCell? cell;
                 if (request.RobotUrdfXml is not null)
