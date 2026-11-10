@@ -133,6 +133,21 @@ public static class BambooBuildSearch
         /// Replay the result with the same rule (<see cref="AssemblyPlanner"/> does this when the option is on).
         /// </summary>
         public bool PlacedFootholds { get; init; }
+        /// <summary>
+        /// Before confirming a landing, ask the planner for its one-step landing candidates
+        /// (<see cref="BambooTrussPlanner.LandingCandidates"/>, pure IK) and skip the landing when there are none, instead
+        /// of counting a rejection. Off by default. The reach-grid precondition is optimistic (any fixed-member site within
+        /// two arm reaches); this is the real one-step test, so the skipped landings are the ones the planner would reject
+        /// with "0 IK candidates". Collision checking is unchanged.
+        /// </summary>
+        public bool LandPrecheck { get; init; }
+        /// <summary>
+        /// Most-constrained member first (off by default): rank candidates by how few stand spots (anchors and members
+        /// fixed in the finished structure) reach both the member's stock and its place by IK, then by mode and distance
+        /// as before. A member that only a few stands can build is placed while the robot is next to one, instead of
+        /// after the robot has walked away. Collision checking is unchanged.
+        /// </summary>
+        public bool ConstrainedFirst { get; init; }
     }
 
     /// <summary>Settings for <see cref="Options.Tamp"/>.</summary>
@@ -228,6 +243,18 @@ public static class BambooBuildSearch
 
         var grid = BuildGrid(o, relayOptions.Values.SelectMany(x => x), tamp?.LazyPreconditions == true);
         Log($"reach grid: {grid.Sites.Count} sites × {grid.Line.Count} lines{(grid.Lazy is null ? "" : " (queried on demand)")}");
+        Dictionary<string, int>? stands = null;
+        if (o.ConstrainedFirst)
+        {
+            var finalFixed = Footholds(graph, graph.Edges.Select(e => e.Id).ToList(), o);
+            stands = graph.Edges.ToDictionary(e => e.Id, e =>
+            {
+                var m = BambooTrussLayout.Def(e.Id)!; var stock = BambooReachMap.Stock(m).Name;
+                return Enumerable.Range(0, grid.Sites.Count).Count(s => grid.Owner[s] != e.Id
+                    && (BambooTrussLayout.IsSupport(grid.Owner[s]) || finalFixed.Contains(grid.Owner[s])) && grid.Ok(s, stock) && grid.Ok(s, e.Id));
+            });
+            Log("constrained first: stand spots reaching stock + place — " + string.Join(", ", stands.OrderBy(x => x.Value).Select(x => $"{x.Key} {x.Value}")));
+        }
         var layoutId = BambooTampMemory.LayoutId();
         var prior = tamp?.PriorLogPaths is { } logs && tamp.PriorWeight > 0 ? BambooTampMemory.Prior(BambooTampMemory.Read(logs), layoutId) : null;
         if (prior is not null) Log("tamp: candidates ordered with the confirm-rate prior");
@@ -308,6 +335,8 @@ public static class BambooBuildSearch
                 options = options.Select(x => { bool? memo = null; var pre = x.Pre; return x with { Pre = () => memo ??= pre() }; }).ToList();
             if (prior is not null)
                 options = options.Select(x => x with { Rank = x.Rank + tamp!.PriorWeight * prior(x.Id, x.Mode) }).ToList();
+            if (stands is not null)
+                options = options.Select(x => x with { Rank = x.Rank + 1000.0 * stands.GetValueOrDefault(x.Id) }).ToList();
             if (stability is not null)
             {
                 var sag = new Dictionary<string, BambooFrameStability.Report>(StringComparer.Ordinal);
@@ -387,6 +416,8 @@ public static class BambooBuildSearch
             {
                 if (BudgetReached()) break;
                 if (!pre()) continue;
+                if (o.LandPrecheck && mode == Mode.Land && p.LandingCandidates(BambooTrussLayout.Def(id)!).Count == 0)
+                { Log($"  {id} land: skipped — no one-step landing reaches its stock and place (IK)"); continue; }
                 if (tamp?.FailureMemory == true && failed.Contains($"{state}#{id}|{mode}|{relay}")) { Log($"  {id} {mode}: already rejected in this build state — skipped"); continue; }
                 if (Try(id, mode, relay, rank, staged && !Resumed(mode, id, relay))) return true;
             }
