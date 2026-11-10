@@ -277,6 +277,21 @@ libraries (glibc / Windows CRT / Apple libm) can lead it to a different, equally
 - **Every platform** checks that the shipped plan loads, builds all 7 members PTP-only and replays Motus
   collision-clear, and that its own live plan is complete and collision-clear.
 
+### 3×3 gridshell dome example (experimental)
+
+The file `tests/fixtures/gridshell_dome3x3/dome3x3.site.json` is a `BambooTrussLayout.Site` in JSON. It has 16 nodes,
+24 canes, 12 anchors and one stock spot for each cane. The two canes at the start corner P00 use the site stock.
+Load it with `JsonSerializer.Deserialize<BambooTrussLayout.Site>`. It is example data. The `bamboo_icd` fixture and
+the Warren defaults do not change.
+
+To build the dome and check it, do the steps that follow (Linux x64, approximately 40–50 min on 8 cores):
+
+1. Run `MOTUS_DOME_BUILD=1 dotnet test tests/Motus.Core.Tests -c Release --filter Dome3x3_Example_BuildsComplete_ReplaysAndIsClear`.
+2. Make sure that the test passes. The test uses `AnchorWalks`, `LandPrecheck`, `ConstrainedFirst` and `MaxRejected = 250`.
+   It makes sure that the search places 24/24, that a fresh planner builds the same order, and that the 2 mm scan is clear.
+
+Without `MOTUS_DOME_BUILD=1` the test does nothing. The default test suite does not build the dome.
+
 ## Releases
 
 Tag `vX.Y.Z` → [release workflow](.github/workflows/release.yml) builds, tests, packs, publishes to [nuget.org](https://www.nuget.org/profiles/lasaths), and creates a GitHub Release.
