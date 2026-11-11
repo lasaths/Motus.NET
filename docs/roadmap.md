@@ -208,7 +208,8 @@ Status: a 1x2, 3-story bamboo tower (60 canes) places 6/60 with one fixed stock 
 - [x] Generality: a replay contract (a task runner over core tasks) so that the search = fresh replay check is not specific to bamboo
 - [x] Generality: a search kernel (backtracking, budgets, resume, failure memory, staged confirmation) behind three interfaces (planning state, candidate generator, confirmer); bamboo is one adapter
 - [x] Generality: move certified segments into Motus.Core; bamboo is one adapter (plan: [next-steps-plan.md](next-steps-plan.md), step 1)
-- [ ] Tower: add an opt-in option that braces a node early, so the robot has a foothold fixed at both ends and can go into the second bay (plan: [next-steps-plan.md](next-steps-plan.md), step 2; inputs in tests/fixtures/tower1x2)
+- [x] Tower: add an opt-in option that braces a node early, so the robot has a foothold fixed at both ends and can go into the second bay (plan: [next-steps-plan.md](next-steps-plan.md), step 2; inputs in tests/fixtures/tower1x2)
+  - Result: `Options.BraceFirst` (f7a8648). The tower still places 6/60 (same path as outT3). The new stall is the relay park of the second-story canes (no landing found).
 - [ ] Tower: get canes to story 3 by relays or by a stock height for each stock spot
 - [ ] Relax planner assumptions one at a time (vertical anchors, straight-up approach, fixed stock spots); keep the 2 mm clearance
 - [ ] Dome and tower: test more seeds and platforms

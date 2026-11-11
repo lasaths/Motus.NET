@@ -46,7 +46,7 @@ Problem: the 1x2, 3-story tower (60 canes) places 6/60 with one stock spot. The 
 
 Inputs are in `tests/fixtures/tower1x2/` (`tower-input.json`, and `harness/` is the runner that made the outT3 result). Build the harness with `dotnet build -c Release tests/fixtures/tower1x2/harness`. The outT3 run settings were:
 `BAY=0.28 STORY=0.30 SITELEN=0.22 STARTHEAD=0 STOCK=-0.25,0.05,45 MAXREJ=250 LANDPRE=1 CONSTRAINED=1`, then
-`dotnet tests/fixtures/tower1x2/harness/bin/Release/net8.0/harness.dll tests/fixtures/bamboo_icd/bamboo_icd.urdf 1 plain <outdir>`.
+`dotnet tests/fixtures/tower1x2/harness/bin/Release/net8.0/tower-harness.dll tests/fixtures/bamboo_icd/bamboo_icd.urdf 1 plain <outdir>`.
 Baseline outT3: 6/60, 9 confirmed, 250 rejected, search 3187 s. Placed: N000N100, N010N100, N011N111, N011N110, N001N100, N011N112.
 
 Do:
@@ -56,6 +56,15 @@ Do:
 4. Report placed count, confirmed and rejected counts, the stop reason and the time.
 
 Done when: gates pass with the option off, and the tower result is reported. Commit the option even if the tower gets better but not complete.
+
+Result (2026-11-11, f7a8648): the option is `Options.BraceFirst` (harness: `BRACE=1`). The core suite passed 571/571 with the option off.
+The tower run outT4 (outT3 settings + `BRACE=1`) placed 6/60, with 9 confirmed and 250 rejected, stop `rejected confirmation limit (250)`, search 1960 s.
+The search path is the same as outT3. A fresh replay built 6 members, and the 2 mm scan is collision-free.
+The option ranked `N001N100` first, but the default search already placed it 5th. That cane fixes `N000N100`.
+New stall: after the six canes, the search used its rejections on relays of the second-story canes
+(`N100N200`, `N110N200`, `N111N210`, `N111N211`, `N110N210`). The planner found no landing for each relay park.
+The remaining first-story canes had no Motus-clear R grasp, or the planner found no landing for them.
+Next: give the robot a foothold for the relay park on the second story (or a stock spot nearer the second story).
 
 ## Later (not planned in detail)
 
