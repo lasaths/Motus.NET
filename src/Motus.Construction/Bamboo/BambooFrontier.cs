@@ -1,3 +1,4 @@
+using Motus.Construction.Search;
 using static Motus.Construction.BambooBuildSearch;
 
 namespace Motus.Construction;
@@ -21,7 +22,7 @@ internal sealed class BambooFrontier
     readonly BambooTrussLayout.Stake _start = BambooTrussLayout.StakeNamed(BambooTrussLayout.Current.StartStake);
     readonly Dictionary<(string, string), double> _gap = new();
     readonly Dictionary<string, int>? _stands;
-    readonly Func<string, Mode, double>? _prior;
+    readonly Func<string, string, double>? _prior;
 
     // Rank offsets per mode (lower first): direct, then landing, anchor walk, relay, reposition.
     const double LandRank = 10, WalkRank = 15, RelayRank = 20, RepositionRank = 30;
@@ -44,7 +45,7 @@ internal sealed class BambooFrontier
             });
             log("constrained first: stand spots reaching stock + place — " + string.Join(", ", _stands.OrderBy(x => x.Value).Select(x => $"{x.Key} {x.Value}")));
         }
-        _prior = tamp?.PriorLogPaths is { } logs && tamp.PriorWeight > 0 ? BambooTampMemory.Prior(BambooTampMemory.Read(logs), layoutId) : null;
+        _prior = tamp?.PriorLogPaths is { } logs && tamp.PriorWeight > 0 ? OutcomeLog.Prior(OutcomeLog.Read(logs), layoutId) : null;
         if (_prior is not null) log("tamp: candidates ordered with the confirm-rate prior");
     }
 
@@ -97,9 +98,9 @@ internal sealed class BambooFrontier
         if (tamp?.LazyPreconditions != true)
             options = options.Where(x => x.Pre()).Select(x => x with { Pre = () => true }).ToList();
         else
-            options = options.Select(x => { bool? memo = null; var pre = x.Pre; return x with { Pre = () => memo ??= pre() }; }).ToList();
+            options = options.Select(x => x with { Pre = Precondition.Once(x.Pre) }).ToList();
         if (_prior is not null)
-            options = options.Select(x => x with { Rank = x.Rank + tamp!.PriorWeight * _prior(x.Id, x.Mode) }).ToList();
+            options = options.Select(x => x with { Rank = x.Rank + tamp!.PriorWeight * _prior(x.Id, x.Mode.ToString()) }).ToList();
         if (_stands is not null)
             options = options.Select(x => x with { Rank = x.Rank + RankPerStand * _stands.GetValueOrDefault(x.Id) }).ToList();
         if (stability is not null)
