@@ -552,10 +552,7 @@ public static class BambooBuildSearch
     internal static Grid BuildGrid(Options o, IEnumerable<string> relays, bool lazy)
     {
         var g = new Grid();
-        foreach (var a in BambooTrussLayout.Stakes)
-            foreach (var s in BambooReachMap.AnchorSites(a.Name)) { g.Sites.Add(s); g.Owner.Add(a.Name); }
-        foreach (var m in BambooTrussLayout.Members)
-            foreach (var s in BambooReachMap.CaneSites("placed-" + m.Id, m.Place, o.CaneOffsets.Select(f => f * (m.Length / 2 - 0.03)), o.Rolls)) { g.Sites.Add(s); g.Owner.Add(m.Id); }
+        (g.Sites, g.Owner) = BambooReachMap.SiteGrid(o.CaneOffsets, o.Rolls);
         var targets = new List<BambooReachMap.TargetLine>();
         foreach (var k in BambooTrussLayout.FeedSpotsInUse.Prepend(0).Distinct()) { var st = BambooReachMap.Stock(k); g.Line[st.Name] = targets.Count; targets.Add(st); }
         foreach (var m in BambooTrussLayout.Members) { g.Line[m.Id] = targets.Count; targets.Add(BambooReachMap.PlaceOf(m)); }
