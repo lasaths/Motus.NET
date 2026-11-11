@@ -7,6 +7,6 @@
     <ServerGarbageCollection>true</ServerGarbageCollection>
   </PropertyGroup>
   <ItemGroup>
-    <ProjectReference Include="/workspace/Motus.NET/src/Motus.Construction/Motus.Construction.csproj" />
+    <ProjectReference Include="../../../../src/Motus.Construction/Motus.Construction.csproj" />
   </ItemGroup>
 </Project>

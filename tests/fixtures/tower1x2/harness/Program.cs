@@ -46,6 +46,7 @@ var opts = new BambooBuildSearch.Options
     Reposition = Environment.GetEnvironmentVariable("REPOSITION") == "1",
     LandPrecheck = Environment.GetEnvironmentVariable("LANDPRE") == "1",
     ConstrainedFirst = Environment.GetEnvironmentVariable("CONSTRAINED") == "1",
+    BraceFirst = Environment.GetEnvironmentVariable("BRACE") == "1",
     // RESUME=<checkpoint.json>: re-confirm an earlier run's prefix first (read directly: the fingerprint includes the clamp rule).
     ResumeAt = Environment.GetEnvironmentVariable("RESUME") is { Length: > 0 } rp
         ? JsonSerializer.Deserialize<BambooBuildSearch.Checkpoint>(File.ReadAllText(rp))!.Order : null,

@@ -11,6 +11,7 @@ public partial class BambooTrussTests
         var o = new BambooBuildSearch.Options();
         Assert.False(o.LandPrecheck);
         Assert.False(o.ConstrainedFirst);
+        Assert.False(o.BraceFirst);
     }
 
     /// <summary>
