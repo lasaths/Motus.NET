@@ -370,7 +370,7 @@ public static class BambooBuildSearch
                 {
                     choice = mode == Mode.Reposition
                         ? Reposition(p, id, double.Parse(relay!, System.Globalization.CultureInfo.InvariantCulture), Log)
-                        : Confirm(p, id, mode, relay, Log);
+                        : Confirm(p, placed, id, mode, relay, Log);
                 }
                 finally { p.RrtAttempts = a0; p.RrtIters = i0; p.StagedIters = 0; }
                 if (shortStage && p.StagedMisses > miss0)
@@ -453,57 +453,65 @@ public static class BambooBuildSearch
     internal static HashSet<string> Footholds(BambooStructureGraph graph, IReadOnlyList<string> placed, Options o) =>
         (o.PlacedFootholds ? placed : graph.Fixed(placed)).ToHashSet(StringComparer.Ordinal);
 
-    /// <summary>Confirm one choice with the real planner (the same calls <see cref="BambooTrussMotion.RunSequence"/> makes).</summary>
-    static Choice? Confirm(BambooTrussPlanner p, string id, Mode mode, string? relay, Action<string> log)
+    /// <summary>
+    /// Confirm one choice with the real planner: its task blocks (<see cref="TasksFor"/>, a landing before each
+    /// re-grasp) run through the replay's interpreter (<see cref="BambooMoveRunner"/>), stopping at the first block not
+    /// planned. A landing that is not needed walks nowhere and is left out of the kept tasks.
+    /// </summary>
+    static Choice? Confirm(BambooTrussPlanner p, IReadOnlyList<string> placed, string id, Mode mode, string? relay, Action<string> log)
     {
-        var m = BambooTrussLayout.Def(id)!;
+        // Every landing a relay may need; which ones walked is read back from the run.
+        var trial = new Choice(id, mode, relay, true, true, "");
+        var tasks = TasksFor(trial).ToList();
+        var runner = new BambooMoveRunner(p, placed) { MaxStepsPerWalk = ReplayWalkSteps };
+        var steps = new List<BambooMoveRunner.Step>();
+        foreach (var t in BambooTaskModel.ToCore(tasks))
+        {
+            steps.Add(runner.Run(t));
+            if (!steps[^1].Ok || (mode == Mode.Land && !steps[0].Walked)) break; // a landing that walks nowhere is not a Land choice
+        }
+        var failed = steps.Count < tasks.Count || !steps[^1].Ok ? steps[^1] : (BambooMoveRunner.Step?)null;
+        // Blocks: [land]? pick place (Direct / Land / Walk); [land] pick park [land] pick place (Relay).
         switch (mode)
         {
             case Mode.Direct:
-                if (!p.BuildMember(m)) { log($"  {id} direct: rejected by the planner — {p.Error}"); return null; }
+                if (failed is not null) { log($"  {id} direct: rejected by the planner — {p.Error}"); return null; }
                 return new Choice(id, mode, null, false, false, $"{id}: direct from {p.LStake}");
             case Mode.Land:
-            {
-                var land = BambooTrussMotion.LandStep(p, id, null);
-                if (!land.Ok || !land.Walked) { log($"  {id} land: rejected — {land.Note}"); return null; }
-                if (!p.BuildMember(m)) { log($"  {id} land: build after landing rejected — {p.Error}"); return null; }
-                return new Choice(id, mode, null, false, true, $"{id}: {land.Note}");
-            }
+                if (!steps[0].Ok || !steps[0].Walked) { log($"  {id} land: rejected — {steps[0].Note}"); return null; }
+                if (failed is not null) { log($"  {id} land: build after landing rejected — {p.Error}"); return null; }
+                return new Choice(id, mode, null, false, true, $"{id}: {steps[0].Note}");
             case Mode.Walk:
-                if (!p.WalkToAnchor(relay!)) { log($"  {id} walk → {relay}: rejected — {p.Error}"); return null; }
-                if (!p.BuildMember(m)) { log($"  {id} walk → {relay}: build after the walk rejected — {p.Error}"); return null; }
+                if (!steps[0].Ok) { log($"  {id} walk → {relay}: rejected — {p.Error}"); return null; }
+                if (failed is not null) { log($"  {id} walk → {relay}: build after the walk rejected — {p.Error}"); return null; }
                 return new Choice(id, mode, relay, false, false, $"{id}: walk {relay} then direct");
             default:
             {
-                var park = BambooTrussLayout.Def(relay!)!;
-                var toPark = BambooTrussMotion.LandStep(p, relay!, null);
-                if (!toPark.Ok || !p.BuildMember(park)) { log($"  {id} relay {relay}: park rejected — {(toPark.Ok ? p.Error : toPark.Note)}"); return null; }
-                var toPlace = BambooTrussMotion.LandStep(p, id, null);
-                if (!toPlace.Ok || !p.BuildMember(m)) { log($"  {id} relay {relay}: re-grasp/place rejected — {(toPlace.Ok ? p.Error : toPlace.Note)}"); return null; }
-                return new Choice(id, mode, relay, toPark.Walked, toPlace.Walked, $"{id}: relay via {relay} — {toPark.Note}; {toPlace.Note}");
+                if (steps.Count <= 2 || !steps[2].Ok) { log($"  {id} relay {relay}: park rejected — {(steps[0].Ok ? p.Error : steps[0].Note)}"); return null; }
+                if (failed is not null) { log($"  {id} relay {relay}: re-grasp/place rejected — {(steps.Count > 3 && !steps[3].Ok ? steps[3].Note : p.Error)}"); return null; }
+                return new Choice(id, mode, relay, steps[0].Walked, steps[3].Walked, $"{id}: relay via {relay} — {steps[0].Note}; {steps[3].Note}");
             }
         }
     }
 
     /// <summary>
     /// Walk-only reposition: L walks to <paramref name="to"/> (anchor name or member id) at clamp parameter
-    /// <paramref name="f"/> and nothing is placed — the same calls <see cref="BambooTrussMotion.RunSequence"/> makes for a
-    /// walk block (anchor → anchor stake walk, else <see cref="BambooWalk.Explore"/> with the default gait).
+    /// <paramref name="f"/> and nothing is placed — the walk block of <see cref="TasksFor"/> run through the replay's
+    /// interpreter (<see cref="BambooMoveRunner"/>), with the walk capped at <see cref="RepositionWalkSeconds"/>.
     /// </summary>
     internal static Choice? Reposition(BambooTrussPlanner p, string to, double f, Action<string> log)
     {
         var target = BambooTrussLayout.IsSupport(to) ? to : "placed-" + to;
-        if (BambooTrussLayout.IsSupport(to) && BambooTrussLayout.IsSupport(p.LStake))
+        var stakeWalk = BambooTrussLayout.IsSupport(to) && BambooTrussLayout.IsSupport(p.LStake);
+        var s = new BambooMoveRunner(p) { MaxStepsPerWalk = ReplayWalkSteps, WalkSeconds = RepositionWalkSeconds }.Walk(target, f, null);
+        var label = BambooTrussLayout.IsSupport(to) ? to : $"{to}@{f:+0.00;-0.00}";
+        if (stakeWalk)
         {
-            if (p.WalkToAnchor(to)) return new Choice(to, Mode.Reposition, null, false, false, $"reposition → {to}: stake walk");
+            if (s.Ok) return new Choice(to, Mode.Reposition, null, false, false, $"reposition → {to}: stake walk");
             log($"  reposition → {to}: rejected — {p.Error}"); return null;
         }
-        var gait = BambooWalk.GaitNamed(null);
-        var label = BambooTrussLayout.IsSupport(to) ? to : $"{to}@{f:+0.00;-0.00}";
-        bool Goal(BambooWalk.Site s) => s.On == target && (s.IsStake || Math.Abs(s.F - f) < 1e-9);
-        var res = BambooWalk.Explore(p, gait, BambooTrussLayout.Current.WalkRAnchor, Goal, ReplayWalkSteps, null, RepositionWalkSeconds, $"walk ({gait.Id}) → {label}");
-        if (res.Reached is { } r) return new Choice(to, Mode.Reposition, null, false, false, $"reposition → {label}: {res.PathTo(r).Count} steps");
-        log($"  reposition → {label}: rejected — not reachable ({res.Tried} steps tried)");
+        if (s.Ok) return new Choice(to, Mode.Reposition, null, false, false, $"reposition → {label}: {s.WalkSteps} steps");
+        log($"  reposition → {label}: rejected — not reachable ({s.Tried} steps tried)");
         return null;
     }
 
