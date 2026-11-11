@@ -1,4 +1,5 @@
 using Motus.Core;
+using Motus.Construction.Search;
 
 namespace Motus.Construction;
 
@@ -8,7 +9,7 @@ namespace Motus.Construction;
 /// (<see cref="BambooBuildSearch"/>, to confirm a choice) both run their tasks through it, so a choice the search keeps
 /// is planned by the same calls the replay makes.
 /// </summary>
-internal sealed class BambooMoveRunner(BambooTrussPlanner p, IEnumerable<string>? built = null, Action<string>? log = null)
+internal sealed class BambooMoveRunner(BambooTrussPlanner p, IEnumerable<string>? built = null, Action<string>? log = null) : ITaskRunner
 {
     /// <summary>Outcome of one task block. Ok = false: the block was not planned (<see cref="Note"/> says why).</summary>
     public readonly record struct Step(bool Ok, bool Walked, string? Note, int WalkSteps = 0, int Tried = 0);
@@ -24,6 +25,9 @@ internal sealed class BambooMoveRunner(BambooTrussPlanner p, IEnumerable<string>
     public List<string> Built { get; } = built?.ToList() ?? new();
 
     PickTask? _pick;
+
+    TaskStep ITaskRunner.Run(TaskInstance task) { var s = Run(task); return new(s.Ok, s.Note); }
+    IReadOnlyList<string> ITaskRunner.Built => Built;
 
     /// <summary>Run one core task. A pick is remembered for the place / park that follows; it plans nothing by itself.</summary>
     public Step Run(TaskInstance c)

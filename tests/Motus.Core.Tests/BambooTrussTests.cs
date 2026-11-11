@@ -888,6 +888,10 @@ public partial class BambooTrussTests
         Assert.Empty(TaskSequenceRules.Validate(BambooTaskModel.ToCore(r.Tasks)));
         Assert.True(BambooTrussMotion.IsShippedSequence(r.Tasks), "the search result is the shipped sequence");
         Assert.Equal(Build().Built, r.Order.Select(c => c.MemberId));
+        // Replay contract: a fresh task runner rebuilds the search result in the same order.
+        var fresh = new BambooTrussPlanner(Cell);
+        Assert.True(fresh.Start(), fresh.Error);
+        Assert.Null(Motus.Construction.Search.Replay.Mismatch(new BambooMoveRunner(fresh), BambooTaskModel.ToCore(r.Tasks), r.Order.Select(c => c.MemberId)));
         }
         finally { File.Delete(ckpt); }
     }
