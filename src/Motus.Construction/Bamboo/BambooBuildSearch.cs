@@ -243,28 +243,14 @@ public static class BambooBuildSearch
 
         var grid = BuildGrid(o, relayOptions.Values.SelectMany(x => x), tamp?.LazyPreconditions == true);
         Log($"reach grid: {grid.Sites.Count} sites × {grid.Line.Count} lines{(grid.Lazy is null ? "" : " (queried on demand)")}");
-        Dictionary<string, int>? stands = null;
-        if (o.ConstrainedFirst)
-        {
-            var finalFixed = Footholds(graph, graph.Edges.Select(e => e.Id).ToList(), o);
-            stands = graph.Edges.ToDictionary(e => e.Id, e =>
-            {
-                var m = BambooTrussLayout.Def(e.Id)!; var stock = BambooReachMap.Stock(m).Name;
-                return Enumerable.Range(0, grid.Sites.Count).Count(s => grid.Owner[s] != e.Id
-                    && (BambooTrussLayout.IsSupport(grid.Owner[s]) || finalFixed.Contains(grid.Owner[s])) && grid.Ok(s, stock) && grid.Ok(s, e.Id));
-            });
-            Log("constrained first: stand spots reaching stock + place — " + string.Join(", ", stands.OrderBy(x => x.Value).Select(x => $"{x.Key} {x.Value}")));
-        }
         var layoutId = BambooTampMemory.LayoutId();
-        var prior = tamp?.PriorLogPaths is { } logs && tamp.PriorWeight > 0 ? BambooTampMemory.Prior(BambooTampMemory.Read(logs), layoutId) : null;
-        if (prior is not null) Log("tamp: candidates ordered with the confirm-rate prior");
         var failed = new HashSet<string>(StringComparer.Ordinal);
         var deadEnds = new HashSet<string>(StringComparer.Ordinal);
 
+        var frontier = new BambooFrontier(graph, grid, o, relayOptions, layoutId, Log);
         if (o.PlacedFootholds) Log("placed footholds: every placed member may be clamped (approximate for pin-joint mechanisms)");
         var p = new BambooTrussPlanner(cell, o.PlacedFootholds ? MotionConstraints.Current with { FixedMemberRule = false } : null) { TransitCache = new() };
         if (!p.Start()) { Log("planner start failed: " + p.Error); return new Result(new(), new(), lines, false, 0, 0, clock.Elapsed.TotalSeconds) { StopReason = "planner start failed: " + p.Error }; }
-        var start = BambooTrussLayout.StakeNamed(BambooTrussLayout.Current.StartStake);
         var placed = new List<string>();
         var order = new List<Choice>();
         var tasks = new List<BambooIcdMotion.TaskEdit>();
@@ -272,7 +258,6 @@ public static class BambooBuildSearch
         var bestTasks = new List<BambooIcdMotion.TaskEdit>();
         int confirmed = 0, rejected = 0, deferred = 0, parked = 0;
         var escalateAll = false;
-        var gap = new Dictionary<(string, string), double>();
         string stopReason = "search exhausted";
 
         bool BudgetReached()
@@ -287,67 +272,11 @@ public static class BambooBuildSearch
             if (placed.Count == graph.Edges.Count) return true;
             if (BudgetReached()) return false;
 
-            var fixedIds = Footholds(graph, placed, o);
             var stand = Stand(p);
             var state = tamp is null ? "" : StateKey(placed, stand);
             if (tamp?.DeadEndMemory == true && deadEnds.Contains(state)) { Log("  tamp: build state already found to be a dead end — skipped"); return false; }
-            // Each candidate carries its reach precondition; eager (default) evaluates it here, lazy when it is next.
-            var options = new List<(string Id, Mode Mode, string? Relay, double Rank, Func<bool> Pre)>();
-            var map = new BambooReachMap { IkSeeds = 12 };
-            foreach (var id in graph.Frontier(placed))
-            {
-                var m = BambooTrussLayout.Def(id)!;
-                var usable = Enumerable.Range(0, grid.Sites.Count)
-                    .Where(s => grid.Owner[s] != id && (BambooTrussLayout.IsSupport(grid.Owner[s]) || fixedIds.Contains(grid.Owner[s]))).ToList();
-                // Far members first: what is built later must not block reaching what is built earlier. NearestFirst: members
-                // whose place and stock lie nearest the stand first, so the robot finishes an area before it moves on.
-                var far = o.NearestFirst ? -(Dist(stand.Origin, (m.Place.X, m.Place.Y, m.Place.Z)) + Dist(stand.Origin, (m.Store.X, m.Store.Y, m.Store.Z)))
-                    : Dist(m.Place, start);
-                var stock = BambooReachMap.Stock(m);
-                options.Add((id, Mode.Direct, null, -far,
-                    () => map.Query(stand, stock).Ik && map.Query(stand, BambooReachMap.PlaceOf(m)).Ik));
-                // A landing puts L on a fixed member one node-transfer step away (BambooTrussPlanner.LandingCandidates):
-                // only member sites within two arm reaches of the stand can be landed on.
-                var landable = usable.Where(s => !BambooTrussLayout.IsSupport(grid.Owner[s]) && Near(stand, grid.Sites[s])).ToList();
-                options.Add((id, Mode.Land, null, 10 - far, () => landable.Any(s => grid.Ok(s, stock.Name) && grid.Ok(s, id))));
-                if (o.AnchorWalks && BambooTrussLayout.IsSupport(p.LStake))
-                    foreach (var a in BambooTrussLayout.Stakes.Where(a => a.Name != p.LStake))
-                        options.Add((id, Mode.Walk, a.Name, 15 - far + Dist(m.Place, a),
-                            // The walk is at most two steps (R on a via point, then L on the anchor): within two arm reaches.
-                            () => Enumerable.Range(0, grid.Sites.Count).Any(s => grid.Owner[s] == a.Name && Near(stand, grid.Sites[s]) && grid.Ok(s, stock.Name) && grid.Ok(s, id))));
-                foreach (var r in relayOptions.GetValueOrDefault(id) ?? new List<string>())
-                {
-                    if (!graph.ExistingNodes(placed).Contains(BambooTrussLayout.RelayNode(r))) continue;
-                    // Stock → park from where the robot stands or one landing; park → place from one landing.
-                    options.Add((id, Mode.Relay, r, 20 - far, () =>
-                        ((map.Query(stand, stock).Ik && map.Query(stand, BambooReachMap.PlaceOf(BambooTrussLayout.Def(r)!)).Ik)
-                            || usable.Any(s => grid.Ok(s, stock.Name) && grid.Ok(s, r)))
-                        && usable.Any(s => grid.Ok(s, r) && grid.Ok(s, id))));
-                }
-            }
             // Only on the deepest branch: shallower states still have siblings, and backtracking is cheaper than a walk.
-            if (o.Reposition && pending is null && o.MaxRepositions > 0 && placed.Count == bestOrder.Count)
-                foreach (var (to, f, travel) in RepositionTargets(graph, placed, fixedIds, stand, grid, map, gap).Take(o.MaxRepositions))
-                    options.Add((to, Mode.Reposition, f.ToString("R", System.Globalization.CultureInfo.InvariantCulture), 30 + travel, () => true));
-            if (tamp?.LazyPreconditions != true)
-                options = options.Where(x => x.Pre()).Select(x => x with { Pre = () => true }).ToList();
-            else
-                options = options.Select(x => { bool? memo = null; var pre = x.Pre; return x with { Pre = () => memo ??= pre() }; }).ToList();
-            if (prior is not null)
-                options = options.Select(x => x with { Rank = x.Rank + tamp!.PriorWeight * prior(x.Id, x.Mode) }).ToList();
-            if (stands is not null)
-                options = options.Select(x => x with { Rank = x.Rank + 1000.0 * stands.GetValueOrDefault(x.Id) }).ToList();
-            if (stability is not null)
-            {
-                var sag = new Dictionary<string, BambooFrameStability.Report>(StringComparer.Ordinal);
-                foreach (var id in options.Select(x => x.Id).Distinct())
-                {
-                    var r = sag[id] = BambooFrameStability.Check(graph, placed.Append(id), stability);
-                    if (!r.Ok) Log($"  {id}: dropped by the stability check — {r.Note}");
-                }
-                options = options.Where(x => sag[x.Id].Ok)
-                    .Select(x => x with { Rank = x.Rank + stability.RankPerMetre * sag[x.Id].MaxDeflectionM }).ToList();
-            }
+            var options = frontier.Candidates(placed, stand, p.LStake, repositionHere: pending is null && placed.Count == bestOrder.Count);
             var resume = o.ResumeAt is { } ra && placed.Count < ra.Count ? ra[placed.Count] : null;
             bool Resumed(Mode mode, string id, string? relay) => resume is not null && (resume.RepositionTo is { } rt && pending is null
                 ? mode == Mode.Reposition && id == rt
@@ -649,15 +578,15 @@ public static class BambooBuildSearch
     }
 
     /// <summary>Clamp site <paramref name="b"/> lies within two arm reaches of <paramref name="a"/> (sound IK prefilter for one step).</summary>
-    static bool Near(BambooReachMap.ClampSite a, BambooReachMap.ClampSite b)
+    internal static bool Near(BambooReachMap.ClampSite a, BambooReachMap.ClampSite b)
     {
         var (p, q) = (a.Origin, b.Origin);
         return Math.Sqrt((p.X - q.X) * (p.X - q.X) + (p.Y - q.Y) * (p.Y - q.Y) + (p.Z - q.Z) * (p.Z - q.Z)) <= 2 * BambooReachMap.MaxReachM;
     }
 
-    static double Dist((double X, double Y, double Z) a, (double X, double Y, double Z) b) =>
+    internal static double Dist((double X, double Y, double Z) a, (double X, double Y, double Z) b) =>
         Math.Sqrt((a.X - b.X) * (a.X - b.X) + (a.Y - b.Y) * (a.Y - b.Y) + (a.Z - b.Z) * (a.Z - b.Z));
 
-    static double Dist(BambooIcdCell.StrutPlacement m, BambooTrussLayout.Stake s) =>
+    internal static double Dist(BambooIcdCell.StrutPlacement m, BambooTrussLayout.Stake s) =>
         Math.Sqrt((m.X - s.X) * (m.X - s.X) + (m.Y - s.ClampY) * (m.Y - s.ClampY) + (m.Z - s.Z) * (m.Z - s.Z));
 }
