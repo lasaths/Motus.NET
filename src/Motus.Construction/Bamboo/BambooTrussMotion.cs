@@ -453,21 +453,21 @@ public static class BambooTrussMotion
         if (p.BuildMember(m)) { p.RollbackDeep(cp); return (true, false, $"walk (land) → {id}: not needed (buildable from {p.LStake})"); }
         p.RollbackDeep(cp);
         var cands = p.LandingCandidates(m);
-        var tried = 0;
+        var tried = 0; string? last = null;
         foreach (var c in cands.GroupBy(c => (c.RCane, c.ROff, c.LCane, c.LOff)).Select(g => g.First()))
         {
             if (tried++ >= BambooTrussPlanner.LandTries) break;
             p.RollbackDeep(cp);
-            if (!p.WalkStep(c.RCane, c.ROff, c.RFrame, c.LCane, c.LOff, c.LFrame, $"walk (land) → {id}")) continue;
+            if (!p.WalkStep(c.RCane, c.ROff, c.RFrame, c.LCane, c.LOff, c.LFrame, $"walk (land) → {id}")) { last = p.Error; continue; }
             var cpw = p.SaveDeep();
-            if (!p.BuildMember(m)) continue;
+            if (!p.BuildMember(m)) { last = p.Error; continue; }
             p.RollbackDeep(cpw);
             var note = $"walk (land) → {id}: R on {c.RCane} at {c.ROff:+0.000;-0.000} m, L lands on {c.LCane} at {c.LOff:+0.000;-0.000} m ({cands.Count} IK candidates, {tried} tried)";
             log?.Invoke(note);
             return (true, true, note);
         }
         p.RollbackDeep(cp);
-        return (false, false, $"walk (land) → {id}: no landing found ({cands.Count} IK candidates, {Math.Min(tried, BambooTrussPlanner.LandTries)} tried)");
+        return (false, false, $"walk (land) → {id}: no landing found ({cands.Count} IK candidates, {Math.Min(tried, BambooTrussPlanner.LandTries)} tried){(string.IsNullOrEmpty(last) ? "" : "; last: " + last)}");
     }
 
     public static TrussBuild Build(IReadOnlyList<BambooIcdMotion.TaskEdit>? tasks = null, bool useCache = false) =>

@@ -11,6 +11,7 @@ public partial class BambooTrussTests
         var o = new BambooBuildSearch.Options();
         Assert.False(o.LandPrecheck);
         Assert.False(o.ConstrainedFirst);
+        Assert.False(o.RelayPrecheck);
     }
 
     /// <summary>
@@ -31,5 +32,21 @@ public partial class BambooTrussTests
         Assert.True(string.IsNullOrEmpty(b.Error), b.Error);
         Assert.All(r.Order, c => Assert.Contains(c.MemberId, b.Built));
         _out.WriteLine($"order {string.Join(" → ", r.Order.Select(c => c.MemberId))}; {r.Confirmed} confirmed, {r.Rejected} rejected, {r.Seconds:F0} s");
+    }
+
+    /// <summary>
+    /// Relay precheck: at the start nothing is placed, so there is no one-step landing, and the T2D relay (its place is
+    /// out of reach from anchor A) is skipped with a reason instead of going to the planner.
+    /// </summary>
+    [Fact]
+    public void RelayPrecheck_NoOneStepLanding_SkipsTheRelay()
+    {
+        BambooTrussMotion.UseCell(Cell);
+        var p = new BambooTrussPlanner(Cell);
+        Assert.True(p.Start(), p.Error);
+        var why = BambooBuildSearch.RelaySkip(p, "T2D", BambooTrussLayout.RelayId("T2D", "A", "z+"));
+        _out.WriteLine(why ?? "(not skipped)");
+        Assert.NotNull(why);
+        Assert.Contains("no one-step landing reaches", why);
     }
 }

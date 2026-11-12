@@ -66,6 +66,17 @@ New stall: after the six canes, the search used its rejections on relays of the 
 The remaining first-story canes had no Motus-clear R grasp, or the planner found no landing for them.
 Next: give the robot a foothold for the relay park on the second story (or a stock spot nearer the second story).
 
+Diagnosis (2026-11-12): the relays are not the real stall. After the six canes, none of the 14 remaining first-story canes can be built, directly or after one landing.
+The cause is the stock pick. From every stand the robot can reach, the R arm collides when it grasps the one stock (`θ4 ↔ anchor-N001` or `θ4 ↔ L-grip rail`), or it has no IK.
+A second-story foothold does not help. Relays used 164 of the 250 rejections.
+
+## Step 3 – Relay precheck (opt-in)
+
+Done: `Options.RelayPrecheck` (harness: `RELAYPRE=1`), off by default.
+With the option on, the search skips a relay before the planner confirms it. It skips the relay when, by IK only, no one-step landing (or the stand) reaches the stock and the park, or no one-step landing (or the stand) reaches the place.
+A skip is not a rejection. The log shows `relay <id>: skipped — <reason>`.
+The option only prunes. It does not make a new path. Next: scout one shared stock spot away from the anchor columns, then re-run the tower with `RELAYPRE=1` (heavy, needs the owner's go-ahead).
+
 ## Later (not planned in detail)
 
 - Tower story 3: relays, or a stock height for each stock spot.

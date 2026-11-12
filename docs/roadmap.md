@@ -197,7 +197,7 @@ Opt-in steps on the bamboo build search; the defaults keep the shipped Warren pl
 - [x] Physics-aware build sequencing: linear frame check of the partial structure (self-weight + robot clamp load) as a frontier filter and ranking term in `BambooBuildSearch` (`Options.Stability`, off by default)
 - [x] Exact collision between samples: conservative-advancement certificate for each joint-space segment (per-link motion bound + exact test against obstacles grown by the bound, bisected), `MotionConstraints.CertifiedSegments`, off by default
 - [x] TAMP layer on the build search: lazy reach preconditions (clamp sites, landings, relays), failure / dead-end memory, a JSONL outcome log and a confirm-rate prior from earlier logs; every kept choice still planner-confirmed (`BambooBuildSearch.Options.Tamp`, off by default)
-- [x] 3D first-order rigidity rule for non-planar structures; opt-in anchor walks, staged confirmation, reposition, replay-exact transit cache, `LandPrecheck` and `ConstrainedFirst` (all off by default)
+- [x] 3D first-order rigidity rule for non-planar structures; opt-in anchor walks, staged confirmation, reposition, replay-exact transit cache, `LandPrecheck`, `RelayPrecheck` and `ConstrainedFirst` (all off by default)
 - [x] 3x3 gridshell dome example: 24/24 with one stock spot for each cane, fresh replay and 2 mm scan clean (`MOTUS_DOME_BUILD=1`; seed 11, Linux x64 only)
 - [x] Architecture deepening (no behaviour change): one move runner for search and replay, one planner cell state, frontier ranking out of the search loop, one clamp-site grid
 

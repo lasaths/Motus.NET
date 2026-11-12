@@ -1350,9 +1350,10 @@ public sealed class BambooTrussPlanner
     /// Targeted landing candidates for building <paramref name="member"/>: one node-transfer step from the current L
     /// base (R clamps a fixed member, L lands on a fixed member). Pure IK first (true FK of both grippers): every R
     /// grasp solution fixes the R frame, every L solution from there fixes the L landing frame (point + roll); a
-    /// candidate is kept when that L frame has IK both to the stock cane and to the member's place line.
+    /// candidate is kept when that L frame has IK both to the stock cane and to the member's place line
+    /// (<paramref name="includeStock"/> false: to the place line only).
     /// </summary>
-    public List<Landing> LandingCandidates(BambooTrussLayout.MemberDef member)
+    public List<Landing> LandingCandidates(BambooTrussLayout.MemberDef member, bool includeStock = true)
     {
         var res = new List<Landing>();
         if (_s.Base != K.Gripper.L) return res;
@@ -1388,8 +1389,8 @@ public sealed class BambooTrussPlanner
                         foreach (var q2 in Distinct(K.SolveGrip(K.Gripper.R, G, t, new[] { q1 }, 12)))
                         {
                             var W = K.Free(K.Gripper.R, G, q2); pL++;
-                            var ns = stockT.Count(x => K.SolveGrip(K.Gripper.L, W, x, null, 6).Count > 0);
-                            if (ns == 0) continue;
+                            var ns = includeStock ? stockT.Count(x => K.SolveGrip(K.Gripper.L, W, x, null, 6).Count > 0) : 0;
+                            if (includeStock && ns == 0) continue;
                             pS++;
                             var np = placeT.Count(x => K.SolveGrip(K.Gripper.L, W, x, null, 6).Count > 0);
                             if (np == 0) continue;

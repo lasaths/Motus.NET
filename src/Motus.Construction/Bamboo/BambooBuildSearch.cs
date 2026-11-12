@@ -143,6 +143,13 @@ public static class BambooBuildSearch
         /// </summary>
         public bool LandPrecheck { get; init; }
         /// <summary>
+        /// Before confirming a relay, skip it (no rejection counted) unless, by IK only, the stand or a one-step landing
+        /// (<see cref="BambooTrussPlanner.LandingCandidates"/>) reaches the stock and the park, and the stand or a one-step
+        /// landing reaches the member's place. Off by default. The reach-grid relay precondition has no step limit; this is
+        /// the one-step test the planner's landings use. Collision checking is unchanged.
+        /// </summary>
+        public bool RelayPrecheck { get; init; }
+        /// <summary>
         /// Most-constrained member first (off by default): rank candidates by how few stand spots (anchors and members
         /// fixed in the finished structure) reach both the member's stock and its place by IK, then by mode and distance
         /// as before. A member that only a few stands can build is placed while the robot is next to one, instead of
@@ -298,16 +305,27 @@ public static class BambooBuildSearch
             // Only on the deepest branch: shallower states still have siblings, and backtracking is cheaper than a walk.
             return frontier.Candidates(placed, Stand(p), p.LStake, repositionHere: pending is null && onDeepest)
                 .Select(x => new Candidate<Move>(new(x.Id, x.Mode, x.Relay), $"{x.Id}|{x.Mode}|{x.Relay}", $"{x.Id} {x.Mode}",
-                    x.Mode == Mode.Reposition ? $"reposition → {x.Id}" : $"{x.Id} ({x.Mode})", x.Rank, Pre(x.Id, x.Mode, x.Pre), Resumed(x.Mode, x.Id, x.Relay)))
+                    x.Mode == Mode.Reposition ? $"reposition → {x.Id}" : $"{x.Id} ({x.Mode})", x.Rank, Pre(x.Id, x.Mode, x.Relay, x.Pre), Resumed(x.Mode, x.Id, x.Relay)))
                 .ToList();
         }
 
-        Func<bool> Pre(string id, Mode mode, Func<bool> pre) => !(o.LandPrecheck && mode == Mode.Land) ? pre : () =>
+        Func<bool> Pre(string id, Mode mode, string? relay, Func<bool> pre) => mode switch
         {
-            if (!pre()) return false;
-            if (p.LandingCandidates(BambooTrussLayout.Def(id)!).Count > 0) return true;
-            log($"  {id} land: skipped — no one-step landing reaches its stock and place (IK)");
-            return false;
+            Mode.Land when o.LandPrecheck => () =>
+            {
+                if (!pre()) return false;
+                if (p.LandingCandidates(BambooTrussLayout.Def(id)!).Count > 0) return true;
+                log($"  {id} land: skipped — no one-step landing reaches its stock and place (IK)");
+                return false;
+            },
+            Mode.Relay when o.RelayPrecheck => () =>
+            {
+                if (!pre()) return false;
+                if (RelaySkip(p, id, relay!) is not { } why) return true;
+                log($"  {id} relay {relay}: skipped — {why}");
+                return false;
+            },
+            _ => pre,
         };
 
         // shortStage: one RRT attempt of StagedRrtIters; if any transit ran out the answer is "not yet".
@@ -332,6 +350,22 @@ public static class BambooBuildSearch
             if (pending is { RepositionTo: { } to }) choice = choice with { RepositionTo = to, RepositionF = pending.RepositionF, Note = $"reposition → {to}; {choice.Note}" };
             return new(Verdict.Yes, choice, choice.Note);
         }
+    }
+
+    /// <summary>
+    /// <see cref="Options.RelayPrecheck"/>: why relay <paramref name="relay"/> of <paramref name="id"/> cannot be done in
+    /// one step from where the robot stands (IK only), or null. The stand or a one-step landing must reach the stock and
+    /// the park, and the stand or a one-step landing must reach the member's place.
+    /// </summary>
+    internal static string? RelaySkip(BambooTrussPlanner p, string id, string relay)
+    {
+        var (m, park) = (BambooTrussLayout.Def(id)!, BambooTrussLayout.Def(relay)!);
+        var (stand, map) = (Stand(p), new BambooReachMap { IkSeeds = 12 });
+        if (!(map.Query(stand, BambooReachMap.Stock(m)).Ik && map.Query(stand, BambooReachMap.PlaceOf(park)).Ik)
+            && p.LandingCandidates(park).Count == 0) return "no one-step landing reaches stock+park (IK)";
+        if (!map.Query(stand, BambooReachMap.PlaceOf(m)).Ik && p.LandingCandidates(m, includeStock: false).Count == 0)
+            return "no one-step landing reaches the place (IK)";
+        return null;
     }
 
     /// <summary>Placed members whose reach-map sites the search may land on (<see cref="Options.PlacedFootholds"/>).</summary>

@@ -45,6 +45,7 @@ var opts = new BambooBuildSearch.Options
     StagedConfirm = Environment.GetEnvironmentVariable("STAGED") == "1",
     Reposition = Environment.GetEnvironmentVariable("REPOSITION") == "1",
     LandPrecheck = Environment.GetEnvironmentVariable("LANDPRE") == "1",
+    RelayPrecheck = Environment.GetEnvironmentVariable("RELAYPRE") == "1",
     ConstrainedFirst = Environment.GetEnvironmentVariable("CONSTRAINED") == "1",
     // RESUME=<checkpoint.json>: re-confirm an earlier run's prefix first (read directly: the fingerprint includes the clamp rule).
     ResumeAt = Environment.GetEnvironmentVariable("RESUME") is { Length: > 0 } rp
