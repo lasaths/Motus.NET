@@ -28,8 +28,6 @@ internal sealed class BambooFrontier
     const double LandRank = 10, WalkRank = 15, RelayRank = 20, RepositionRank = 30;
     /// <summary>ConstrainedFirst: rank added per stand spot that reaches a member's stock and place (fewest spots first).</summary>
     const double RankPerStand = 1000;
-    /// <summary>BraceFirst: rank taken off a candidate that makes placed members fixed (ahead of every other rank term).</summary>
-    const double BraceRank = 1e9;
 
     public BambooFrontier(BambooStructureGraph graph, Grid grid, Options o, IReadOnlyDictionary<string, List<string>> relayOptions,
         string layoutId, Action<string> log)
@@ -105,14 +103,6 @@ internal sealed class BambooFrontier
             options = options.Select(x => x with { Rank = x.Rank + tamp!.PriorWeight * _prior(x.Id, x.Mode.ToString()) }).ToList();
         if (_stands is not null)
             options = options.Select(x => x with { Rank = x.Rank + RankPerStand * _stands.GetValueOrDefault(x.Id) }).ToList();
-        if (o.BraceFirst)
-        {
-            var before = graph.Fixed(placed).Count;
-            var braces = options.Where(x => x.Mode != Mode.Reposition).Select(x => x.Id).Distinct()
-                .Where(id => graph.Fixed(placed.Append(id)).Count(f => f != id) > before).ToHashSet(StringComparer.Ordinal);
-            if (braces.Count > 0) log("  brace first: " + string.Join(", ", braces));
-            options = options.Select(x => x.Mode != Mode.Reposition && braces.Contains(x.Id) ? x with { Rank = x.Rank - BraceRank } : x).ToList();
-        }
         if (stability is not null)
         {
             var sag = new Dictionary<string, BambooFrameStability.Report>(StringComparer.Ordinal);

@@ -57,7 +57,7 @@ Do:
 
 Done when: gates pass with the option off, and the tower result is reported. Commit the option even if the tower gets better but not complete.
 
-Result (2026-11-11, f7a8648): the option is `Options.BraceFirst` (harness: `BRACE=1`). The core suite passed 571/571 with the option off.
+Result (2026-11-11, f7a8648): the option was `Options.BraceFirst` (harness: `BRACE=1`). It did not change the result, so it was removed again in the next commit. The core suite passed 571/571 with the option off.
 The tower run outT4 (outT3 settings + `BRACE=1`) placed 6/60, with 9 confirmed and 250 rejected, stop `rejected confirmation limit (250)`, search 1960 s.
 The search path is the same as outT3. A fresh replay built 6 members, and the 2 mm scan is collision-free.
 The option ranked `N001N100` first, but the default search already placed it 5th. That cane fixes `N000N100`.

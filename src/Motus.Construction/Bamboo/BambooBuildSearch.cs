@@ -149,12 +149,6 @@ public static class BambooBuildSearch
         /// after the robot has walked away. Collision checking is unchanged.
         /// </summary>
         public bool ConstrainedFirst { get; init; }
-        /// <summary>
-        /// Brace first (off by default): rank first the candidates that make placed members fixed at both ends
-        /// (<see cref="BambooStructureGraph.Fixed"/>), for example the cane that closes a node above a post. Then the
-        /// robot can clamp the post and walk on it into the next bay. The fixed-member rule and collision checking are unchanged.
-        /// </summary>
-        public bool BraceFirst { get; init; }
     }
 
     /// <summary>Settings for <see cref="Options.Tamp"/>.</summary>

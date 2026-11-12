@@ -175,10 +175,11 @@ Offline dual-agent tower demo: HolonomicSE3 drone delivers a brick; serial arm f
 - [x] Phase B: base-frame attach on FreeFlyerHull (`WithAttached` / `BaseFrameAttachCollisionChecker`)
 - [x] `AerialStationHold.AppendHold` + GH Plan aerial station-hold (1 s) for One Play
 - [x] Motus.NET `AerialArmPassOffTests` (hover → PickPlace + ExpandMany mini-tower ×4)
-- [x] GH example `11_aerial_arm_pass_off` (generated mini-tower ×4 + One Play scrub; `layout.cs` for full 5×4)
+- [x] GH example 11 shipped as `11_aerial_hover` (drone-only hover); the arm pass-off canvas `11_aerial_arm_pass_off` was not shipped
 - [x] Docs: `aerial.md` pass-off; METHODS; ADRs 0002 / GH 0006
 - [x] Motus.NET package identity / CHANGELOG prepared for **2.1.0**; NuGet + GitHub release on the `v2.1.0` tag
-- [ ] Coordinated Motus.Grasshopper **2.1.0** tag (Yak GA still explicit product call); **Rhino Auto Plan pass on example 11**
+- [x] Motus.Grasshopper **2.1.0** released (approved 2026-10-28; Yak `motus` 2.1.0 live since 2026-10-27)
+- [ ] **Rhino Auto Plan pass on example 11**
 
 ### 2.1.0 — tasks and construction (integrated on `master`; Motus.NET 2.1.0 package cut)
 
@@ -186,7 +187,7 @@ Offline dual-agent tower demo: HolonomicSE3 drone delivers a brick; serial arm f
 - [x] `Motus.Construction` library: bamboo work cell, Warren truss planner, build search with checkpoint/resume, `AssemblyPlanner` + `RobotDefinition`
 - [x] Exact collision with a 2 mm clearance margin (grasp/clamp exempt); exact-shape speed-ups with shipped-plan identity tests
 - [x] Retimer unit fix (prismatic m/s defaults) and validation/retiming hardening
-- [ ] Motus.Construction stays **experimental** (not in the supported surface / Yak headline) until the coordinated 2.1.0 cut above
+- [ ] Motus.Construction stays **experimental** (not in the supported surface / Yak headline) until an ADR, a METHODS entry and a Rhino matrix proof
 - [x] Motus.Grasshopper `12_bamboo_truss_assembly` on NuGet (Motus.Construction 2.1.0 published)
 
 ## Milestone 15 — Construction planning toward TAMP (in progress)
@@ -202,14 +203,15 @@ Opt-in steps on the bamboo build search; the defaults keep the shipped Warren pl
 
 ### Next steps
 
-Status: a 1x2, 3-story bamboo tower (60 canes) places 6/60 with one fixed stock spot. The cause is a missing foothold, not the stock position.
+Status: a 1x2, 3-story bamboo tower (60 canes) places 6/60 with one fixed stock spot. Bracing a node first did not change the result. The stall is the relay park of the second-story canes (no landing found).
 
 - [x] Run the 3x3 dome build on the architecture branch; the result must be 24/24 and identical to the build on PR #41
 - [x] Generality: a replay contract (a task runner over core tasks) so that the search = fresh replay check is not specific to bamboo
 - [x] Generality: a search kernel (backtracking, budgets, resume, failure memory, staged confirmation) behind three interfaces (planning state, candidate generator, confirmer); bamboo is one adapter
 - [x] Generality: move certified segments into Motus.Core; bamboo is one adapter (plan: [next-steps-plan.md](next-steps-plan.md), step 1)
 - [x] Tower: add an opt-in option that braces a node early, so the robot has a foothold fixed at both ends and can go into the second bay (plan: [next-steps-plan.md](next-steps-plan.md), step 2; inputs in tests/fixtures/tower1x2)
-  - Result: `Options.BraceFirst` (f7a8648). The tower still places 6/60 (same path as outT3). The new stall is the relay park of the second-story canes (no landing found).
+  - Result: tried as `Options.BraceFirst` (f7a8648); the tower still placed 6/60 by the same path as outT3. The option was removed again. The stall is the relay park of the second-story canes (no landing found).
+- [ ] Tower: a landing for the second-story relay park, or a stock spot nearer story 2
 - [ ] Tower: get canes to story 3 by relays or by a stock height for each stock spot
 - [ ] Relax planner assumptions one at a time (vertical anchors, straight-up approach, fixed stock spots); keep the 2 mm clearance
 - [ ] Dome and tower: test more seeds and platforms
