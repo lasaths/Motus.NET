@@ -18,7 +18,7 @@ Notes for AI agents and maintainers working on Motus.NET. Mirrors the convention
 ## Collision rule (exact)
 
 - The final collision verdict comes from **exact shapes** (segment/triangle/OBB distances, SAT). Bounding volumes (AABB, BVH, spheres) are used only as a **provably conservative broad phase**: they may cull pairs that cannot touch, and never decide "clear" on their own.
-- Bamboo planning adds `MotionConstraints.ClearanceMarginM` (2 mm) to every obstacle. Only grasped/clamped contacts are exempt.
+- Bamboo planning adds `MotionConstraints.ClearanceMarginM` (default 2 mm) to every obstacle. The planner and the scan use the same value. Only grasped/clamped contacts are exempt.
 - A speed-up must not change a verdict. `ShippedDefaultPlan_IsIdenticalToLivePlanning` (Linux x64) and the shipped-plan replay tests (every platform) must stay green. If a change alters the shipped Warren plan, treat that as a regression unless it is deliberate and documented.
 
 ## Sanitization
