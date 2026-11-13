@@ -60,4 +60,14 @@ public class NumericalIkSeedTests
         }
         Assert.True(ok >= 38, $"{id}: {ok}/{trials} off-answer seeds converged");
     }
+
+    [Fact]
+    public void GoalOutOfReach_FailsWithNamedReason()
+    {
+        var preset = PresetLoader.LoadFromFile(Resource("KUKA/KR_10_R1100.json"));
+        var ik = new NumericalInverseKinematics(preset);
+        var r = ik.TrySolveDetailed(new CartesianPose(new Frame(50, 0, 0)), new JointState(new double[preset.JointLimits.Count]));
+        Assert.False(r.Success);
+        Assert.Equal(NumericalIkFailureReasons.NoConvergence, r.FailureReason);
+    }
 }
