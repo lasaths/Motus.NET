@@ -9,8 +9,8 @@ namespace Motus.Geometry;
 /// </summary>
 internal sealed class UrdfUniversalRobotsKinematics : IInverseKinematics
 {
-    // URDF base_link vs Motus DH preset: same joints, TCP xy negated (Rz(pi)).
-    private static readonly double[] UrdfToDhBase = Transforms.FromRpy(0, 0, 0, 0, 0, Math.PI);
+    // URDF base_link vs Motus DH preset: same joints; TCP is Rz(pi) (ROS-Industrial base_link) or identical (base frame already DH).
+    private static readonly double[][] UrdfToDhBases = [Transforms.FromRpy(0, 0, 0, 0, 0, Math.PI), Transforms.Identity()];
 
     private readonly UrInverseKinematics _dhIk;
     private readonly IFkSolver _urdfFk;
@@ -33,14 +33,17 @@ internal sealed class UrdfUniversalRobotsKinematics : IInverseKinematics
 
     public bool TrySolve(CartesianPose target, JointState seed, out JointState solution)
     {
-        var dhTarget = ToDhFrame(target);
-        if (_dhIk.TrySolve(dhTarget, seed, out solution) && UrdfTcpMatches(target, solution))
-            return true;
-
-        foreach (var trySeed in ExtraSeeds(seed))
+        foreach (var toDh in UrdfToDhBases)
         {
-            if (_dhIk.TrySolve(dhTarget, trySeed, out solution) && UrdfTcpMatches(target, solution))
+            var dhTarget = ToDhFrame(toDh, target);
+            if (_dhIk.TrySolve(dhTarget, seed, out solution) && UrdfTcpMatches(target, solution))
                 return true;
+
+            foreach (var trySeed in ExtraSeeds(seed))
+            {
+                if (_dhIk.TrySolve(dhTarget, trySeed, out solution) && UrdfTcpMatches(target, solution))
+                    return true;
+            }
         }
 
         return _numerical.TrySolve(target, seed, out solution);
@@ -48,9 +51,11 @@ internal sealed class UrdfUniversalRobotsKinematics : IInverseKinematics
 
     public bool TrySolveNear(CartesianPose target, JointState seed, out JointState solution)
     {
-        var dhTarget = ToDhFrame(target);
-        if (_dhIk.TrySolveNear(dhTarget, seed, out solution) && UrdfTcpMatches(target, solution))
-            return true;
+        foreach (var toDh in UrdfToDhBases)
+        {
+            if (_dhIk.TrySolveNear(ToDhFrame(toDh, target), seed, out solution) && UrdfTcpMatches(target, solution))
+                return true;
+        }
         return _numerical.TrySolveNear(target, seed, out solution);
     }
 
@@ -60,8 +65,8 @@ internal sealed class UrdfUniversalRobotsKinematics : IInverseKinematics
         yield return new JointState(new double[seed.AxisCount]);
     }
 
-    private static CartesianPose ToDhFrame(CartesianPose urdf) =>
-        new(Transforms.ToFrame(Transforms.Multiply(UrdfToDhBase, Transforms.FromFrame(urdf.Tcp))));
+    private static CartesianPose ToDhFrame(double[] toDh, CartesianPose urdf) =>
+        new(Transforms.ToFrame(Transforms.Multiply(toDh, Transforms.FromFrame(urdf.Tcp))));
 
     private bool UrdfTcpMatches(CartesianPose target, JointState joints) =>
         Transforms.TcpMatches(

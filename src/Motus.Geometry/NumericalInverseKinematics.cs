@@ -197,8 +197,8 @@ public sealed class NumericalInverseKinematics : IInverseKinematics
                     return new NumericalIkResult(false, bad, NumericalIkFailureReasons.InvalidInput, iter + 1);
                 }
                 j = BodyJacobianAtTcp(q);
-                var cond = PoEJacobian.EstimateConditionJjT(j);
-                if (!double.IsFinite(cond) || cond > 1e10)
+                // DLS damping handles near-singular J; only bail when J carries no step.
+                if (IsJacobianSingular(j))
                 {
                     var singularSol = new JointState(Clamp(q));
                     return new NumericalIkResult(false, singularSol, NumericalIkFailureReasons.SingularJacobian, iter + 1);
@@ -212,7 +212,9 @@ public sealed class NumericalInverseKinematics : IInverseKinematics
                     var singularSol = new JointState(Clamp(q));
                     return new NumericalIkResult(false, singularSol, NumericalIkFailureReasons.SingularJacobian, iter + 1);
                 }
+                // j = d(target − current)/dq, so the Newton step is −J⁺e: flip e.
                 e = PoseErrorVector(current, targetM);
+                for (var i = 0; i < 6; i++) e[i] = -e[i];
             }
 
             var currentLambda = iter < 20 ? Math.Max(lambda, 0.1) : lambda;
@@ -288,7 +290,9 @@ public sealed class NumericalInverseKinematics : IInverseKinematics
 
     private static bool IsJacobianSingular(double[,] j)
     {
-        // Rough: if all entries near zero, DLS will not move.
+        // Rough: if all entries near zero (or any is not finite), DLS will not move.
+        foreach (var v in j)
+            if (!double.IsFinite(v)) return true;
         var max = 0.0;
         var rows = j.GetLength(0);
         var cols = j.GetLength(1);

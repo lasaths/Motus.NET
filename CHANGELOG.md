@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Numerical IK (`NumericalInverseKinematics`) now converges from a seed that is not the answer. Before, it failed for all non-UR robots (0/40). Now: 40/40 each for UR10e URDF, rail + UR10e, Panda, KR 210 URDF, KR 10 and iiwa 7. Causes: `PoEJacobian.JacobianBody` multiplied the transforms in the wrong order; the finite-difference step had the wrong sign; a singularity estimate that was almost always infinite stopped the solve at iteration 1. `PoEJacobian.EstimateConditionJjT` is removed.
+- `UrdfUniversalRobotsKinematics` also tries the base frame without the Rz(π) turn, so analytic UR IK works on `ur10e.urdf`. Each answer is still checked with the URDF FK.
+- Plans for non-UR robots can change, because IK now finds answers that it did not find before.
+
 ## [2.2.0] - 2026-10-29
 
 ### Added
