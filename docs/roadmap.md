@@ -175,10 +175,11 @@ Offline dual-agent tower demo: HolonomicSE3 drone delivers a brick; serial arm f
 - [x] Phase B: base-frame attach on FreeFlyerHull (`WithAttached` / `BaseFrameAttachCollisionChecker`)
 - [x] `AerialStationHold.AppendHold` + GH Plan aerial station-hold (1 s) for One Play
 - [x] Motus.NET `AerialArmPassOffTests` (hover → PickPlace + ExpandMany mini-tower ×4)
-- [x] GH example `11_aerial_arm_pass_off` (generated mini-tower ×4 + One Play scrub; `layout.cs` for full 5×4)
+- [x] GH example 11 shipped as `11_aerial_hover` (drone-only hover); the arm pass-off canvas `11_aerial_arm_pass_off` was not shipped
 - [x] Docs: `aerial.md` pass-off; METHODS; ADRs 0002 / GH 0006
 - [x] Motus.NET package identity / CHANGELOG prepared for **2.1.0**; NuGet + GitHub release on the `v2.1.0` tag
-- [ ] Coordinated Motus.Grasshopper **2.1.0** tag (Yak GA still explicit product call); **Rhino Auto Plan pass on example 11**
+- [x] Motus.Grasshopper **2.1.0** released (approved 2026-10-28; Yak `motus` 2.1.0 live since 2026-10-27)
+- [ ] **Rhino Auto Plan pass on example 11**
 
 ### 2.1.0 — tasks and construction (integrated on `master`; Motus.NET 2.1.0 package cut)
 
@@ -186,7 +187,7 @@ Offline dual-agent tower demo: HolonomicSE3 drone delivers a brick; serial arm f
 - [x] `Motus.Construction` library: bamboo work cell, Warren truss planner, build search with checkpoint/resume, `AssemblyPlanner` + `RobotDefinition`
 - [x] Exact collision with a 2 mm clearance margin (grasp/clamp exempt); exact-shape speed-ups with shipped-plan identity tests
 - [x] Retimer unit fix (prismatic m/s defaults) and validation/retiming hardening
-- [ ] Motus.Construction stays **experimental** (not in the supported surface / Yak headline) until the coordinated 2.1.0 cut above
+- [ ] Motus.Construction stays **experimental** (not in the supported surface / Yak headline) until an ADR, a METHODS entry and a Rhino matrix proof
 - [x] Motus.Grasshopper `12_bamboo_truss_assembly` on NuGet (Motus.Construction 2.1.0 published)
 
 ## Milestone 15 — Construction planning toward TAMP (in progress)
@@ -196,3 +197,40 @@ Opt-in steps on the bamboo build search; the defaults keep the shipped Warren pl
 - [x] Physics-aware build sequencing: linear frame check of the partial structure (self-weight + robot clamp load) as a frontier filter and ranking term in `BambooBuildSearch` (`Options.Stability`, off by default)
 - [x] Exact collision between samples: conservative-advancement certificate for each joint-space segment (per-link motion bound + exact test against obstacles grown by the bound, bisected), `MotionConstraints.CertifiedSegments`, off by default
 - [x] TAMP layer on the build search: lazy reach preconditions (clamp sites, landings, relays), failure / dead-end memory, a JSONL outcome log and a confirm-rate prior from earlier logs; every kept choice still planner-confirmed (`BambooBuildSearch.Options.Tamp`, off by default)
+- [x] 3D first-order rigidity rule for non-planar structures; opt-in anchor walks, staged confirmation, reposition, replay-exact transit cache, `LandPrecheck`, `RelayPrecheck` and `ConstrainedFirst` (all off by default)
+- [x] 3x3 gridshell dome example: 24/24 with one stock spot for each cane, fresh replay and 2 mm scan clean (`MOTUS_DOME_BUILD=1`; seed 11, Linux x64 only)
+- [x] Architecture deepening (no behaviour change): one move runner for search and replay, one planner cell state, frontier ranking out of the search loop, one clamp-site grid
+
+### Next steps
+
+Status (2026-11-13): a 1x2, 3-story bamboo tower (60 canes) places 7/60 with one fixed stock spot (outT6, `FOOTHOLDS=1`; 6/60 without it). Bracing a node first and `RelayPrecheck` did not change the result. The stall is the stock grasp beside `anchor-N001`, not the relay park.
+
+- [x] Run the 3x3 dome build on the architecture branch; the result must be 24/24 and identical to the build on PR #41
+- [x] Generality: a replay contract (a task runner over core tasks) so that the search = fresh replay check is not specific to bamboo
+- [x] Generality: a search kernel (backtracking, budgets, resume, failure memory, staged confirmation) behind three interfaces (planning state, candidate generator, confirmer); bamboo is one adapter
+- [x] Generality: move certified segments into Motus.Core; bamboo is one adapter (plan: [next-steps-plan.md](next-steps-plan.md), step 1)
+- [x] Tower: add an opt-in option that braces a node early, so the robot has a foothold fixed at both ends and can go into the second bay (plan: [next-steps-plan.md](next-steps-plan.md), step 2; inputs in tests/fixtures/tower1x2)
+  - Result: tried as `Options.BraceFirst` (f7a8648); the tower still placed 6/60 by the same path as outT3. The option was removed again. The stall is the relay park of the second-story canes (no landing found).
+- [ ] Tower: move or raise the one stock spot away from `anchor-N001` (owner's decision; plan: [next-steps-plan.md](next-steps-plan.md), step G11)
+- [ ] Tower: get canes to story 3 by relays or by a stock height for each stock spot
+- [ ] Relax planner assumptions one at a time (vertical anchors, straight-up approach, fixed stock spots); keep the 2 mm clearance
+- [ ] Dome and tower: test more seeds and platforms
+- [ ] Architecture: replace the planner statics with an explicit planning session, in small steps
+- [ ] Architecture: finish one tiered reach module (landing grid and walk offsets)
+
+## Milestone 16 — Toward a general planner (planned)
+
+Setups: 6-axis arm, arm + linear track, arm + 1- or 2-axis positioner (DKP), bamboo mobile robot; later 7-axis, gantry, two arms, mobile manipulator, remote TCP. Plan with files, gates and sizes: [next-steps-plan.md](next-steps-plan.md), Milestone 16. Defaults stay unchanged unless the owner agrees; the 2 mm check is not loosened.
+
+- [ ] G0 (P0): fix numerical IK (singularity estimate in `PoEJacobian`, step sign in the finite-difference branch); off-answer IK tests; UR analytic IK on the plain `ur10e.urdf` fixtures
+- [ ] G1 (P0): link-to-link collision in `TreeFkCollisionChecker` (arm against positioner, arm against arm)
+- [ ] G2: prismatic joints in metres in `UrdfRobotLoader` and in export
+- [ ] G3: track: Cartesian goals and LIN with the rail; fixture and tests
+- [ ] G4: positioner: relative IK with the positioner axes (opt-in); keep LIN motion type in GH `EmbedSideBranches`
+- [ ] G5: serial export writes the SE(2) base pose
+- [ ] G6: L2 general AssemblyPlanner: UR pick-place tower through the search kernel; ADR on internal adapter vs public kernel API (owner's decision)
+- [ ] G7: opt-in secondary objective for redundant IK
+- [ ] G8: opt-in remote TCP for LIN / CIRC
+- [ ] G9: gantry and two-arm fixtures
+- [ ] G10: robot-code writers (URScript, KRL, RAPID): in or out of scope (owner's decision)
+- [ ] G11: bamboo tower stock spot (owner's decision); G12: merge #41 → #42 → #43 (owner's OK); G13: Rhino matrix pass (deferred)

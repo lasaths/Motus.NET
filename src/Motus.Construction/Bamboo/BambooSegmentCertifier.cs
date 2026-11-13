@@ -4,13 +4,11 @@ using Motus.Geometry;
 namespace Motus.Construction;
 
 /// <summary>
-/// Proves a joint-space PTP segment contact-free between its samples (opt-in, <see cref="MotionConstraints.CertifiedSegments"/>).
+/// Bamboo adapter of <see cref="SegmentCertifier"/> (opt-in, <see cref="MotionConstraints.CertifiedSegments"/>): proves a
+/// joint-space PTP segment of the ICD cell contact-free between its samples.
 /// <para>
-/// A motion bound ε (metres) holds for the whole segment: no point of the robot, its mount parts or the held cane moves
-/// more than ε·|t − s| between segment fractions t and s (<see cref="SweepBound"/>). An interval [a, b] is then clear
-/// if the pose at its midpoint is clear of every obstacle grown by ε·(b − a)/2; otherwise it is bisected
-/// (conservative advancement in threshold form — Schwarzer, Saha &amp; Latombe 2005). The narrow phase stays the exact
-/// Motus test; growing is the existing <see cref="BambooTrussCollision.Inflate"/>.
+/// The adapter gives the motion bound of the robot, its mount parts and the held cane (<see cref="SweepBound"/>) and the
+/// clear check: the exact Motus test against obstacles grown by <see cref="BambooTrussCollision.Inflate"/>.
 /// </para>
 /// Scope (flagged): robot ↔ environment pairs only (self and robot ↔ own-mount pairs stay sample-checked); the clearance
 /// margin stays enforced at the samples, between them only exact contact is proven; mesh growing is conservative only
@@ -18,8 +16,8 @@ namespace Motus.Construction;
 /// </summary>
 public static class BambooSegmentCertifier
 {
-    /// <summary>Smallest obstacle growth step (m); growths are rounded up to 1e-4·2^k so grown obstacles are reused.</summary>
-    public const double GrowQuantumM = 1e-4;
+    /// <summary>Smallest obstacle growth step (m); see <see cref="SegmentCertifier.GrowQuantumM"/>.</summary>
+    public const double GrowQuantumM = SegmentCertifier.GrowQuantumM;
 
     /// <summary>
     /// Motion bound ε (m) of the segment qa → qb (degrees) with jaw strokes gR, gL (mm): every robot, mount and held-cane
@@ -35,32 +33,11 @@ public static class BambooSegmentCertifier
         var mats = NewMats(n);
         cell.Fk.ComputeLinkTransformsInto(rad, mats);
         if (AxisPoints(cell, rad, mats) is not { } axis) return double.PositiveInfinity;
-        // Body b (−1 = mount, n − 1 = R-grip and held cane). Base L: joint j turns bodies b ≥ j, which reach at most
-        // |axis[b] − axis[j]| (chain) + reach of b from axis[b]. Base R: joint j turns bodies b < j, measured from axis[b + 1].
-        var baseR = baseGripper == "R";
-        var reach = new double[n + 1];
-        Array.Fill(reach, -1);
-        foreach (var (b, c, r) in Spheres(cell, qaDeg, gRa, gRb, gLa, gLb, held, heldLength, mats))
-        {
-            var pivot = baseR ? b + 1 : b;
-            if (pivot < 0 || pivot >= n) continue; // a body that never moves (mount under base L, R-grip under base R)
-            reach[b + 1] = Math.Max(reach[b + 1], Dist(c, axis[pivot]) + r);
-        }
-        var worst = 0.0;
-        for (var b = -1; b < n; b++)
-        {
-            if (reach[b + 1] < 0) continue;
-            var delta = 0.0;
-            for (var j = 0; j < n; j++)
-            {
-                if (baseR ? b >= j : b < j) continue;
-                var chain = 0.0;
-                var (lo, hi) = baseR ? (b + 1, j) : (j, b);
-                for (var k = lo; k < hi; k++) chain += Dist(axis[k], axis[k + 1]);
-                delta += Math.Abs(qbDeg[j] - qaDeg[j]) * Math.PI / 180 * (chain + reach[b + 1]);
-            }
-            worst = Math.Max(worst, delta);
-        }
+        // Body b (−1 = mount, n − 1 = R-grip and held cane) is chain body b + 1. Base R: the chain is fixed at its tip.
+        var spheres = Spheres(cell, qaDeg, gRa, gRb, gLa, gLb, held, heldLength, mats).Select(s => (s.Body + 1, s.C, s.R));
+        var delta = new double[n];
+        for (var j = 0; j < n; j++) delta[j] = (qbDeg[j] - qaDeg[j]) * Math.PI / 180;
+        var worst = SegmentCertifier.ChainSweepBound(axis, spheres, delta, fixedAtTip: baseGripper == "R");
         return worst + (Math.Abs(gRb - gRa) + Math.Abs(gLb - gLa)) / 2000.0;
     }
 
@@ -74,57 +51,49 @@ public static class BambooSegmentCertifier
     public static bool Certify(BambooIcdCell cell, string? baseGripper, double[] baseWorld,
         IReadOnlyList<double> qaDeg, IReadOnlyList<double> qbDeg, double gRa, double gRb, double gLa, double gLb,
         Frame? held, IReadOnlyList<CollisionObject> env, string? lOn, string? rOn, double? heldLength,
-        int maxDepth, int maxChecks, out int checks)
+        int maxDepth, int maxChecks, out int checks) =>
+        SegmentCertifier.Certify(new Segment(cell, baseGripper, baseWorld, qaDeg, qbDeg, gRa, gRb, gLa, gLb, held, env, lOn, rOn, heldLength),
+            maxDepth, maxChecks, out checks);
+
+    /// <summary>Growth rounded up to 1e-4·2^k m; see <see cref="SegmentCertifier.Quantize"/>.</summary>
+    public static double Quantize(double d) => SegmentCertifier.Quantize(d);
+
+    sealed class Segment(BambooIcdCell cell, string? baseGripper, double[] baseWorld,
+        IReadOnlyList<double> qaDeg, IReadOnlyList<double> qbDeg, double gRa, double gRb, double gLa, double gLb,
+        Frame? held, IReadOnlyList<CollisionObject> env, string? lOn, string? rOn, double? heldLength) : ICertifiableSegment
     {
-        checks = 0;
-        var eps = SweepBound(cell, baseGripper, qaDeg, qbDeg, gRa, gRb, gLa, gLb, held, heldLength);
-        if (eps == 0) return true;
-        if (double.IsInfinity(eps) || double.IsNaN(eps)) return false;
-        var envNames = new HashSet<string>(env.Select(o => o.Name), StringComparer.Ordinal);
-        var baseR = baseGripper == "R";
-        var def = RobotDefinition.Current;
-        bool Fixed(string part) => baseR
-            ? gRa == gRb && (def.R.Owns(part) || part == BambooIcdCell.Strut)
-            : gLa == gLb && def.L.Owns(part);
+        HashSet<string>? _envNames;
+        List<(string A, string B)>? _allowed;
+        readonly RobotDefinition _def = RobotDefinition.Current;
+        double[]? _q;
+
+        public double SweepBound() => BambooSegmentCertifier.SweepBound(cell, baseGripper, qaDeg, qbDeg, gRa, gRb, gLa, gLb, held, heldLength);
+
+        public bool IsClear(double m, double grow)
+        {
+            _envNames ??= new HashSet<string>(env.Select(o => o.Name), StringComparer.Ordinal);
+            _allowed ??= BambooTrussCollision.Allowed(lOn, rOn);
+            var n = qaDeg.Count;
+            var q = _q ??= new double[n];
+            for (var k = 0; k < n; k++) q[k] = qaDeg[k] + (qbDeg[k] - qaDeg[k]) * m;
+            var grown = env.Select(o => BambooTrussCollision.Inflate(o, grow)).ToList();
+            cell.SetMountViewer(BambooTrussPlanner.LWorld(baseGripper, baseWorld, q));
+            return !cell.PoseContacts(q, gRa + (gRb - gRa) * m, gLa + (gLb - gLa) * m, held, grown, _allowed, 64, heldLength).Any(Counts);
+        }
+
         bool Counts(CollisionContact c)
         {
-            var aEnv = envNames.Contains(c.BodyA); var bEnv = envNames.Contains(c.BodyB);
+            var aEnv = _envNames!.Contains(c.BodyA); var bEnv = _envNames.Contains(c.BodyB);
             if (aEnv == bEnv) return false;
             return !Fixed(aEnv ? c.BodyB : c.BodyA);
         }
-        var allowed = BambooTrussCollision.Allowed(lOn, rOn);
-        var n = qaDeg.Count;
-        var q = new double[n];
-        var stack = new Stack<(double A, double B, int Depth)>();
-        stack.Push((0, 1, 0));
-        while (stack.Count > 0)
-        {
-            var (a, b, depth) = stack.Pop();
-            var grow = Quantize(eps * (b - a) / 2);
-            var clear = false;
-            if (grow <= 0.25)
-            {
-                if (++checks > maxChecks) return false;
-                var m = (a + b) / 2;
-                for (var k = 0; k < n; k++) q[k] = qaDeg[k] + (qbDeg[k] - qaDeg[k]) * m;
-                var grown = env.Select(o => BambooTrussCollision.Inflate(o, grow)).ToList();
-                cell.SetMountViewer(BambooTrussPlanner.LWorld(baseGripper, baseWorld, q));
-                clear = !cell.PoseContacts(q, gRa + (gRb - gRa) * m, gLa + (gLb - gLa) * m, held, grown, allowed, 64, heldLength).Any(Counts);
-            }
-            if (clear) continue;
-            if (depth >= maxDepth) return false;
-            var mid = (a + b) / 2;
-            stack.Push((mid, b, depth + 1));
-            stack.Push((a, mid, depth + 1));
-        }
-        return true;
-    }
 
-    /// <summary>Growth rounded up to 1e-4·2^k m (reuses grown obstacles across intervals).</summary>
-    public static double Quantize(double d)
-    {
-        if (d <= GrowQuantumM) return GrowQuantumM;
-        return GrowQuantumM * Math.Pow(2, Math.Ceiling(Math.Log2(d / GrowQuantumM) - 1e-12));
+        bool Fixed(string part)
+        {
+            return baseGripper == "R"
+                ? gRa == gRb && (_def.R.Owns(part) || part == BambooIcdCell.Strut)
+                : gLa == gLb && _def.L.Owns(part);
+        }
     }
 
     // ---- bound internals (chain-base frame; all distances are between points fixed in one body) ----
@@ -216,5 +185,4 @@ public static class BambooSegmentCertifier
 
     static double[][] NewMats(int n) { var m = new double[n][]; for (var i = 0; i < n; i++) m[i] = new double[16]; return m; }
     static double[] Origin(double[] m) => new[] { m[3], m[7], m[11] };
-    static double Dist(double[] a, double[] b) => Math.Sqrt((a[0] - b[0]) * (a[0] - b[0]) + (a[1] - b[1]) * (a[1] - b[1]) + (a[2] - b[2]) * (a[2] - b[2]));
 }

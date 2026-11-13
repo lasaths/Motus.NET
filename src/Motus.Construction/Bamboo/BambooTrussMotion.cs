@@ -385,7 +385,6 @@ public static class BambooTrussMotion
         var cell = TryCell();
         if (cell is null) return new TrussBuild { Error = "Motus cell required (call UseCell with the viewer BambooIcdCell).", Tasks = tasks.ToList() };
         var clock = System.Diagnostics.Stopwatch.StartNew();
-        var site = BambooTrussLayout.Current;
         var notes = new List<string>();
         if (SceneCheckFirst)
         {
@@ -401,68 +400,14 @@ public static class BambooTrussMotion
                     Notes = notes, Tasks = tasks.ToList() };
         }
         var p = new BambooTrussPlanner(cell);
-        var built = new List<string>();
         if (!p.Start()) return new TrussBuild { Error = p.Error, Tasks = tasks.ToList() };
         // The sequence runs on the core task types (pick / place / park / walk).
         var core = BambooTaskModel.ToCore(tasks);
         foreach (var pr in TaskSequenceRules.Validate(core)) notes.Add($"task rule: #{pr.Index} {pr.Message}");
-        PickTask? pick = null;
-        bool Build(BambooTrussLayout.MemberDef m, string what)
-        {
-            var fx = BambooTrussLayout.ExistingNodes(built);
-            if (!fx.Contains(m.NodeA) && !fx.Contains(m.NodeB)) { notes.Add($"{m.Id}: not built — neither end node exists yet"); return false; }
-            if (p.BuildMember(m)) { if (!BambooTrussLayout.IsRelay(m.Id)) built.Add(m.Id); log?.Invoke($"{m.Id}: {what}"); return true; }
-            notes.Add($"{m.Id}: not built — {p.Error}"); log?.Invoke($"{m.Id}: {p.Error}");
-            return false;
-        }
-        for (var ti = 0; ti < core.Count; ti++)
-        {
-            var c = core[ti];
-            if (CoreTasks.AsPick(c) is { } pk) { pick = pk; continue; }
-            if (CoreTasks.AsPlace(c) is { } pl && pick is not null && pick.Object == pl.Object)
-            {
-                pick = null;
-                var m = BambooTrussLayout.Def(pl.Object);
-                if (m is null) { notes.Add($"{pl.Object}: not a truss member — skipped"); continue; }
-                Build(m, "built");
-                continue;
-            }
-            if (CoreTasks.AsPark(c) is { } park && pick is not null && pick.Object == park.Object)
-            {
-                pick = null;
-                var m = BambooTrussLayout.Def(BambooTaskModel.RelayIdOf(park));
-                if (m is null) { notes.Add($"{park.Object}: cannot park at {park.Connector}/{park.Direction} — skipped"); continue; }
-                Build(m, $"parked at {park.Connector}/{park.Direction}");
-                continue;
-            }
-            if (CoreTasks.AsWalk(c) is not { } walk) continue;
-            if (walk.Mode == WalkMode.Land)
-            {
-                notes.Add(Land(p, walk.Target, log));
-                continue;
-            }
-            var sw = System.Diagnostics.Stopwatch.StartNew();
-            var gait = BambooWalk.GaitNamed(walk.Gait);
-            var target = walk.Target; var f = WalkTargetF(walk);
-            if (BambooTrussLayout.IsSupport(target) && BambooTrussLayout.IsSupport(p.LStake))
-            {
-                if (p.LStake == target) continue;
-                var ok = p.WalkToAnchor(target);
-                notes.Add(ok ? $"walk → {target}: stake walk" : $"walk → {target}: not planned — {p.Error}");
-                continue;
-            }
-            bool Goal(BambooWalk.Site s) => s.On == target && (s.IsStake || Math.Abs(s.F - f) < 1e-9);
-            var label = BambooTrussLayout.IsSupport(target) ? target : $"{target["placed-".Length..]}@{f:+0.00;-0.00}";
-            var res = BambooWalk.Explore(p, gait, site.WalkRAnchor, Goal, maxStepsPerWalk, log, cycleName: $"walk ({gait.Id}) → {label}");
-            var path = res.Reached is { } r ? res.PathTo(r) : new List<BambooWalk.Step>();
-            var leg = new WalkLeg($"{target}@{f:+0.00;-0.00}", gait.Id, res.Reached is not null, path.Count, res.Tried,
-                path.Count == 0 ? 0 : path.Average(x => x.StrideM), sw.Elapsed.TotalSeconds, path, res);
-            legs?.Add(leg);
-            notes.Add(res.Reached is { } rr
-                ? $"walk ({gait.Id}) → {rr}: {path.Count} steps — " + string.Join(" → ", path.Select(x => $"{x.Kind} (R on {x.RAnchor}) to {x.To}"))
-                : $"walk ({gait.Id}) → {target}@{f:+0.00;-0.00}: not reachable with this gait ({res.Tried} steps tried, {res.Reachable.Count} sites reached)");
-            log?.Invoke(notes[^1]);
-        }
+        var runner = new BambooMoveRunner(p, null, log) { MaxStepsPerWalk = maxStepsPerWalk, Legs = legs };
+        foreach (var c in core)
+            if (runner.Run(c).Note is { } note) notes.Add(note);
+        var built = runner.Built;
         p.StampTimes();
         cell.SetMountViewer(BambooTrussLayout.StartBase);
         var keys = p.Keys;
@@ -496,13 +441,6 @@ public static class BambooTrussMotion
     public const string LandGait = "land";
 
     /// <summary>
-    /// Targeted landing walk for member (or relay) <paramref name="id"/>: if it is not buildable from where L stands,
-    /// rank IK landing candidates (<see cref="BambooTrussPlanner.LandingCandidates"/>) and take the first whose walk
-    /// step AND trial build (stock pick → carry → place → R park, Motus-clear) succeed; only the walk is kept.
-    /// </summary>
-    static string Land(BambooTrussPlanner p, string id, Action<string>? log) => LandStep(p, id, log).Note;
-
-    /// <summary>
     /// Targeted-landing walk for <paramref name="id"/>: not needed when it is buildable from where the robot stands;
     /// otherwise the first landing (of <see cref="BambooTrussPlanner.LandTries"/> IK candidates) from which the real
     /// planner builds it. The trial build is rolled back (the planner state, random stream included, is as after the walk).
@@ -515,21 +453,21 @@ public static class BambooTrussMotion
         if (p.BuildMember(m)) { p.RollbackDeep(cp); return (true, false, $"walk (land) → {id}: not needed (buildable from {p.LStake})"); }
         p.RollbackDeep(cp);
         var cands = p.LandingCandidates(m);
-        var tried = 0;
+        var tried = 0; string? last = null;
         foreach (var c in cands.GroupBy(c => (c.RCane, c.ROff, c.LCane, c.LOff)).Select(g => g.First()))
         {
             if (tried++ >= BambooTrussPlanner.LandTries) break;
             p.RollbackDeep(cp);
-            if (!p.WalkStep(c.RCane, c.ROff, c.RFrame, c.LCane, c.LOff, c.LFrame, $"walk (land) → {id}")) continue;
+            if (!p.WalkStep(c.RCane, c.ROff, c.RFrame, c.LCane, c.LOff, c.LFrame, $"walk (land) → {id}")) { last = p.Error; continue; }
             var cpw = p.SaveDeep();
-            if (!p.BuildMember(m)) continue;
+            if (!p.BuildMember(m)) { last = p.Error; continue; }
             p.RollbackDeep(cpw);
             var note = $"walk (land) → {id}: R on {c.RCane} at {c.ROff:+0.000;-0.000} m, L lands on {c.LCane} at {c.LOff:+0.000;-0.000} m ({cands.Count} IK candidates, {tried} tried)";
             log?.Invoke(note);
             return (true, true, note);
         }
         p.RollbackDeep(cp);
-        return (false, false, $"walk (land) → {id}: no landing found ({cands.Count} IK candidates, {Math.Min(tried, BambooTrussPlanner.LandTries)} tried)");
+        return (false, false, $"walk (land) → {id}: no landing found ({cands.Count} IK candidates, {Math.Min(tried, BambooTrussPlanner.LandTries)} tried){(string.IsNullOrEmpty(last) ? "" : "; last: " + last)}");
     }
 
     public static TrussBuild Build(IReadOnlyList<BambooIcdMotion.TaskEdit>? tasks = null, bool useCache = false) =>
