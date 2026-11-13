@@ -12,6 +12,13 @@ using var logFile = new StreamWriter(Path.Combine(outDir, tag + ".log")) { AutoF
 void Log(string s) { var line = $"[{clock.Elapsed.TotalSeconds,7:F1}s] {s}"; Console.WriteLine(line); logFile.WriteLine(line); }
 
 BambooTrussLayout.Use(site);
+var clearanceMm = 2.0;
+if (Environment.GetEnvironmentVariable("CLEARANCE_MM") is { Length: > 0 } raw)
+{
+    if (!double.TryParse(raw, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out clearanceMm))
+        throw new ArgumentException($"CLEARANCE_MM must be a finite number in [0, 20], got '{raw}'");
+    MotionConstraints.Current = (MotionConstraints.Current with { ClearanceMarginM = clearanceMm / 1000 }).Validate();
+}
 var st = site.Structure!;
 Log($"input {tag}: {st.Nodes.Count} nodes, {st.Members.Count} members, {site.Stakes.Count} anchors, cane lengths " +
     $"{st.Members.Min(m => m.Length):F3}–{st.Members.Max(m => m.Length):F3} m, node Y {st.Nodes.Min(x => x.Y):F3}–{st.Nodes.Max(x => x.Y):F3} m");
@@ -67,16 +74,16 @@ Log($"replay: built {build.Built.Count} [{string.Join(",", build.Built)}], keys 
 if (build.Keys.Count == 0) return;
 var members = BambooTrussLayout.Members.ToList();
 var scan = new BambooTrussScan(cell, build.Keys, build.Cycles, members, BambooTrussLayout.JawClosedMm); scan.RunToEnd();
-Log($"scan @2 mm: {(scan.FirstHit is { } h ? $"collision t={h.T:F4} {h.Label}: {h.Describe()}" : scan.TrackMiss is { } tm ? "tracking miss " + tm : "collision-free")}");
-var passed = 0.0;
-foreach (var mm in new[] { 3.0, 4, 5, 6, 8, 10, 12, 15, 20 })
+Log($"scan @{clearanceMm} mm: {(scan.FirstHit is { } h ? $"collision t={h.T:F4} {h.Label}: {h.Describe()}" : scan.TrackMiss is { } tm ? "tracking miss " + tm : "collision-free")}");
+var passed = clearanceMm;
+foreach (var mm in new[] { 3.0, 4, 5, 6, 8, 10, 12, 15, 20 }.Where(mm => mm > clearanceMm))
 {
     var c = MotionConstraints.Current with { ClearanceMarginM = mm / 1000 };
     var s2 = new BambooTrussScan(cell, build.Keys, build.Cycles, members, BambooTrussLayout.JawClosedMm, constraints: c).RunToEnd();
     if (s2.FirstHit is not null) { Log($"margin sweep: fails at {mm} mm ({s2.FirstHit.Label}: {s2.FirstHit.Describe()})"); break; }
     passed = mm;
 }
-Log($"min clearance (non-exempt pairs, sampled scan) ≥ {Math.Max(2, passed)} mm");
+Log($"min clearance (non-exempt pairs, sampled scan) ≥ {passed} mm");
 File.WriteAllText(Path.Combine(outDir, tag + ".keys.json"), JsonSerializer.Serialize(new
 {
     keys = build.Keys, built = build.Built, members = members.Select(m => new { m.Id, m.Length, m.Place.X, m.Place.Y, m.Place.Z, m.Place.PitchDeg, m.Place.YawDeg })

@@ -675,6 +675,8 @@ public partial class BambooTrussTests
         var built = Build();
         Assert.Equal(c.ScanStepDeg, Scan(built).Constraints.ScanStepDeg);
         Assert.Throws<ArgumentException>(() => new BambooTrussPlanner(Cell, c with { ClearanceMarginM = -0.001 }));
+        Assert.Throws<ArgumentException>(() => new BambooTrussPlanner(Cell, c with { ClearanceMarginM = double.NaN }));
+        Assert.Throws<ArgumentException>(() => new BambooTrussPlanner(Cell, c with { ClearanceMarginM = double.PositiveInfinity }));
         Assert.Throws<NotSupportedException>(() => new BambooTrussPlanner(Cell, c with { SwapAtRest = false }));
         Assert.Throws<NotSupportedException>(() => new BambooTrussPlanner(Cell, c with { OneClampedBase = false }));
         // Swaps at rest: every key whose base differs from the previous key's has the same joints.
@@ -685,6 +687,99 @@ public partial class BambooTrussTests
         var open = new BambooTrussPlanner(Cell, c with { FixedMemberRule = false });
         Assert.Equal(new[] { "AM" }, open.Clampable(new[] { "AM" }));
         Assert.Empty(p.Clampable(new[] { "AM" }));
+    }
+
+    /// <summary>
+    /// A pose 1.5 mm from an added sphere fails at the default 2 mm clearance and passes at 1 mm. The planner and the
+    /// scan use the same setting and give the same verdict.
+    /// </summary>
+    [Fact]
+    public void ClearanceMargin_Pose15mmAway_FailsAtDefault_PassesAt1mm_PlannerAndScanAgree()
+    {
+        var q = new double[5];
+        var baseWorld = BambooTrussLayout.StartBase;
+        var s1 = BambooTrussLayout.S1.Name;
+        var gR = BambooTrussLayout.JawOpenMm;
+        var gL = BambooTrussLayout.JawClosedMm;
+        var env0 = BambooTrussCollision.Environment(Cell, Array.Empty<(string, double[])>(), null, null, null, true, 0);
+        var startClear = BambooTrussCollision.Contacts(Cell, "L", baseWorld, q, gR, gL, null, env0, s1, null, 1, 0.002);
+        Assert.Empty(startClear);
+
+        var sphere = ProbeSphere15mmFromStart(q, baseWorld, gR, gL, s1, env0);
+        var keep = BambooTrussLayout.Current;
+        try
+        {
+            BambooTrussLayout.Use(keep with { Obstacles = [sphere] });
+            var cDefault = MotionConstraints.Bamboo;
+            var c1mm = cDefault with { ClearanceMarginM = 0.001 };
+            Assert.Equal(0.002, cDefault.ClearanceMarginM);
+
+            var plannerDefault = new BambooTrussPlanner(Cell, cDefault).ContactsNow(q, gR, gL, 0, s1, null);
+            var planner1mm = new BambooTrussPlanner(Cell, c1mm).ContactsNow(q, gR, gL, 0, s1, null);
+            Assert.NotEmpty(plannerDefault);
+            Assert.Empty(planner1mm);
+
+            var keys = StartHoldKeys(q, baseWorld, gR, gL, s1);
+            var cycles = new[] { new BambooTrussMotion.CycleBound { MemberId = "start", T0 = 0, T1 = 1, FirstKey = 0, LastKey = 1 } };
+            var scanDefault = new BambooTrussScan(Cell, keys, cycles, BambooTrussLayout.Members, gL, constraints: cDefault);
+            var scan1mm = new BambooTrussScan(Cell, keys, cycles, BambooTrussLayout.Members, gL, constraints: c1mm);
+            Assert.Equal(cDefault.ClearanceMarginM, scanDefault.Constraints.ClearanceMarginM);
+            Assert.Equal(c1mm.ClearanceMarginM, scan1mm.Constraints.ClearanceMarginM);
+            var scanHitsDefault = scanDefault.ContactsAt(0, q, gR, gL, 0);
+            var scanHits1mm = scan1mm.ContactsAt(0, q, gR, gL, 0);
+            Assert.NotEmpty(scanHitsDefault);
+            Assert.Empty(scanHits1mm);
+        }
+        finally { BambooTrussLayout.Use(keep); }
+    }
+
+    static BambooIcdMotion.MotionKey[] StartHoldKeys(double[] q, double[] baseWorld, double gR, double gL, string s1) =>
+    [
+        new() { T = 0, Label = "start", Q = q, GR = gR, GL = gL, Hold = 0, Base = "L", BaseWorld = baseWorld, BaseOn = s1, LOn = s1 },
+        new() { T = 1, Label = "hold", Q = q, GR = gR, GL = gL, Hold = 0, Base = "L", BaseWorld = baseWorld, BaseOn = s1, LOn = s1 }
+    ];
+
+    /// <summary>Sphere whose surface sits 1.5 mm beyond first exact contact with the start pose, along a free direction.</summary>
+    static CollisionObject ProbeSphere15mmFromStart(double[] q, double[] baseWorld, double gR, double gL, string s1,
+        IReadOnlyList<CollisionObject> env0)
+    {
+        var rw = BambooTrussPlanner.ToMotus(BambooTrussPlanner.RWorld("L", baseWorld, q));
+        var origin = new[] { rw[3], rw[7], rw[11] };
+        var dirs = new[]
+        {
+            new[] { rw[0], rw[4], rw[8] },
+            new[] { -rw[0], -rw[4], -rw[8] },
+            new[] { rw[1], rw[5], rw[9] },
+            new[] { -rw[1], -rw[5], -rw[9] },
+            new[] { rw[2], rw[6], rw[10] },
+            new[] { -rw[2], -rw[6], -rw[10] }
+        };
+        const double radius = 0.005;
+        const double gap = 0.0015;
+        foreach (var d in dirs)
+        {
+            var n = Math.Sqrt(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
+            if (n < 1e-9) continue;
+            double ux = d[0] / n, uy = d[1] / n, uz = d[2] / n;
+            bool Hits(double t, double margin)
+            {
+                var sph = CollisionObject.Sphere("clearance-probe", new Frame(origin[0] + ux * t, origin[1] + uy * t, origin[2] + uz * t), radius);
+                var env = env0.Append(sph).ToList();
+                return BambooTrussCollision.Contacts(Cell, "L", baseWorld, q, gR, gL, null, env, s1, null, 1, margin).Count > 0;
+            }
+            const double far = 0.4;
+            if (Hits(far, 0)) continue;
+            double lo = 0, hi = far;
+            for (var i = 0; i < 40; i++)
+            {
+                var mid = (lo + hi) / 2;
+                if (Hits(mid, 0)) lo = mid; else hi = mid;
+            }
+            var tPlace = (lo + hi) / 2 + gap;
+            if (Hits(tPlace, 0.002) && !Hits(tPlace, 0.001))
+                return CollisionObject.Sphere("clearance-probe", new Frame(origin[0] + ux * tPlace, origin[1] + uy * tPlace, origin[2] + uz * tPlace), radius);
+        }
+        throw new InvalidOperationException("no free direction from the start R-grip for a 1.5 mm probe sphere");
     }
 
     /// <summary>The scan samples each key segment at exactly the canonical joint-space fractions the planner verifies.</summary>

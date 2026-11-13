@@ -8,8 +8,10 @@ namespace Motus.Construction;
 /// Rules that are structural in the planner (one clamped base, swaps at rest) cannot be switched off; a profile that
 /// asks for that is rejected by <see cref="Validate"/>. <see cref="ClearanceMarginM"/> is the extra distance a pose
 /// must keep from every obstacle at every sample: obstacles are grown by it before the exact Motus contact test, so any
-/// margin in [0, 20 mm] is supported (see <see cref="Validate"/>). Between samples a segment is only sampled unless
-/// <see cref="CertifiedSegments"/> is on.
+/// finite margin in [0, 20 mm] is supported (see <see cref="Validate"/>). The planner and the final scan read this same
+/// value. Path sampling must stay finer than the clearance: a large joint or jaw step can miss a gap smaller than the
+/// clearance between samples. This profile has no edge step in metres, so <see cref="Validate"/> does not compare them.
+/// Between samples a segment is only sampled unless <see cref="CertifiedSegments"/> is on.
 /// </remarks>
 public sealed record MotionConstraints
 {
@@ -24,7 +26,7 @@ public sealed record MotionConstraints
     /// <summary>After every placement the free gripper parks before anything else happens.</summary>
     public bool ParkAfterPlace { get; init; } = true;
     /// <summary>Clearance to obstacles (metres), enforced by the shared check (obstacles grown by it; clamped objects and
-    /// the held cane on its stock pegs exempt). Lassie: 2 mm.</summary>
+    /// the held cane on its stock pegs exempt). Default 2 mm. The planner and the scan use this same value.</summary>
     public double ClearanceMarginM { get; init; } = 0.002;
     /// <summary>Joint step of the coarse (search) segment check, degrees.</summary>
     public double SearchStepDeg { get; init; } = 2.0;
@@ -57,7 +59,8 @@ public sealed record MotionConstraints
     {
         if (!OneClampedBase) throw new NotSupportedException("The planner always keeps one gripper clamped as the IK base.");
         if (!SwapAtRest) throw new NotSupportedException("The planner only swaps the base at rest.");
-        if (ClearanceMarginM < 0 || ClearanceMarginM > 0.02) throw new ArgumentException("Clearance margin must be in [0, 20 mm].");
+        if (!double.IsFinite(ClearanceMarginM) || ClearanceMarginM < 0 || ClearanceMarginM > 0.02)
+            throw new ArgumentException("Clearance margin must be finite and in [0, 20 mm].");
         if (SearchStepDeg <= 0 || VerifyStepDeg <= 0 || ScanStepDeg <= 0 || ScanOversample < 1 || JawStepMm <= 0 || SearchJawStepMm <= 0)
             throw new ArgumentException("Sample resolutions must be positive (oversample ≥ 1).");
         if (CertifyMaxDepth < 1 || CertifyMaxDepth > 40 || CertifyMaxChecks < 1)
