@@ -265,8 +265,12 @@ public static class BambooBuildSearch
                 FailureMemory = tamp?.FailureMemory == true,
                 DeadEndMemory = tamp?.DeadEndMemory == true,
                 Outcome = tamp?.OutcomeLogPath is { } outPath
-                    ? (c, order, ok, seconds) => OutcomeLog.Append(outPath, new OutcomeLog.Outcome(layoutId, c.Value.Id, c.Value.Mode.ToString(), c.Value.Relay,
-                        order.Count, string.Join(",", order.Select(x => x.MemberId).Order(StringComparer.Ordinal)), c.Rank, ok, seconds))
+                    ? (c, order, ok, seconds, node, pos) => OutcomeLog.Append(outPath, new OutcomeLog.Outcome(layoutId, c.Value.Id, c.Value.Mode.ToString(), c.Value.Relay,
+                        order.Count, StateOf(order), c.Rank, ok, seconds, c.Value.Stand, c.Value.F, BambooFrontier.FeatureVersion, node, pos))
+                    : null,
+                Sorted = tamp?.OutcomeLogPath is { } sortedPath
+                    ? (node, sorted, order) => OutcomeLog.AppendAll(sortedPath, sorted.Select((c, pos) => new OutcomeLog.Sorted(layoutId, c.Value.Id,
+                        c.Value.Mode.ToString(), c.Value.Relay, order.Count, StateOf(order), c.Rank, null, c.Value.Stand, c.Value.F, BambooFrontier.FeatureVersion, node, pos)))
                     : null,
                 Placed = (order, complete) => SaveCheckpoint(o.CheckpointPath, order.ToList(), complete),
             }).Run();
@@ -277,8 +281,11 @@ public static class BambooBuildSearch
         { StopReason = r.StopReason, Deferred = r.Deferred };
     }
 
-    /// <summary>A frontier move: the member (or reposition foothold), how it is built, and its relay / anchor / clamp parameter.</summary>
-    internal readonly record struct Move(string Id, Mode Mode, string? Relay);
+    static string StateOf(IReadOnlyList<Choice> order) => string.Join(",", order.Select(x => x.MemberId).Order(StringComparer.Ordinal));
+
+    /// <summary>A frontier move: the member (or reposition foothold), how it is built, and its relay / anchor / clamp
+    /// parameter. <see cref="F"/> and <see cref="Stand"/> (stand origin) are set only when the outcome log is on.</summary>
+    internal readonly record struct Move(string Id, Mode Mode, string? Relay, double[]? F = null, double[]? Stand = null);
 
     /// <summary>
     /// The bamboo side of the search kernel (<see cref="BacktrackSearch{T, TChoice, TSave}"/>): the planner is the planning
@@ -302,9 +309,12 @@ public static class BambooBuildSearch
             bool Resumed(Mode mode, string id, string? relay) => resume is not null && (resume.RepositionTo is { } rt && pending is null
                 ? mode == Mode.Reposition && id == rt
                 : id == resume.MemberId && mode == resume.Mode && relay == resume.Relay);
+            var stand = Stand(p);
+            var logged = o.Tamp?.OutcomeLogPath is not null;
+            double[]? at = logged ? new[] { stand.Origin.X, stand.Origin.Y, stand.Origin.Z } : null;
             // Only on the deepest branch: shallower states still have siblings, and backtracking is cheaper than a walk.
-            return frontier.Candidates(placed, Stand(p), p.LStake, repositionHere: pending is null && onDeepest)
-                .Select(x => new Candidate<Move>(new(x.Id, x.Mode, x.Relay), $"{x.Id}|{x.Mode}|{x.Relay}", $"{x.Id} {x.Mode}",
+            return frontier.Candidates(placed, stand, p.LStake, repositionHere: pending is null && onDeepest)
+                .Select(x => new Candidate<Move>(new(x.Id, x.Mode, x.Relay, logged ? frontier.Features(x.Id, x.Mode, x.Relay, placed, stand) : null, at), $"{x.Id}|{x.Mode}|{x.Relay}", $"{x.Id} {x.Mode}",
                     x.Mode == Mode.Reposition ? $"reposition → {x.Id}" : $"{x.Id} ({x.Mode})", x.Rank, Pre(x.Id, x.Mode, x.Relay, x.Pre), Resumed(x.Mode, x.Id, x.Relay)))
                 .ToList();
         }
@@ -331,7 +341,7 @@ public static class BambooBuildSearch
         // shortStage: one RRT attempt of StagedRrtIters; if any transit ran out the answer is "not yet".
         public Confirmation<Choice> Confirm(Move c, IReadOnlyList<Choice> order, Choice? pending, bool shortStage)
         {
-            var (id, mode, relay) = c;
+            var (id, mode, relay, _, _) = c;
             var placed = Placed(order);
             var firstKey = p.Keys.Count;
             var f = mode == Mode.Reposition ? double.Parse(relay!, System.Globalization.CultureInfo.InvariantCulture) : 0;
