@@ -73,3 +73,21 @@ The report holds out one layout at a time. It compares the geometric order, the 
 - `ShippedDefaultPlan_IsIdenticalToLivePlanning`.
 - `BambooTrussTests.Tamp.cs`, including `BuildSearch_OutcomeLog_DoesNotChangeTheSearch_AndLogsSortedCandidates` (log on and off give the same search).
 - The full core suite. Run it only when no other heavy job runs on the machine.
+
+## Note for the G6 ADR: kernel-level outcome logging
+
+Today the outcome log is wired only on the bamboo path. `BambooFrontier.Candidates` builds the candidate list. When `TampSettings.OutcomeLogPath` is set, `BambooBuildSearch.Adapter.For` attaches `BambooFrontier.Features` (12 numbers, `FeatureVersion` 1). `BacktrackSearch.Dfs` already calls two optional sinks on each expansion: `Settings.Sorted` before the first try, and `Settings.Outcome` after each confirmation (`src/Motus.Construction/Search/BacktrackSearch.cs`). `BambooBuildSearch.Run` fills those sinks with `OutcomeLog` rows (`src/Motus.Construction/Search/OutcomeLog.cs`). The kernel does not own the row shape.
+
+If G6 happens, let the kernel log one generic row per candidate. The row holds: layout id, node (the expansion id in `BacktrackSearch.Dfs`), candidate id, rank position, a feature vector, a `FeatureVersion` from the adapter, a verdict (confirmed, rejected, deferred, or untried-sorted), and a reject reason. The adapter supplies the feature vector and its version. The bamboo adapter keeps the current 12 features. A pick-place adapter supplies its own features and version.
+
+Option A (second adapter, interfaces stay `internal`): the kernel calls an optional logger sink. Each adapter supplies features when the sink is on. The public API does not grow.
+
+Option B (the kernel interfaces become public): the same sink becomes part of the public surface. Keep the sink small: a path or a write callback, and the feature vector from the adapter. Do not publish the bamboo feature layout.
+
+Rules for both options:
+
+- Logging is off by default.
+- Logging on and off give an identical search. Keep the existing identity test (`BuildSearch_OutcomeLog_DoesNotChangeTheSearch_AndLogsSortedCandidates`).
+- The model is advisory only. The 2 mm confirmer does not change. Logging does not change rank order.
+
+Gain: a UR pick-place tower is a second, very different structure. Leave-one-layout-out can then train on one family and test on the other.
