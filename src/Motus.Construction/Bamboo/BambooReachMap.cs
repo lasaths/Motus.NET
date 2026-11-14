@@ -135,15 +135,18 @@ public sealed class BambooReachMap
 
     // ---------------- cache ----------------
 
-    static readonly System.Collections.Concurrent.ConcurrentDictionary<string, Reach> _cache = new();
-    const int CacheCap = 250_000;
-    static long _hits, _misses;
+    // Keyed by layout fingerprint, then by the query: the long fingerprint is stored once, not in every key.
+    static readonly System.Collections.Concurrent.ConcurrentDictionary<string, System.Collections.Concurrent.ConcurrentDictionary<string, Reach>> _cache = new();
+    // Above one full scene check (2475 sites × 157 lines ≈ 388k queries), so the build search's own scene check
+    // reuses the harness's answers instead of computing them again.
+    const int CacheCap = 600_000;
+    static long _hits, _misses, _entries;
 
     /// <summary>Cached reach queries so far (hits, misses). Query results are pure functions of the key.</summary>
-    public static (long Hits, long Misses, int Entries) CacheStats => (Interlocked.Read(ref _hits), Interlocked.Read(ref _misses), _cache.Count);
+    public static (long Hits, long Misses, int Entries) CacheStats => (Interlocked.Read(ref _hits), Interlocked.Read(ref _misses), (int)Interlocked.Read(ref _entries));
 
     /// <summary>Drop every cached query (tests / benchmarks).</summary>
-    public static void ClearCache() { _cache.Clear(); Interlocked.Exchange(ref _hits, 0); Interlocked.Exchange(ref _misses, 0); }
+    public static void ClearCache() { _cache.Clear(); Interlocked.Exchange(ref _entries, 0); Interlocked.Exchange(ref _hits, 0); Interlocked.Exchange(ref _misses, 0); }
 
     /// <summary>Use the process-wide query cache (default on). Off for custom <see cref="Environment"/>s (not keyable).</summary>
     public bool UseCache { get; init; } = true;
@@ -152,11 +155,11 @@ public sealed class BambooReachMap
     /// Cache key: the layout fingerprint (covers the design environment and every scene setting), IK seeds, collision
     /// flag, the clamp frame and the target line (pose, offsets, touch), all at the fingerprint's 6-decimal precision.
     /// </summary>
-    string? Key(ClampSite site, TargetLine line, string fingerprint)
+    string? Key(ClampSite site, TargetLine line)
     {
         if (!UseCache || (Collision && Environment is not null)) return null;
-        var sb = new System.Text.StringBuilder(fingerprint.Length + 256);
-        sb.Append(fingerprint).Append('|').Append(IkSeeds).Append('|').Append(Collision ? 'c' : 'k').Append('|').Append(site.On).Append('|');
+        var sb = new System.Text.StringBuilder(256);
+        sb.Append(IkSeeds).Append('|').Append(Collision ? 'c' : 'k').Append('|').Append(site.On).Append('|');
         foreach (var v in site.BaseWorld) sb.Append(BambooTrussMotion.FingerprintNumber(v)).Append(',');
         var p = line.Pose;
         sb.Append('|').Append(line.Touch).Append('|');
@@ -171,17 +174,19 @@ public sealed class BambooReachMap
 
     Reach Query(ClampSite site, TargetLine line, string fingerprint)
     {
-        var key = Key(site, line, fingerprint);
-        if (key is not null && _cache.TryGetValue(key, out var hit)) { Interlocked.Increment(ref _hits); return hit; }
+        var key = Key(site, line);
+        if (key is not null && _cache.TryGetValue(fingerprint, out var byFp) && byFp.TryGetValue(key, out var hit)) { Interlocked.Increment(ref _hits); return hit; }
         Interlocked.Increment(ref _misses);
         var r = Compute(site, line);
         if (key is not null)
         {
-            if (_cache.Count >= CacheCap) _cache.Clear();
-            _cache[key] = r;
+            if (Interlocked.Read(ref _entries) >= CacheCap) ClearEntries();
+            if (_cache.GetOrAdd(fingerprint, _ => new()).TryAdd(key, r)) Interlocked.Increment(ref _entries);
         }
         return r;
     }
+
+    static void ClearEntries() { _cache.Clear(); Interlocked.Exchange(ref _entries, 0); }
 
     Reach Compute(ClampSite site, TargetLine line)
     {

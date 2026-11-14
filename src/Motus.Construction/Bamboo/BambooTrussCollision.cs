@@ -87,28 +87,100 @@ public static class BambooTrussCollision
         string? lOn, string? rOn, int max, double marginM = 0, double? heldLength = null)
     {
         cell.SetMountViewer(BambooTrussPlanner.LWorld(baseGripper, baseWorld, qDeg));
-        var allowed = Allowed(lOn, rOn);
+        var mc = cell.MarginCache ??= new MarginCache();
+        var allowed = mc.AllowedFor(lOn, rOn);
         if (marginM <= 0) return cell.PoseContacts(qDeg, gR, gL, held, env, allowed, max, heldLength);
-        var clamped = $"{lOn}|{rOn}".Split('|', StringSplitOptions.RemoveEmptyEntries);
+        mc.Prepare(env, marginM, lOn, rOn);
         // Grasp zone: a gripper whose slot axis lies on an object's axis (within the margin) is grasping / releasing /
         // sliding on it — its own parts may be closer than the margin to that object (still never in exact contact).
         var (lw, rw) = BambooGripKinematics.Grippers(baseGripper == "R" ? BambooGripKinematics.Gripper.R : BambooGripKinematics.Gripper.L, baseWorld, qDeg);
-        var zoneL = GraspZone(BambooTrussPlanner.ToMotus(lw), env, marginM);
-        var zoneR = GraspZone(BambooTrussPlanner.ToMotus(rw), env, marginM);
-        bool Candidate(CollisionObject o) => zoneL.Contains(o.Name) || zoneR.Contains(o.Name) ||
-            (held is not null && o.Name.StartsWith(PegPrefix, StringComparison.Ordinal));
+        var zoneL = mc.GraspZone(mc.ZoneL, BambooTrussPlanner.ToMotus(lw), marginM);
+        var zoneR = mc.GraspZone(mc.ZoneR, BambooTrussPlanner.ToMotus(rw), marginM);
+        bool Candidate(int i) => zoneL.Contains(mc.Env[i].Name) || zoneR.Contains(mc.Env[i].Name) || (held is not null && mc.IsPeg[i]);
         bool Exempt(CollisionContact c) => (IsPegRest(c) && held is not null) || InZone(c.BodyA, c.BodyB, zoneL, zoneR) || InZone(c.BodyB, c.BodyA, zoneL, zoneR);
         // Pass 1 (early-out): everything grown except clamped objects and exemption candidates, which are exact here.
-        var pass1 = env.Select(o => clamped.Contains(o.Name) || Candidate(o) ? o : Inflate(o, marginM)).ToList();
+        var pass1 = mc.Pass1; pass1.Clear();
+        for (var i = 0; i < mc.Env.Length; i++) pass1.Add(mc.Clamped[i] || Candidate(i) ? mc.Env[i] : mc.Grown[i]);
         var hits = cell.PoseContacts(qDeg, gR, gL, held, pass1, allowed, max, heldLength);
         if (hits.Count >= max) return hits;
         // Pass 2: the candidates grown, keeping the margin for every pair that is not an intended contact.
-        var cands = env.Where(o => !clamped.Contains(o.Name) && Candidate(o)).Select(o => Inflate(o, marginM)).ToList();
+        var cands = mc.Pass2; cands.Clear();
+        for (var i = 0; i < mc.Env.Length; i++) if (!mc.Clamped[i] && Candidate(i)) cands.Add(mc.Grown[i]);
         if (cands.Count == 0) return hits;
         var kept = hits.ToList();
         foreach (var c in cell.PoseContacts(qDeg, gR, gL, held, cands, allowed, 64, heldLength))
             if (!Exempt(c) && kept.Count < max) kept.Add(c);
         return kept;
+    }
+
+    /// <summary>
+    /// Per-cell setup of <see cref="Contacts"/> for one hold state (environment, margin, clamped objects): the grown
+    /// obstacles, the clamped / peg flags and mesh axes, made once and reused while the inputs stay the same (same
+    /// object instances, so the same verdicts). Not thread-safe: one cell is used by one thread at a time.
+    /// </summary>
+    internal sealed class MarginCache
+    {
+        public CollisionObject[] Env = Array.Empty<CollisionObject>();
+        public CollisionObject[] Grown = Array.Empty<CollisionObject>();
+        public bool[] Clamped = Array.Empty<bool>(), IsPeg = Array.Empty<bool>();
+        (double[] C, double[] U, double H)?[] _axes = Array.Empty<(double[], double[], double)?>();
+        double _margin = double.NaN;
+        string? _lOn, _rOn, _aL, _aR;
+        RobotDefinition? _aDef;
+        List<(string A, string B)>? _allowed;
+        public readonly HashSet<string> ZoneL = new(StringComparer.Ordinal), ZoneR = new(StringComparer.Ordinal);
+        public readonly List<CollisionObject> Pass1 = new(), Pass2 = new();
+
+        public List<(string A, string B)> AllowedFor(string? lOn, string? rOn)
+        {
+            if (_allowed is null || _aL != lOn || _aR != rOn || !ReferenceEquals(_aDef, RobotDefinition.Current))
+                (_allowed, _aL, _aR, _aDef) = (Allowed(lOn, rOn), lOn, rOn, RobotDefinition.Current);
+            return _allowed;
+        }
+
+        public void Prepare(IReadOnlyList<CollisionObject> env, double marginM, string? lOn, string? rOn)
+        {
+            if (Same(env, marginM, lOn, rOn)) return;
+            var n = env.Count;
+            Env = new CollisionObject[n]; Grown = new CollisionObject[n]; Clamped = new bool[n]; IsPeg = new bool[n];
+            _axes = new (double[], double[], double)?[n];
+            var clamped = $"{lOn}|{rOn}".Split('|', StringSplitOptions.RemoveEmptyEntries);
+            for (var i = 0; i < n; i++)
+            {
+                var o = env[i];
+                Env[i] = o;
+                Grown[i] = Inflate(o, marginM);
+                Clamped[i] = clamped.Contains(o.Name);
+                IsPeg[i] = o.Name.StartsWith(PegPrefix, StringComparison.Ordinal);
+                if (o.Shape == CollisionShape.Mesh && o.MeshAabbMin is not null) _axes[i] = AxisOf(o);
+            }
+            (_margin, _lOn, _rOn) = (marginM, lOn, rOn);
+        }
+
+        bool Same(IReadOnlyList<CollisionObject> env, double marginM, string? lOn, string? rOn)
+        {
+            if (env.Count != Env.Length || !marginM.Equals(_margin) || _lOn != lOn || _rOn != rOn) return false;
+            for (var i = 0; i < Env.Length; i++) if (!ReferenceEquals(env[i], Env[i])) return false;
+            return true;
+        }
+
+        /// <summary>Objects (cane / column meshes) whose axis the gripper's slot axis (local Z of <paramref name="g"/>, Motus) lies on.</summary>
+        public HashSet<string> GraspZone(HashSet<string> set, double[] g, double marginM)
+        {
+            set.Clear();
+            for (var i = 0; i < Env.Length; i++)
+            {
+                if (_axes[i] is not var (c, u, h)) continue;
+                double dx = g[3] - c[0], dy = g[7] - c[1], dz = g[11] - c[2];
+                var along = dx * u[0] + dy * u[1] + dz * u[2];
+                if (Math.Abs(along) > h + 0.005) continue;
+                double px = dx - along * u[0], py = dy - along * u[1], pz = dz - along * u[2];
+                if (Math.Sqrt(px * px + py * py + pz * pz) > marginM + 0.001) continue;
+                if (Math.Abs(g[2] * u[0] + g[6] * u[1] + g[10] * u[2]) < Math.Cos(10 * Math.PI / 180)) continue;
+                set.Add(Env[i].Name);
+            }
+            return set;
+        }
     }
 
     static bool IsRPart(string n) => RobotDefinition.Current.R.Owns(n);
@@ -117,25 +189,6 @@ public static class BambooTrussCollision
 
     static bool InZone(string part, string obj, HashSet<string> zoneL, HashSet<string> zoneR) =>
         (IsLPart(part) && zoneL.Contains(obj)) || (IsRPart(part) && zoneR.Contains(obj));
-
-    /// <summary>Objects (cane / column meshes) whose axis the gripper's slot axis (local Z of <paramref name="g"/>, Motus) lies on.</summary>
-    static HashSet<string> GraspZone(double[] g, IReadOnlyList<CollisionObject> env, double marginM)
-    {
-        var set = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var o in env)
-        {
-            if (o.Shape != CollisionShape.Mesh || o.MeshAabbMin is null) continue;
-            var (c, u, h) = AxisOf(o);
-            double dx = g[3] - c[0], dy = g[7] - c[1], dz = g[11] - c[2];
-            var along = dx * u[0] + dy * u[1] + dz * u[2];
-            if (Math.Abs(along) > h + 0.005) continue;
-            double px = dx - along * u[0], py = dy - along * u[1], pz = dz - along * u[2];
-            if (Math.Sqrt(px * px + py * py + pz * pz) > marginM + 0.001) continue;
-            if (Math.Abs(g[2] * u[0] + g[6] * u[1] + g[10] * u[2]) < Math.Cos(10 * Math.PI / 180)) continue;
-            set.Add(o.Name);
-        }
-        return set;
-    }
 
     /// <summary>Long axis of a mesh (local AABB, longest extent): centre, unit direction and half length, world (Motus).</summary>
     static readonly System.Runtime.CompilerServices.ConditionalWeakTable<CollisionObject, Tuple<double[], double[], double>> _axes = new();
