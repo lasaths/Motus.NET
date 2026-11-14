@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- URDF loaders (`UrdfRobotLoader`, `UrdfCollisionLoader`) fail closed. When a number attribute is absent, the loader uses the default, as before. When the attribute is present but is not a finite number (for example `abc`, `NaN`, `1e999`, or a triple with fewer than three values), the load stops with an `InvalidDataException` that names the joint or collision. Before this fix, a bad limit became ±π, a bad radius became 0.05 m, and `NaN` was accepted. All shipped fixtures load the same as before.
+- `XacroPreprocessor`: a macro that calls a macro (or itself) now stops with a `NotSupportedException` that names the two macros. Before this fix, the nested call was silently removed from the output.
+
 ## [2.2.0] - 2026-10-29
 
 ### Added
