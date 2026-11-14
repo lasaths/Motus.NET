@@ -59,4 +59,30 @@ public class CollisionMeshCacheTests
         Assert.NotNull(first);
         Assert.False(CollisionMeshCache.TryGet(Triangle(0), out _));
     }
+
+    // Same name, different place: only the vertices differ, so ContentHash (32 bits) collides by chance.
+    private static CollisionObject Shifted(int i) => CollisionObject.Mesh("col", Frame.Identity,
+        new List<double[]> { new[] { i * 1.0, 0, 0 }, new[] { i * 1.0 + 1, 0, 0 }, new[] { i * 1.0, 1, 0 } }, new List<int> { 0, 1, 2 });
+
+    [Fact]
+    public void HashCollision_DoesNotReturnTheOtherMeshBvh()
+    {
+        // Birthday search for two different meshes with the same 32-bit ContentHash (HashCode is seeded per process).
+        var seen = new Dictionary<int, int>();
+        int a = -1, b = -1;
+        for (var i = 0; i < 2_000_000 && a < 0; i++)
+        {
+            var h = Shifted(i).ContentHash;
+            if (seen.TryGetValue(h, out var j)) { a = j; b = i; }
+            else seen[h] = i;
+        }
+        Assert.True(a >= 0, "no 32-bit collision found");
+        CollisionMeshCache.Clear();
+        CollisionMeshCache.GetOrBuild(Shifted(a));
+        var got = CollisionMeshCache.GetOrBuild(Shifted(b));
+        Assert.Equal(b * 1.0, got.Min[0]); // a stale hit has the BVH box of mesh a
+        Assert.True(CollisionMeshCache.TryGet(Shifted(b), out var again));
+        Assert.Equal(b * 1.0, again!.Min[0]);
+        Assert.True(CollisionMeshCache.TryGet(Shifted(a), out var other) == false || other!.Min[0] == a * 1.0);
+    }
 }
