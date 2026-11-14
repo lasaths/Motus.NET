@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `CollisionMeshCache` (shared mesh BVH cache): a cache hit must also have the same mesh vertices and indices. Before this fix, two different meshes with the same 32-bit `ContentHash` shared one BVH, and the second mesh was tested with the bounding boxes of the first. A collision could then show as clear. Results for meshes that do not collide by hash do not change.
+
 ## [2.2.0] - 2026-10-29
 
 ### Added

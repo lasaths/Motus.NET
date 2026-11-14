@@ -13,7 +13,7 @@ public static class CollisionMeshCache
     // safe: any RobotMeshCollisionChecker that already copied a BvhNode reference into its own
     // private cache keeps working after eviction; the shared cache just rebuilds on next miss.
     private const int MaxEntries = 256;
-    private static readonly Dictionary<int, BvhNode> Cache = new();
+    private static readonly Dictionary<int, (CollisionObject Source, BvhNode Node)> Cache = new();
     private static readonly LinkedList<int> Order = new();
     private static readonly Dictionary<int, LinkedListNode<int>> OrderNodes = new();
     private static readonly object Gate = new();
@@ -27,13 +27,13 @@ public static class CollisionMeshCache
         var key = GeometryFingerprint(meshObj);
         lock (Gate)
         {
-            if (Cache.TryGetValue(key, out var node))
+            if (Cache.TryGetValue(key, out var hit) && SameMesh(hit.Source, meshObj))
             {
                 Touch(key);
-                return node;
+                return hit.Node;
             }
-            node = BvhBuilder.Build(meshObj);
-            Insert(key, node);
+            var node = BvhBuilder.Build(meshObj);
+            Insert(key, meshObj, node);
             return node;
         }
     }
@@ -48,10 +48,10 @@ public static class CollisionMeshCache
         var key = GeometryFingerprint(meshObj);
         lock (Gate)
         {
-            if (!Cache.TryGetValue(key, out var cached))
+            if (!Cache.TryGetValue(key, out var cached) || !SameMesh(cached.Source, meshObj))
                 return false;
             Touch(key);
-            node = cached;
+            node = cached.Node;
             return true;
         }
     }
@@ -65,9 +65,11 @@ public static class CollisionMeshCache
         Order.AddLast(node);
     }
 
-    private static void Insert(int key, BvhNode node)
+    // A colliding key replaces the older mesh's entry (one slot per key).
+    private static void Insert(int key, CollisionObject source, BvhNode node)
     {
-        Cache[key] = node;
+        if (OrderNodes.Remove(key, out var old)) Order.Remove(old);
+        Cache[key] = (source, node);
         OrderNodes[key] = Order.AddLast(key);
         while (Order.Count > MaxEntries)
         {
@@ -76,6 +78,18 @@ public static class CollisionMeshCache
             OrderNodes.Remove(oldest.Value);
             Cache.Remove(oldest.Value);
         }
+    }
+
+    // The 32-bit ContentHash is only the slot: a hit must have the same vertices and indices (the BVH depends on nothing else).
+    private static bool SameMesh(CollisionObject a, CollisionObject b)
+    {
+        if (ReferenceEquals(a, b)) return true;
+        if (a.MeshIndices!.Count != b.MeshIndices!.Count || a.MeshVertices!.Count != b.MeshVertices!.Count) return false;
+        for (var i = 0; i < a.MeshIndices.Count; i++)
+            if (a.MeshIndices[i] != b.MeshIndices[i]) return false;
+        for (var i = 0; i < a.MeshVertices.Count; i++)
+            if (!a.MeshVertices[i].AsSpan().SequenceEqual(b.MeshVertices[i])) return false;
+        return true;
     }
 
     /// <summary>Uses <see cref="CollisionObject.ContentHash"/> computed once at construction.</summary>
