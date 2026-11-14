@@ -7,9 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Opt-in box prefilter for pose collision checks (`RobotMeshCollisionChecker.BoxPrefilter`, default off; tower harness `BOXPRE=1`). Before the exact test of a robot part against a scene mesh (or a mesh part against a box), the checker compares the two oriented bounding boxes. If they are apart by more than 1 µm, the pair is clear and the exact test is not run. If not, the exact test decides. The prefilter never reports a collision, so every verdict and every plan stays the same. The clearance margin is already in the grown obstacles, so the prefilter works for each `ClearanceMarginM`.
+
 ### Changed
 
-- Bamboo planner speed. The results do not change: the same IK answers, the same collision verdicts and the same plans (bit for bit). `BambooGripKinematics.SolveGrip` uses no heap memory in its loop and does not compute the current gripper pose two times. `BambooTrussCollision.Contacts` makes the grown obstacles, clamp flags and mesh axes one time per hold state, not for each pose. `RobotMeshCollisionChecker` computes each link world matrix one time per pose. The mount-part memo keeps two results, as the scene memo does. The reach-query cache stores the layout fingerprint one time and holds 600 000 queries (before: 250 000), so the second scene check in the build search uses the first one's answers.
+- Bamboo planner speed. The results do not change: the same IK answers, the same collision verdicts and the same plans (bit for bit). `BambooGripKinematics.SolveGrip` uses no heap memory in its loop and does not compute the current gripper pose two times. `BambooTrussCollision.Contacts` makes the grown obstacles, clamp flags and mesh axes one time per hold state, not for each pose. `RobotMeshCollisionChecker` computes each link world matrix one time per pose, and the scene loop uses the matrices of the self-collision pass (the same products). The mount-part memo keeps two results, as the scene memo does. The reach-query cache stores the layout fingerprint one time and holds 600 000 queries (before: 250 000), so the second scene check in the build search uses the first one's answers.
 - Collision clearance (`MotionConstraints.ClearanceMarginM`, default 2 mm) is one setting. The planner and the final scan always use the same value. `Validate` rejects a non-finite value. The default does not change. The tower harness accepts `CLEARANCE_MM` (unset = 2). Path sampling must stay finer than the clearance.
 
 ### Fixed

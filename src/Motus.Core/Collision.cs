@@ -37,6 +37,9 @@ public sealed class CollisionObject
     /// </summary>
     internal double[]? WorldAabbSlot;
 
+    /// <summary>Slot for Motus.Geometry: world oriented bounding box of a mesh or box (4×4 + half extents; empty = none), filled on first use.</summary>
+    internal double[]? WorldObbSlot;
+
     // PONYTAIL: Sphere/Box/Capsule/Plane constructor
     private CollisionObject(string name, Frame pose, CollisionShape shape, double extentX, double extentY, double extentZ)
     {
