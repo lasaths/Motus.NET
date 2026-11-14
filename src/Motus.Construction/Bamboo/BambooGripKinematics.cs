@@ -132,6 +132,60 @@ public static class BambooGripKinematics
         m[8] = c0z; m[9] = c1z; m[10] = c2z; m[11] = pz; m[12] = 0; m[13] = 0; m[14] = 0; m[15] = 1;
     }
 
+    // Chain state before joint i, 12 values: columns c0, c1, c2 and origin p of TlrInto's loop.
+    const int StateLen = 12;
+    static ReadOnlySpan<double> StartState => new double[] { 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0 };
+
+    /// <summary>
+    /// TlrInto's loop from joint <paramref name="from"/> on, starting at that joint's state, with the cosines and sines
+    /// given (joint <paramref name="from"/> uses <paramref name="cFirst"/>, <paramref name="sFirst"/>). Same operations in
+    /// the same order as TlrInto, so <paramref name="m"/> is bitwise the same. States after each joint go to
+    /// <paramref name="rec"/> (index (i + 1)·12) when it is not empty.
+    /// </summary>
+    static void ChainFrom(Span<double> m, ReadOnlySpan<double> start, int from, ReadOnlySpan<double> cs, ReadOnlySpan<double> sn,
+        double cFirst, double sFirst, Span<double> rec)
+    {
+        double c0x = start[0], c0y = start[1], c0z = start[2], c1x = start[3], c1y = start[4], c1z = start[5];
+        double c2x = start[6], c2y = start[7], c2z = start[8], px = start[9], py = start[10], pz = start[11];
+        for (var i = from; i < 5; i++)
+        {
+            px -= Seg[i] * c1x; py -= Seg[i] * c1y; pz -= Seg[i] * c1z;
+            var c = i == from ? cFirst : cs[i]; var s = i == from ? sFirst : sn[i];
+            if (Axes[i] == 'X')
+            {
+                double n1x = c * c1x + s * c2x, n1y = c * c1y + s * c2y, n1z = c * c1z + s * c2z;
+                double n2x = -s * c1x + c * c2x, n2y = -s * c1y + c * c2y, n2z = -s * c1z + c * c2z;
+                c1x = n1x; c1y = n1y; c1z = n1z; c2x = n2x; c2y = n2y; c2z = n2z;
+            }
+            else
+            {
+                double n0x = c * c0x - s * c2x, n0y = c * c0y - s * c2y, n0z = c * c0z - s * c2z;
+                double n2x = s * c0x + c * c2x, n2y = s * c0y + c * c2y, n2z = s * c0z + c * c2z;
+                c0x = n0x; c0y = n0y; c0z = n0z; c2x = n2x; c2y = n2y; c2z = n2z;
+            }
+            if (rec.Length > 0)
+            {
+                var r = rec.Slice((i + 1) * StateLen, StateLen);
+                r[0] = c0x; r[1] = c0y; r[2] = c0z; r[3] = c1x; r[4] = c1y; r[5] = c1z;
+                r[6] = c2x; r[7] = c2y; r[8] = c2z; r[9] = px; r[10] = py; r[11] = pz;
+            }
+        }
+        px -= Seg[5] * c1x; py -= Seg[5] * c1y; pz -= Seg[5] * c1z;
+        m[0] = c0x; m[1] = c1x; m[2] = c2x; m[3] = px; m[4] = c0y; m[5] = c1y; m[6] = c2y; m[7] = py;
+        m[8] = c0z; m[9] = c1z; m[10] = c2z; m[11] = pz; m[12] = 0; m[13] = 0; m[14] = 0; m[15] = 1;
+    }
+
+    // Free-gripper frame of q into g, as FreeInto, and q's cosines, sines and chain states for later ChainFrom calls.
+    static void FreeRecord(Span<double> g, Gripper bg, double[] bw, ReadOnlySpan<double> q, double backoff,
+        Span<double> cs, Span<double> sn, Span<double> st)
+    {
+        for (var i = 0; i < 5; i++) { var a = q[i] * Deg; cs[i] = Math.Cos(a); sn[i] = Math.Sin(a); }
+        StartState.CopyTo(st);
+        Span<double> t = stackalloc double[16];
+        ChainFrom(t, st, 0, cs, sn, cs[0], sn[0], st);
+        FinishFree(g, bg, bw, t, backoff);
+    }
+
     /// <summary>
     /// Free-gripper frame into <paramref name="g"/> with the same arithmetic as <see cref="Free"/> (+ back-off as in
     /// <see cref="GripResidual"/>), without heap allocation.
@@ -139,8 +193,14 @@ public static class BambooGripKinematics
     static void FreeInto(Span<double> g, Gripper bg, double[] bw, ReadOnlySpan<double> q, double backoff)
     {
         Span<double> t = stackalloc double[16];
-        Span<double> u = stackalloc double[16];
         TlrInto(t, q);
+        FinishFree(g, bg, bw, t, backoff);
+    }
+
+    // The part of FreeInto after T_LR: base frame, inverse for an R base, back-off. t is overwritten.
+    static void FinishFree(Span<double> g, Gripper bg, double[] bw, Span<double> t, double backoff)
+    {
+        Span<double> u = stackalloc double[16];
         if (bg == Gripper.L) MulInto(g, bw, t);
         else { u.Clear(); InvInto(u, t); MulInto(g, bw, u); }
         if (backoff == 0) return;
@@ -268,6 +328,15 @@ public static class BambooGripKinematics
         return (Math.Sqrt(dx * dx + dy * dy + dz * dz), Math.Acos(Math.Min(1, dot)) / Deg);
     }
 
+    // ResidualOf(g, t) is (pe, ae) and pe < 1e-7 && ae < 1e-5, without the Acos when the position test fails.
+    static bool Converged(ReadOnlySpan<double> grip, GripTarget t)
+    {
+        var dx = grip[3] - t.X; var dy = grip[7] - t.Y; var dz = grip[11] - t.Z;
+        if (!(Math.Sqrt(dx * dx + dy * dy + dz * dz) < 1e-7)) return false;
+        var dot = Math.Abs(grip[2] * t.Ax + grip[6] * t.Ay + grip[10] * t.Az);
+        return Math.Acos(Math.Min(1, dot)) / Deg < 1e-5;
+    }
+
     // Allocation-free: all scratch is on the stack. The free-gripper frame of the current q is kept (gq), so each
     // iteration does not compute it a second time; every value is computed in the same order as before.
     static double[]? Refine(Gripper bg, double[] bw, GripTarget t, double[] seed, double backoff, int axisSign)
@@ -276,22 +345,26 @@ public static class BambooGripKinematics
         for (var k = 0; k < 5; k++) q[k] = Math.Clamp(q[k], BambooIcdMotion.LimitsDeg[k].Min, BambooIcdMotion.LimitsDeg[k].Max);
         Span<double> gq = stackalloc double[16], gp = stackalloc double[16];
         Span<double> e = stackalloc double[6], ep = stackalloc double[6], en2 = stackalloc double[6];
-        Span<double> qp = stackalloc double[5], qn = stackalloc double[5], b = stackalloc double[5], dq = stackalloc double[5];
+        Span<double> qn = stackalloc double[5], b = stackalloc double[5], dq = stackalloc double[5];
         Span<double> J = stackalloc double[30], A = stackalloc double[25];
+        // Cosines, sines and chain states of q (base) and of the trial step qn: a Jacobian column only re-runs the
+        // chain from its own joint, and only that joint's angle needs a new cosine / sine. Results are bitwise the same.
+        Span<double> cs = stackalloc double[5], sn = stackalloc double[5], csN = stackalloc double[5], snN = stackalloc double[5];
+        Span<double> st = stackalloc double[6 * StateLen], stN = stackalloc double[6 * StateLen], tl = stackalloc double[16];
         var lambda = 0.01;
-        FreeInto(gq, bg, bw, q, backoff);
+        FreeRecord(gq, bg, bw, q, backoff, cs, sn, st);
         ErrorOf(e, gq, t, axisSign);
         var en = Norm(e);
         for (var it = 0; it < 120; it++)
         {
-            var (pe, ae) = ResidualOf(gq, t);
-            if (pe < 1e-7 && ae < 1e-5) break;
+            if (Converged(gq, t)) break;
             // Numerical Jacobian (6×5, row-major J[r·5 + k]) of the error w.r.t. q (radians).
             const double h = 1e-6;
             for (var k = 0; k < 5; k++)
             {
-                q.CopyTo(qp); qp[k] += h / Deg;
-                FreeInto(gp, bg, bw, qp, backoff);
+                var ak = (q[k] + h / Deg) * Deg;
+                ChainFrom(tl, st.Slice(k * StateLen, StateLen), k, cs, sn, Math.Cos(ak), Math.Sin(ak), default);
+                FinishFree(gp, bg, bw, tl, backoff);
                 ErrorOf(ep, gp, t, axisSign);
                 for (var r = 0; r < 6; r++) J[r * 5 + k] = -(ep[r] - e[r]) / h;
             }
@@ -314,12 +387,13 @@ public static class BambooGripKinematics
             var scale = maxStep > 0.35 ? 0.35 / maxStep : 1.0;
             for (var k = 0; k < 5; k++)
                 qn[k] = Math.Clamp(q[k] + dq[k] * scale / Deg, BambooIcdMotion.LimitsDeg[k].Min, BambooIcdMotion.LimitsDeg[k].Max);
-            FreeInto(gp, bg, bw, qn, backoff);
+            FreeRecord(gp, bg, bw, qn, backoff, csN, snN, stN);
             ErrorOf(en2, gp, t, axisSign);
             var nn = Norm(en2);
             if (nn < en)
             {
                 qn.CopyTo(q); en2.CopyTo(e); gp.CopyTo(gq); en = nn;
+                csN.CopyTo(cs); snN.CopyTo(sn); stN.CopyTo(st);
                 lambda = Math.Max(1e-5, lambda * 0.5);
             }
             else
