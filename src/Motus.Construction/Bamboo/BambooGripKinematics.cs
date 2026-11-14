@@ -175,7 +175,7 @@ public static class BambooGripKinematics
         m[8] = c0z; m[9] = c1z; m[10] = c2z; m[11] = pz; m[12] = 0; m[13] = 0; m[14] = 0; m[15] = 1;
     }
 
-    // Free-gripper frame of q into g, as FreeInto, and q's cosines, sines and chain states for later ChainFrom calls.
+    // Slot axis and origin of q's free gripper into g (FinishFree), and q's cosines, sines and chain states for ChainFrom.
     static void FreeRecord(Span<double> g, Gripper bg, double[] bw, ReadOnlySpan<double> q, double backoff,
         Span<double> cs, Span<double> sn, Span<double> st)
     {
@@ -187,26 +187,32 @@ public static class BambooGripKinematics
     }
 
     /// <summary>
-    /// Free-gripper frame into <paramref name="g"/> with the same arithmetic as <see cref="Free"/> (+ back-off as in
-    /// <see cref="GripResidual"/>), without heap allocation.
+    /// The part of <see cref="Free"/> after T_LR (base frame, inverse for an R base, back-off as in
+    /// <see cref="GripResidual"/>), without heap allocation. Only the slot axis and the origin (rows 0–2 of columns 2
+    /// and 3, all that Refine reads) are written to <paramref name="g"/>, with the same sums as <see cref="Mul"/>.
     /// </summary>
-    static void FreeInto(Span<double> g, Gripper bg, double[] bw, ReadOnlySpan<double> q, double backoff)
-    {
-        Span<double> t = stackalloc double[16];
-        TlrInto(t, q);
-        FinishFree(g, bg, bw, t, backoff);
-    }
-
-    // The part of FreeInto after T_LR: base frame, inverse for an R base, back-off. t is overwritten.
-    static void FinishFree(Span<double> g, Gripper bg, double[] bw, Span<double> t, double backoff)
+    static void FinishFree(Span<double> g, Gripper bg, double[] bw, ReadOnlySpan<double> t, double backoff)
     {
         Span<double> u = stackalloc double[16];
-        if (bg == Gripper.L) MulInto(g, bw, t);
-        else { u.Clear(); InvInto(u, t); MulInto(g, bw, u); }
-        if (backoff == 0) return;
+        scoped ReadOnlySpan<double> right = t;
+        if (bg == Gripper.R) { InvInto(u, t); right = u; }
+        if (backoff == 0) { MulSlotOrigin(g, bw, right); return; }
+        Span<double> m = stackalloc double[16];
+        MulInto(m, bw, right);
         u.Clear(); u[0] = 1; u[5] = 1; u[10] = 1; u[15] = 1; u[3] = 0; u[7] = -backoff; u[11] = 0; // Trans(0, −backoff, 0)
-        g.CopyTo(t);
-        MulInto(g, t, u);
+        MulSlotOrigin(g, m, u);
+    }
+
+    // Rows 0–2 of columns 2 and 3 of a·b, each with MulInto's sum.
+    static void MulSlotOrigin(Span<double> c, ReadOnlySpan<double> a, ReadOnlySpan<double> b)
+    {
+        for (var r = 0; r < 3; r++)
+            for (var k = 2; k < 4; k++)
+            {
+                var s = 0.0;
+                for (var j = 0; j < 4; j++) s += a[r * 4 + j] * b[j * 4 + k];
+                c[r * 4 + k] = s;
+            }
     }
 
     /// <summary>World poses of both grippers given which one is the clamped base and its world frame.</summary>

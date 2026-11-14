@@ -15,7 +15,7 @@ public class BambooGripKinematicsIdentityTests
         var rng = new Random(11);
         var lim = BambooIcdMotion.LimitsDeg;
         var solved = 0;
-        for (var c = 0; c < 120; c++)
+        for (var c = 0; c < 400; c++)
         {
             var bg = c % 2 == 0 ? K.Gripper.L : K.Gripper.R;
             var bw = K.StakeClampFrame(rng.NextDouble() - 0.5, 0.1 + 0.3 * rng.NextDouble(), rng.NextDouble() - 0.5, 360 * rng.NextDouble());
@@ -36,7 +36,7 @@ public class BambooGripKinematicsIdentityTests
                     Assert.Equal(BitConverter.DoubleToInt64Bits(want[i][k]), BitConverter.DoubleToInt64Bits(got[i][k]));
             if (got.Count > 0) solved++;
         }
-        Assert.True(solved > 30, $"only {solved} cases solved");
+        Assert.True(solved > 100, $"only {solved} cases solved");
     }
 
     /// <summary>The pre-speedup SolveGrip (allocating), verbatim.</summary>
