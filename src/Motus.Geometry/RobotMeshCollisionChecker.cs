@@ -33,8 +33,6 @@ public sealed class RobotMeshCollisionChecker : ICollisionChecker, ICollisionCon
     private readonly List<(int index, LinkCollisionEntry entry, double[] linkMat, double[] worldM)> _posedScratch = new();
     private readonly List<double[]> _linkMatPool = new();
     private readonly List<double[]> _worldMatPool = new();
-    private readonly double[] _linkWorldScratch = new double[16];
-    private readonly List<double[]> _envWorldPool = new();
     private readonly int _selfMinLinkGap;
     private readonly IReadOnlyList<string> _linkNames;
 
@@ -167,13 +165,13 @@ public sealed class RobotMeshCollisionChecker : ICollisionChecker, ICollisionCon
         if (_attached.Count > 0 && !AttachedBodiesCollisionFree(state, scene, linkMats, sink, max)) { clear = false; if (Full(sink, max)) return false; }
 
         // Per-pose link envelope spheres (world centre + radius), computed once instead of once per (object, link).
-        if (_pc.Length < _links.Count * 4) _pc = new double[_links.Count * 4];
-        for (var li = 0; li < _links.Count; li++)
+        if (_pc.Length < _links.Count * 4) { _pc = new double[_links.Count * 4]; _envWorld = new double[_links.Count][]; }
+        for (int li = 0, pi = 0; li < _links.Count; li++)
         {
             var en = _links[li];
             if (en.LinkIndex < 0 || en.LinkIndex >= linkMats.Length) { _pc[li * 4 + 3] = -1; continue; }
-            var w = RentMat(_envWorldPool, li);
-            ComposeWorldInto(w, _baseM, linkMats[en.LinkIndex], en);
+            // Same products in the same order as SelfCollisionFree made for this link (bitwise the same matrix).
+            var w = _envWorld[li] = _posedScratch[pi++].worldM;
             EnvelopeCenter(en, w, out _pc[li * 4], out _pc[li * 4 + 1], out _pc[li * 4 + 2]);
             _pc[li * 4 + 3] = en.EnvelopeRadius;
         }
@@ -203,7 +201,8 @@ public sealed class RobotMeshCollisionChecker : ICollisionChecker, ICollisionCon
                     if (scene.IsPairAllowed(entry.Geometry.Name, obj.Name))
                         continue;
                 }
-                var worldM = _envWorldPool[li]; // this pose's link world matrix, from the envelope loop above
+                var worldM = _envWorld[li]; // this pose's link world matrix, from the envelope loop above
+                if (Apart(entry.Geometry, worldM, obj)) continue;
                 if (!CollisionGeometry.EnvelopeMayHit(entry.Geometry, worldM, entry.EnvelopeRadius, obj, _meshBvhCache, _scratch))
                     continue;
                 if (CollisionGeometry.IntersectsAtPose(entry.Geometry, worldM, obj, _meshBvhCache, _scratch))
@@ -221,11 +220,35 @@ public sealed class RobotMeshCollisionChecker : ICollisionChecker, ICollisionCon
     private const double AabbPad = 1e-9;
 
     /// <summary>
+    /// Opt-in (default off): before the exact test of a robot part against a scene mesh, skip the pair when their
+    /// oriented bounding boxes are apart (<see cref="CollisionGeometry.ObbApart"/>). It only skips pairs the exact
+    /// test clears, so every verdict stays the same. Process-wide; set it before planning.
+    /// </summary>
+    public static bool BoxPrefilter { get; set; }
+
+    // Per thread, so the parallel segment workers do not share one counter.
+    [ThreadStatic] private static long _prefilterTested, _prefilterCleared;
+
+    /// <summary>Pairs the box prefilter tested and cleared on the calling thread (parallel workers are not counted).</summary>
+    public static (long Tested, long Cleared) BoxPrefilterStats() => (_prefilterTested, _prefilterCleared);
+
+    private bool Apart(CollisionObject part, double[] worldM, CollisionObject obj)
+    {
+        // Box vs box: the exact test is the same OBB test, so only meshes on one side gain.
+        if (!BoxPrefilter || ReferencePath || !(obj.Shape == CollisionShape.Mesh || (obj.Shape == CollisionShape.Box && part.Shape == CollisionShape.Mesh))) return false;
+        _prefilterTested++;
+        if (!CollisionGeometry.ObbApart(part, worldM, obj, _scratch)) return false;
+        _prefilterCleared++;
+        return true;
+    }
+
+    /// <summary>
     /// Tests only: run the pre-speedup reference path on this thread (no broadphase prefilter, no allowed-name shortcut,
     /// no memo). Used by the checker-equivalence test to prove verdicts are unchanged.
     /// </summary>
     [ThreadStatic] public static bool ReferencePath;
     private double[] _pc = Array.Empty<double>();
+    private double[][] _envWorld = Array.Empty<double[]>();
     private static readonly double[] Unbounded = Array.Empty<double>();
 
     /// <summary>
@@ -309,6 +332,7 @@ public sealed class RobotMeshCollisionChecker : ICollisionChecker, ICollisionCon
         foreach (var obj in scene.Objects)
         {
             if (scene.IsPairAllowed(_toolEntry.Geometry.Name, obj.Name)) continue;
+            if (Apart(_toolEntry.Geometry, worldM, obj)) continue;
             if (!CollisionGeometry.EnvelopeMayHit(_toolEntry.Geometry, worldM, _toolEntry.EnvelopeRadius, obj, _meshBvhCache, _scratch))
                 continue;
             if (CollisionGeometry.IntersectsAtPose(_toolEntry.Geometry, worldM, obj, _meshBvhCache, _scratch))
@@ -338,6 +362,7 @@ public sealed class RobotMeshCollisionChecker : ICollisionChecker, ICollisionCon
             foreach (var obj in scene.Objects)
             {
                 if (scene.IsPairAllowed(entry.Geometry.Name, obj.Name)) continue;
+                if (Apart(entry.Geometry, attWorldM, obj)) continue;
                 if (!CollisionGeometry.EnvelopeMayHit(entry.Geometry, attWorldM, entry.EnvelopeRadius, obj, _meshBvhCache, _scratch))
                     continue;
                 if (CollisionGeometry.IntersectsAtPose(entry.Geometry, attWorldM, obj, _meshBvhCache, _scratch))
@@ -520,12 +545,6 @@ public sealed class RobotMeshCollisionChecker : ICollisionChecker, ICollisionCon
             return;
         }
         x = worldM[3]; y = worldM[7]; z = worldM[11];
-    }
-
-    private void ComposeWorldInto(double[] dest, double[] baseM, double[] linkMat, LinkCollisionEntry entry)
-    {
-        Transforms.MultiplyInto(_linkWorldScratch, baseM, linkMat);
-        Transforms.MultiplyInto(dest, _linkWorldScratch, entry.LocalM);
     }
 
     private static double[] RentMat(List<double[]> pool, int index)

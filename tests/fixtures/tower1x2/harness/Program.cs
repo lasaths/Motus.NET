@@ -19,6 +19,8 @@ if (Environment.GetEnvironmentVariable("CLEARANCE_MM") is { Length: > 0 } raw)
         throw new ArgumentException($"CLEARANCE_MM must be a finite number in [0, 20], got '{raw}'");
     MotionConstraints.Current = (MotionConstraints.Current with { ClearanceMarginM = clearanceMm / 1000 }).Validate();
 }
+// BOXPRE=1: box prefilter before exact pose checks (verdicts unchanged, only faster).
+Motus.Geometry.RobotMeshCollisionChecker.BoxPrefilter = Environment.GetEnvironmentVariable("BOXPRE") == "1";
 var st = site.Structure!;
 Log($"input {tag}: {st.Nodes.Count} nodes, {st.Members.Count} members, {site.Stakes.Count} anchors, cane lengths " +
     $"{st.Members.Min(m => m.Length):F3}–{st.Members.Max(m => m.Length):F3} m, node Y {st.Nodes.Min(x => x.Y):F3}–{st.Nodes.Max(x => x.Y):F3} m");
@@ -65,6 +67,11 @@ var opts = new BambooBuildSearch.Options
 var r = BambooBuildSearch.Run(cell, opts, s => Log("search · " + s));
 Log($"RESULT {tag}: placed {r.Order.Count}/{BambooTrussLayout.Members.Count}, complete={r.Complete}, stop='{r.StopReason}', " +
     $"confirmed {r.Confirmed}, rejected {r.Rejected}, deferred {r.Deferred}, search {r.Seconds:F0} s");
+if (Motus.Geometry.RobotMeshCollisionChecker.BoxPrefilter)
+{
+    var (tested, cleared) = Motus.Geometry.RobotMeshCollisionChecker.BoxPrefilterStats();
+    Log($"box prefilter: {cleared}/{tested} pairs cleared on the search thread ({100.0 * cleared / Math.Max(1, tested):F1}%)");
+}
 Log("order: " + string.Join(" → ", r.Order.Select(c => $"{(c.RepositionTo is null ? "" : "[reposition " + c.RepositionTo + "] ")}{c.MemberId}({c.Mode}{(c.Relay is null ? "" : " " + c.Relay)})")));
 if (r.Order.Count == 0) return;
 File.WriteAllText(Path.Combine(outDir, tag + ".tasks.json"), JsonSerializer.Serialize(new { order = r.Order.Select(c => c.MemberId), tasks = r.Tasks }));
