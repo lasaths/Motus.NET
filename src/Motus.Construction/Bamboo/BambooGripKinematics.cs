@@ -373,6 +373,8 @@ public static class BambooGripKinematics
             {
                 for (var j = 0; j < 5; j++)
                 {
+                    // Symmetric: the products commute exactly and the sum runs in the same r order.
+                    if (j < i) { A[i * 5 + j] = A[j * 5 + i]; continue; }
                     var s = 0.0;
                     for (var r = 0; r < 6; r++) s += J[r * 5 + i] * J[r * 5 + j];
                     A[i * 5 + j] = s + (i == j ? lambda * lambda : 0);
