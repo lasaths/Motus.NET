@@ -203,7 +203,7 @@ Opt-in steps on the bamboo build search; the defaults keep the shipped Warren pl
 
 ### Next steps
 
-Status: a 1x2, 3-story bamboo tower (60 canes) places 6/60 with one fixed stock spot. Bracing a node first did not change the result. The stall is the relay park of the second-story canes (no landing found).
+Status (2026-11-13): a 1x2, 3-story bamboo tower (60 canes) places 7/60 with one fixed stock spot (outT6, `FOOTHOLDS=1`; 6/60 without it). Bracing a node first and `RelayPrecheck` did not change the result. The stall is the stock grasp beside `anchor-N001`, not the relay park.
 
 - [x] Run the 3x3 dome build on the architecture branch; the result must be 24/24 and identical to the build on PR #41
 - [x] Generality: a replay contract (a task runner over core tasks) so that the search = fresh replay check is not specific to bamboo
@@ -211,9 +211,26 @@ Status: a 1x2, 3-story bamboo tower (60 canes) places 6/60 with one fixed stock 
 - [x] Generality: move certified segments into Motus.Core; bamboo is one adapter (plan: [next-steps-plan.md](next-steps-plan.md), step 1)
 - [x] Tower: add an opt-in option that braces a node early, so the robot has a foothold fixed at both ends and can go into the second bay (plan: [next-steps-plan.md](next-steps-plan.md), step 2; inputs in tests/fixtures/tower1x2)
   - Result: tried as `Options.BraceFirst` (f7a8648); the tower still placed 6/60 by the same path as outT3. The option was removed again. The stall is the relay park of the second-story canes (no landing found).
-- [ ] Tower: a landing for the second-story relay park, or a stock spot nearer story 2
+- [ ] Tower: move or raise the one stock spot away from `anchor-N001` (owner's decision; plan: [next-steps-plan.md](next-steps-plan.md), step G11)
 - [ ] Tower: get canes to story 3 by relays or by a stock height for each stock spot
 - [ ] Relax planner assumptions one at a time (vertical anchors, straight-up approach, fixed stock spots); keep the 2 mm clearance
 - [ ] Dome and tower: test more seeds and platforms
 - [ ] Architecture: replace the planner statics with an explicit planning session, in small steps
 - [ ] Architecture: finish one tiered reach module (landing grid and walk offsets)
+
+## Milestone 16 — Toward a general planner (planned)
+
+Setups: 6-axis arm, arm + linear track, arm + 1- or 2-axis positioner (DKP), bamboo mobile robot; later 7-axis, gantry, two arms, mobile manipulator, remote TCP. Plan with files, gates and sizes: [next-steps-plan.md](next-steps-plan.md), Milestone 16. Defaults stay unchanged unless the owner agrees; the 2 mm check is not loosened.
+
+- [ ] G0 (P0): fix numerical IK (singularity estimate in `PoEJacobian`, step sign in the finite-difference branch); off-answer IK tests; UR analytic IK on the plain `ur10e.urdf` fixtures
+- [ ] G1 (P0): link-to-link collision in `TreeFkCollisionChecker` (arm against positioner, arm against arm)
+- [ ] G2: prismatic joints in metres in `UrdfRobotLoader` and in export
+- [ ] G3: track: Cartesian goals and LIN with the rail; fixture and tests
+- [ ] G4: positioner: relative IK with the positioner axes (opt-in); keep LIN motion type in GH `EmbedSideBranches`
+- [ ] G5: serial export writes the SE(2) base pose
+- [ ] G6: L2 general AssemblyPlanner: UR pick-place tower through the search kernel; ADR on internal adapter vs public kernel API (owner's decision)
+- [ ] G7: opt-in secondary objective for redundant IK
+- [ ] G8: opt-in remote TCP for LIN / CIRC
+- [ ] G9: gantry and two-arm fixtures
+- [ ] G10: robot-code writers (URScript, KRL, RAPID): in or out of scope (owner's decision)
+- [ ] G11: bamboo tower stock spot (owner's decision); G12: merge #41 → #42 → #43 (owner's OK); G13: Rhino matrix pass (deferred)
