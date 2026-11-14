@@ -77,4 +77,31 @@ public class UrdfFailClosedTests
         }
         finally { File.Delete(path); }
     }
+
+    [Fact]
+    public void FixedChain_MalformedOrigin_Throws_AbsentKeepsDefault()
+    {
+        static XElement Root(string xyz) => XElement.Parse($"""
+            <robot name="r">
+              <link name="base_link"/><link name="wrist"/><link name="tool0"/>
+              <joint name="j" type="revolute"><parent link="base_link"/><child link="wrist"/></joint>
+              <joint name="f" type="fixed"><parent link="wrist"/><child link="tool0"/><origin {xyz}/></joint>
+            </robot>
+            """);
+        Assert.Equal(0.1, UrdfFixedChain.TryTipAttachOffset(Root("xyz=\"0 0 0.1\""))!.Value.Z, 12);
+        Assert.Equal(0, UrdfFixedChain.TryTipAttachOffset(Root(""))!.Value.Z);
+        var e = Assert.Throws<InvalidDataException>(() => UrdfFixedChain.TryTipAttachOffset(Root("xyz=\"0 0 NaN\"")));
+        Assert.Contains("wrist → tool0 origin xyz", e.Message);
+    }
+
+    [Theory]
+    [InlineData("lower=\"-1\" upper=\"oops\"", "joint 'joint1' limit upper")]
+    [InlineData("lower=\"-1\" upper=\"1\"", null)]
+    public void UrdfWriterTryParse_MalformedNumber_ReturnsNamedError(string limit, string? what)
+    {
+        var ok = UrdfWriter.TryParse(Robot(limit: limit).ToString(), out var d, out var errors);
+        if (what is null) { Assert.True(ok, string.Join("; ", errors)); Assert.NotNull(d); return; }
+        Assert.False(ok);
+        Assert.Contains(errors, x => x.Contains(what));
+    }
 }
