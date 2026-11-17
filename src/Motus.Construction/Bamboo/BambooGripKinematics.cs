@@ -34,6 +34,13 @@ public static class BambooGripKinematics
     public static double[] Mul(double[] a, double[] b)
     {
         var c = new double[16];
+        MulInto(c, a, b);
+        return c;
+    }
+
+    // c must not alias a or b.
+    static void MulInto(Span<double> c, ReadOnlySpan<double> a, ReadOnlySpan<double> b)
+    {
         for (var r = 0; r < 4; r++)
             for (var k = 0; k < 4; k++)
             {
@@ -41,19 +48,24 @@ public static class BambooGripKinematics
                 for (var j = 0; j < 4; j++) s += a[r * 4 + j] * b[j * 4 + k];
                 c[r * 4 + k] = s;
             }
-        return c;
     }
 
     /// <summary>Rigid inverse.</summary>
     public static double[] Inv(double[] m)
     {
         var r = new double[16];
+        InvInto(r, m);
+        return r;
+    }
+
+    // r must be zeroed and must not alias m.
+    static void InvInto(Span<double> r, ReadOnlySpan<double> m)
+    {
         for (var i = 0; i < 3; i++)
             for (var j = 0; j < 3; j++) r[i * 4 + j] = m[j * 4 + i];
         for (var i = 0; i < 3; i++)
             r[i * 4 + 3] = -(r[i * 4] * m[3] + r[i * 4 + 1] * m[7] + r[i * 4 + 2] * m[11]);
         r[15] = 1;
-        return r;
     }
 
     public static double[] Trans(double x, double y, double z)
@@ -86,6 +98,15 @@ public static class BambooGripKinematics
     /// <summary>Mount (L-grip) → tool0 (R-grip) for joint angles in degrees.</summary>
     public static double[] Tlr(IReadOnlyList<double> qDeg)
     {
+        Span<double> q = stackalloc double[5];
+        for (var i = 0; i < 5; i++) q[i] = qDeg[i];
+        var m = new double[16];
+        TlrInto(m, q);
+        return m;
+    }
+
+    static void TlrInto(Span<double> m, ReadOnlySpan<double> qDeg)
+    {
         // Columns of R (c0, c1, c2) and origin p; R·Rx / R·Ry update two columns in place.
         double c0x = 1, c0y = 0, c0z = 0, c1x = 0, c1y = 1, c1z = 0, c2x = 0, c2y = 0, c2z = 1;
         double px = 0, py = 0, pz = 0;
@@ -107,7 +128,25 @@ public static class BambooGripKinematics
             }
         }
         px -= Seg[5] * c1x; py -= Seg[5] * c1y; pz -= Seg[5] * c1z;
-        return new[] { c0x, c1x, c2x, px, c0y, c1y, c2y, py, c0z, c1z, c2z, pz, 0, 0, 0, 1 };
+        m[0] = c0x; m[1] = c1x; m[2] = c2x; m[3] = px; m[4] = c0y; m[5] = c1y; m[6] = c2y; m[7] = py;
+        m[8] = c0z; m[9] = c1z; m[10] = c2z; m[11] = pz; m[12] = 0; m[13] = 0; m[14] = 0; m[15] = 1;
+    }
+
+    /// <summary>
+    /// Free-gripper frame into <paramref name="g"/> with the same arithmetic as <see cref="Free"/> (+ back-off as in
+    /// <see cref="GripResidual"/>), without heap allocation.
+    /// </summary>
+    static void FreeInto(Span<double> g, Gripper bg, double[] bw, ReadOnlySpan<double> q, double backoff)
+    {
+        Span<double> t = stackalloc double[16];
+        Span<double> u = stackalloc double[16];
+        TlrInto(t, q);
+        if (bg == Gripper.L) MulInto(g, bw, t);
+        else { u.Clear(); InvInto(u, t); MulInto(g, bw, u); }
+        if (backoff == 0) return;
+        u.Clear(); u[0] = 1; u[5] = 1; u[10] = 1; u[15] = 1; u[3] = 0; u[7] = -backoff; u[11] = 0; // Trans(0, −backoff, 0)
+        g.CopyTo(t);
+        MulInto(g, t, u);
     }
 
     /// <summary>World poses of both grippers given which one is the clamped base and its world frame.</summary>
@@ -209,69 +248,78 @@ public static class BambooGripKinematics
         return Residual(g, target);
     }
 
-    static double[] ErrorVec(Gripper bg, double[] bw, GripTarget t, double[] q, double backoff, int axisSign)
+    // Error of the free gripper frame g (already backed off) against t, as 6 values (position, w · slot-axis cross).
+    static void ErrorOf(Span<double> e, ReadOnlySpan<double> g, GripTarget t, int axisSign)
     {
-        var g = Free(bg, bw, q);
-        if (backoff != 0) g = Mul(g, Trans(0, -backoff, 0));
         var zx = g[2]; var zy = g[6]; var zz = g[10];
         var dot = zx * t.Ax + zy * t.Ay + zz * t.Az;
         var sgn = axisSign != 0 ? axisSign : dot >= 0 ? 1.0 : -1.0;
         var ux = t.Ax * sgn; var uy = t.Ay * sgn; var uz = t.Az * sgn;
         const double w = 0.1; // metres per radian
-        return new[]
-        {
-            t.X - g[3], t.Y - g[7], t.Z - g[11],
-            w * (zy * uz - zz * uy), w * (zz * ux - zx * uz), w * (zx * uy - zy * ux)
-        };
+        e[0] = t.X - g[3]; e[1] = t.Y - g[7]; e[2] = t.Z - g[11];
+        e[3] = w * (zy * uz - zz * uy); e[4] = w * (zz * ux - zx * uz); e[5] = w * (zx * uy - zy * ux);
     }
 
+    // Same arithmetic as Residual(g, t).
+    static (double PosM, double AxisDeg) ResidualOf(ReadOnlySpan<double> grip, GripTarget t)
+    {
+        var dx = grip[3] - t.X; var dy = grip[7] - t.Y; var dz = grip[11] - t.Z;
+        var dot = Math.Abs(grip[2] * t.Ax + grip[6] * t.Ay + grip[10] * t.Az);
+        return (Math.Sqrt(dx * dx + dy * dy + dz * dz), Math.Acos(Math.Min(1, dot)) / Deg);
+    }
+
+    // Allocation-free: all scratch is on the stack. The free-gripper frame of the current q is kept (gq), so each
+    // iteration does not compute it a second time; every value is computed in the same order as before.
     static double[]? Refine(Gripper bg, double[] bw, GripTarget t, double[] seed, double backoff, int axisSign)
     {
         var q = seed.ToArray();
         for (var k = 0; k < 5; k++) q[k] = Math.Clamp(q[k], BambooIcdMotion.LimitsDeg[k].Min, BambooIcdMotion.LimitsDeg[k].Max);
+        Span<double> gq = stackalloc double[16], gp = stackalloc double[16];
+        Span<double> e = stackalloc double[6], ep = stackalloc double[6], en2 = stackalloc double[6];
+        Span<double> qp = stackalloc double[5], qn = stackalloc double[5], b = stackalloc double[5], dq = stackalloc double[5];
+        Span<double> J = stackalloc double[30], A = stackalloc double[25];
         var lambda = 0.01;
-        var e = ErrorVec(bg, bw, t, q, backoff, axisSign);
+        FreeInto(gq, bg, bw, q, backoff);
+        ErrorOf(e, gq, t, axisSign);
         var en = Norm(e);
         for (var it = 0; it < 120; it++)
         {
-            var (pe, ae) = GripResidual(bg, bw, t, q, backoff);
+            var (pe, ae) = ResidualOf(gq, t);
             if (pe < 1e-7 && ae < 1e-5) break;
-            // Numerical Jacobian (6×5) of the error w.r.t. q (radians).
-            var J = new double[6, 5];
+            // Numerical Jacobian (6×5, row-major J[r·5 + k]) of the error w.r.t. q (radians).
             const double h = 1e-6;
             for (var k = 0; k < 5; k++)
             {
-                var qp = q.ToArray(); qp[k] += h / Deg;
-                var ep = ErrorVec(bg, bw, t, qp, backoff, axisSign);
-                for (var r = 0; r < 6; r++) J[r, k] = -(ep[r] - e[r]) / h;
+                q.CopyTo(qp); qp[k] += h / Deg;
+                FreeInto(gp, bg, bw, qp, backoff);
+                ErrorOf(ep, gp, t, axisSign);
+                for (var r = 0; r < 6; r++) J[r * 5 + k] = -(ep[r] - e[r]) / h;
             }
             // (JᵀJ + λ²I) dq = Jᵀ e
-            var A = new double[5, 5]; var b = new double[5];
             for (var i = 0; i < 5; i++)
             {
                 for (var j = 0; j < 5; j++)
                 {
                     var s = 0.0;
-                    for (var r = 0; r < 6; r++) s += J[r, i] * J[r, j];
-                    A[i, j] = s + (i == j ? lambda * lambda : 0);
+                    for (var r = 0; r < 6; r++) s += J[r * 5 + i] * J[r * 5 + j];
+                    A[i * 5 + j] = s + (i == j ? lambda * lambda : 0);
                 }
                 var sb = 0.0;
-                for (var r = 0; r < 6; r++) sb += J[r, i] * e[r];
+                for (var r = 0; r < 6; r++) sb += J[r * 5 + i] * e[r];
                 b[i] = sb;
             }
-            var dq = Solve5(A, b);
-            if (dq is null) return null;
+            if (!Solve5(A, b, dq)) return null;
             var maxStep = 0.0;
             for (var k = 0; k < 5; k++) maxStep = Math.Max(maxStep, Math.Abs(dq[k]));
             var scale = maxStep > 0.35 ? 0.35 / maxStep : 1.0;
-            var qn = q.ToArray();
             for (var k = 0; k < 5; k++)
                 qn[k] = Math.Clamp(q[k] + dq[k] * scale / Deg, BambooIcdMotion.LimitsDeg[k].Min, BambooIcdMotion.LimitsDeg[k].Max);
-            var en2 = ErrorVec(bg, bw, t, qn, backoff, axisSign);
+            FreeInto(gp, bg, bw, qn, backoff);
+            ErrorOf(en2, gp, t, axisSign);
             var nn = Norm(en2);
             if (nn < en)
             {
-                q = qn; e = en2; en = nn;
+                qn.CopyTo(q); en2.CopyTo(e); gp.CopyTo(gq); en = nn;
                 lambda = Math.Max(1e-5, lambda * 0.5);
             }
             else
@@ -280,7 +328,7 @@ public static class BambooGripKinematics
                 if (lambda > 1e3) break;
             }
         }
-        var (p, a) = GripResidual(bg, bw, t, q, backoff);
+        var (p, a) = ResidualOf(gq, t);
         if (p > GripPosTolM || a > GripAxisTolDeg) return null;
         if (axisSign != 0)
         {
@@ -290,29 +338,29 @@ public static class BambooGripKinematics
         return WithinLimits(q) ? q : null;
     }
 
-    static double Norm(double[] v) { var s = 0.0; foreach (var x in v) s += x * x; return Math.Sqrt(s); }
+    static double Norm(ReadOnlySpan<double> v) { var s = 0.0; foreach (var x in v) s += x * x; return Math.Sqrt(s); }
 
-    static double[]? Solve5(double[,] A, double[] b)
+    // A is 5×5 row-major; the result goes to x. False when a pivot is (near) zero.
+    static bool Solve5(ReadOnlySpan<double> A, ReadOnlySpan<double> b, Span<double> x)
     {
-        const int n = 5;
-        var M = new double[n, n + 1];
-        for (var i = 0; i < n; i++) { for (var j = 0; j < n; j++) M[i, j] = A[i, j]; M[i, n] = b[i]; }
+        const int n = 5, w = n + 1;
+        Span<double> M = stackalloc double[n * w];
+        for (var i = 0; i < n; i++) { for (var j = 0; j < n; j++) M[i * w + j] = A[i * n + j]; M[i * w + n] = b[i]; }
         for (var c = 0; c < n; c++)
         {
             var piv = c;
-            for (var r = c + 1; r < n; r++) if (Math.Abs(M[r, c]) > Math.Abs(M[piv, c])) piv = r;
-            if (Math.Abs(M[piv, c]) < 1e-14) return null;
-            if (piv != c) for (var j = 0; j <= n; j++) (M[c, j], M[piv, j]) = (M[piv, j], M[c, j]);
+            for (var r = c + 1; r < n; r++) if (Math.Abs(M[r * w + c]) > Math.Abs(M[piv * w + c])) piv = r;
+            if (Math.Abs(M[piv * w + c]) < 1e-14) return false;
+            if (piv != c) for (var j = 0; j <= n; j++) (M[c * w + j], M[piv * w + j]) = (M[piv * w + j], M[c * w + j]);
             for (var r = 0; r < n; r++)
             {
                 if (r == c) continue;
-                var f = M[r, c] / M[c, c];
-                for (var j = c; j <= n; j++) M[r, j] -= f * M[c, j];
+                var f = M[r * w + c] / M[c * w + c];
+                for (var j = c; j <= n; j++) M[r * w + j] -= f * M[c * w + j];
             }
         }
-        var x = new double[n];
-        for (var i = 0; i < n; i++) x[i] = M[i, n] / M[i, i];
-        return x;
+        for (var i = 0; i < n; i++) x[i] = M[i * w + n] / M[i * w + i];
+        return true;
     }
 
     /// <summary>

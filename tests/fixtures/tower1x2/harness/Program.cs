@@ -39,6 +39,8 @@ var cell = BambooIcdCell.Load(File.ReadAllText(urdfPath), BambooTrussLayout.Stru
 BambooTrussMotion.UseCell(cell);
 Log($"constraints: {JsonSerializer.Serialize(MotionConstraints.Current)}");
 
+// Footholds rule first: the layout fingerprint includes it, so the build search's own scene check reuses this one's reach cache.
+if (Environment.GetEnvironmentVariable("FOOTHOLDS") == "1") MotionConstraints.Current = MotionConstraints.Current with { FixedMemberRule = false };
 var check = BambooSceneCheck.Run(null, BambooTrussLayout.Members);
 Log(check.Summary);
 foreach (var d in check.Details) Log("  scene check · " + d);
@@ -60,7 +62,6 @@ var opts = new BambooBuildSearch.Options
     MaxRejected = int.TryParse(Environment.GetEnvironmentVariable("MAXREJ"), out var mr) ? mr : 40,
     Tamp = mode == "tamp" ? new BambooBuildSearch.TampSettings { OutcomeLogPath = Path.Combine(outDir, tag + ".outcomes.jsonl") } : null
 };
-if (opts.PlacedFootholds) MotionConstraints.Current = MotionConstraints.Current with { FixedMemberRule = false }; // replay uses the same rule
 var r = BambooBuildSearch.Run(cell, opts, s => Log("search · " + s));
 Log($"RESULT {tag}: placed {r.Order.Count}/{BambooTrussLayout.Members.Count}, complete={r.Complete}, stop='{r.StopReason}', " +
     $"confirmed {r.Confirmed}, rejected {r.Rejected}, deferred {r.Deferred}, search {r.Seconds:F0} s");

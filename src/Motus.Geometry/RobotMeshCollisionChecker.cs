@@ -34,8 +34,7 @@ public sealed class RobotMeshCollisionChecker : ICollisionChecker, ICollisionCon
     private readonly List<double[]> _linkMatPool = new();
     private readonly List<double[]> _worldMatPool = new();
     private readonly double[] _linkWorldScratch = new double[16];
-    private readonly double[] _worldScratch = new double[16];
-    private readonly double[] _poseScratch = new double[16];
+    private readonly List<double[]> _envWorldPool = new();
     private readonly int _selfMinLinkGap;
     private readonly IReadOnlyList<string> _linkNames;
 
@@ -48,6 +47,9 @@ public sealed class RobotMeshCollisionChecker : ICollisionChecker, ICollisionCon
         public int LinkIndex { get; init; }
         public BvhNode? LocalBvh { get; init; }
         public double EnvelopeRadius { get; init; }
+        private double[]? _localM;
+        /// <summary>Geometry pose as a 4×4 (the object is immutable, so this is computed once).</summary>
+        public double[] LocalM => _localM ??= Transforms.FromFrame(Geometry.Pose);
     }
 
     public RobotMeshCollisionChecker(RobotModel robot, SerialJointChain? chain = null, IReadOnlyList<AttachedBody>? attached = null)
@@ -170,8 +172,9 @@ public sealed class RobotMeshCollisionChecker : ICollisionChecker, ICollisionCon
         {
             var en = _links[li];
             if (en.LinkIndex < 0 || en.LinkIndex >= linkMats.Length) { _pc[li * 4 + 3] = -1; continue; }
-            ComposeWorldInto(_worldScratch, _baseM, linkMats[en.LinkIndex], en.Geometry.Pose);
-            EnvelopeCenter(en, _worldScratch, out _pc[li * 4], out _pc[li * 4 + 1], out _pc[li * 4 + 2]);
+            var w = RentMat(_envWorldPool, li);
+            ComposeWorldInto(w, _baseM, linkMats[en.LinkIndex], en);
+            EnvelopeCenter(en, w, out _pc[li * 4], out _pc[li * 4 + 1], out _pc[li * 4 + 2]);
             _pc[li * 4 + 3] = en.EnvelopeRadius;
         }
         foreach (var obj in scene.Objects)
@@ -200,10 +203,10 @@ public sealed class RobotMeshCollisionChecker : ICollisionChecker, ICollisionCon
                     if (scene.IsPairAllowed(entry.Geometry.Name, obj.Name))
                         continue;
                 }
-                ComposeWorldInto(_worldScratch, _baseM, linkMats[entry.LinkIndex], entry.Geometry.Pose);
-                if (!CollisionGeometry.EnvelopeMayHit(entry.Geometry, _worldScratch, entry.EnvelopeRadius, obj, _meshBvhCache, _scratch))
+                var worldM = _envWorldPool[li]; // this pose's link world matrix, from the envelope loop above
+                if (!CollisionGeometry.EnvelopeMayHit(entry.Geometry, worldM, entry.EnvelopeRadius, obj, _meshBvhCache, _scratch))
                     continue;
-                if (CollisionGeometry.IntersectsAtPose(entry.Geometry, _worldScratch, obj, _meshBvhCache, _scratch))
+                if (CollisionGeometry.IntersectsAtPose(entry.Geometry, worldM, obj, _meshBvhCache, _scratch))
                 {
                     if (sink is null) return false;
                     clear = false;
@@ -449,7 +452,7 @@ public sealed class RobotMeshCollisionChecker : ICollisionChecker, ICollisionCon
             var linkMat = RentMat(_linkMatPool, posedIdx);
             Transforms.MultiplyInto(linkMat, _baseM, linkMats[entry.LinkIndex]);
             var worldM = RentMat(_worldMatPool, posedIdx);
-            ComposeWorldInto(worldM, linkMat, entry.Geometry.Pose);
+            Transforms.MultiplyInto(worldM, linkMat, entry.LocalM);
             _posedScratch.Add((entry.LinkIndex, entry, linkMat, worldM));
             posedIdx++;
         }
@@ -461,7 +464,7 @@ public sealed class RobotMeshCollisionChecker : ICollisionChecker, ICollisionCon
                 _robotCollision.ToolGeometryInFlangeFrame,
                 _robotCollision.ToolGeometryAttachOffset);
             var worldM = RentMat(_worldMatPool, posedIdx);
-            ComposeWorldInto(worldM, toolM, _toolEntry.Geometry.Pose);
+            Transforms.MultiplyInto(worldM, toolM, _toolEntry.LocalM);
             var linkMat = RentMat(_linkMatPool, posedIdx);
             Array.Copy(toolM, linkMat, 16);
             _posedScratch.Add((linkMats.Length - 1, _toolEntry, linkMat, worldM));
@@ -519,16 +522,10 @@ public sealed class RobotMeshCollisionChecker : ICollisionChecker, ICollisionCon
         x = worldM[3]; y = worldM[7]; z = worldM[11];
     }
 
-    private void ComposeWorldInto(double[] dest, double[] linkWorldMatrix, Frame localPose)
-    {
-        Transforms.FromFrameInto(_poseScratch, localPose);
-        Transforms.MultiplyInto(dest, linkWorldMatrix, _poseScratch);
-    }
-
-    private void ComposeWorldInto(double[] dest, double[] baseM, double[] linkMat, Frame localPose)
+    private void ComposeWorldInto(double[] dest, double[] baseM, double[] linkMat, LinkCollisionEntry entry)
     {
         Transforms.MultiplyInto(_linkWorldScratch, baseM, linkMat);
-        ComposeWorldInto(dest, _linkWorldScratch, localPose);
+        Transforms.MultiplyInto(dest, _linkWorldScratch, entry.LocalM);
     }
 
     private static double[] RentMat(List<double[]> pool, int index)
