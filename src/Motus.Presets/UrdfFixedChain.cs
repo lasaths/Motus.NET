@@ -88,8 +88,8 @@ public static class UrdfFixedChain
             foreach (var joint in children)
             {
                 if (!visited.Add(joint.Child)) continue;
-                var xyz = ParseTriple(joint.Origin?.Attribute("xyz")?.Value);
-                var rpy = ParseTriple(joint.Origin?.Attribute("rpy")?.Value);
+                var xyz = UrdfNumbers.Triple(joint.Origin?.Attribute("xyz")?.Value, 0, 0, 0, $"fixed joint {joint.Parent} → {joint.Child} origin xyz");
+                var rpy = UrdfNumbers.Triple(joint.Origin?.Attribute("rpy")?.Value, 0, 0, 0, $"fixed joint {joint.Parent} → {joint.Child} origin rpy");
                 var step = FrameFromRpy(xyz.x, xyz.y, xyz.z, rpy.x, rpy.y, rpy.z);
                 queue.Enqueue((joint.Child, ComposeFrames(pose, step)));
             }
@@ -103,15 +103,4 @@ public static class UrdfFixedChain
 
     private static Frame FrameFromRpy(double x, double y, double z, double roll, double pitch, double yaw) =>
         Transforms.ToFrame(Transforms.FromRpy(x, y, z, roll, pitch, yaw));
-
-    private static (double x, double y, double z) ParseTriple(string? s, double dx = 0, double dy = 0, double dz = 0)
-    {
-        if (string.IsNullOrWhiteSpace(s)) return (dx, dy, dz);
-        var p = s.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
-        if (p.Length < 3) return (dx, dy, dz);
-        return (ParseDouble(p[0], dx), ParseDouble(p[1], dy), ParseDouble(p[2], dz));
-    }
-
-    private static double ParseDouble(string? s, double fallback) =>
-        double.TryParse(s, NumberStyles.Float, CultureInfo.InvariantCulture, out var v) ? v : fallback;
 }
