@@ -26,8 +26,17 @@ public class BambooCheckerEquivalenceTests
         return cell;
     }
 
-    [Fact]
-    public void ShortCase_PoseVerdicts_IdenticalToReferenceChecker()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void ShortCase_PoseVerdicts_IdenticalToReferenceChecker(bool boxPrefilter)
+    {
+        RobotMeshCollisionChecker.BoxPrefilter = boxPrefilter;
+        try { ShortCase(boxPrefilter); }
+        finally { RobotMeshCollisionChecker.BoxPrefilter = false; }
+    }
+
+    void ShortCase(bool boxPrefilter)
     {
         var cell = NewCell();
         var p = new BambooTrussPlanner(cell) { VerdictLog = new() };
@@ -44,6 +53,11 @@ public class BambooCheckerEquivalenceTests
             if (ok) built++; else p.RollbackDeep(cp);
         }
         Assert.Equal(2, built);
+        if (boxPrefilter)
+        {
+            var (tested, cleared) = RobotMeshCollisionChecker.BoxPrefilterStats();
+            lines.Add($"box prefilter: {cleared}/{tested} pairs cleared");
+        }
         lines.Add($"TOTAL {sw.Elapsed.TotalSeconds:F1}s checks={p.Checks} poseWatch={p.PoseWatch.Elapsed.TotalSeconds:F1}s poses/s={p.Checks / p.PoseWatch.Elapsed.TotalSeconds:F0}");
         var log = p.VerdictLog!;
         Assert.True(log.Count > 1000);
@@ -70,7 +84,7 @@ public class BambooCheckerEquivalenceTests
         if (System.Environment.GetEnvironmentVariable("MOTUS_PERF_OUT") is { Length: > 0 } dir)
         {
             Directory.CreateDirectory(dir);
-            var tag = System.Environment.GetEnvironmentVariable("MOTUS_PERF_TAG") ?? "run";
+            var tag = (System.Environment.GetEnvironmentVariable("MOTUS_PERF_TAG") ?? "run") + (boxPrefilter ? "-boxpre" : "");
             File.WriteAllLines(Path.Combine(dir, $"short-{tag}.txt"), lines);
             File.WriteAllLines(Path.Combine(dir, $"verdicts-{tag}.txt"), log.Select(v =>
                 $"{v.Hold}|{v.LOn}|{v.ROn}|{v.GR:R}|{v.GL:R}|{string.Join(",", v.Q.Select(x => x.ToString("R")))}|{v.Ok}"));

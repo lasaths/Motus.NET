@@ -10,10 +10,51 @@ internal sealed class CollisionQueryScratch
     public readonly double[] WorldAabbMax = new double[3];
     public readonly double[] WorldAabbMinB = new double[3];
     public readonly double[] WorldAabbMaxB = new double[3];
+    public readonly double[] Obb = new double[19];
 }
 
 internal static class CollisionGeometry
 {
+    private const double ObbPad = 1e-6;
+
+    /// <summary>
+    /// Prefilter: true only when the oriented bounding box of <paramref name="local"/> (a box, or a mesh's local AABB)
+    /// at <paramref name="worldM"/> and the one of the mesh or box <paramref name="obstacle"/> are separated (both padded by
+    /// 1 µm). Every exact test only reports contact inside these boxes, so true means the exact test says clear.
+    /// False means "maybe": the exact test decides.
+    /// </summary>
+    public static bool ObbApart(CollisionObject local, double[] worldM, CollisionObject obstacle, CollisionQueryScratch scratch)
+    {
+        var b = obstacle.WorldObbSlot;
+        if (b is null)
+        {
+            if (obstacle.Shape == CollisionShape.Box)
+                b = ObbInto(new double[19], Transforms.FromFrame(obstacle.Pose), new[] { -obstacle.ExtentX, -obstacle.ExtentY, -obstacle.ExtentZ }, new[] { obstacle.ExtentX, obstacle.ExtentY, obstacle.ExtentZ });
+            else if (obstacle.Shape == CollisionShape.Mesh && obstacle.MeshAabbMin is { } bMin && obstacle.MeshAabbMax is { } bMax)
+                b = ObbInto(new double[19], Transforms.FromFrame(obstacle.Pose), bMin, bMax);
+            else b = Array.Empty<double>();
+            obstacle.WorldObbSlot = b;
+        }
+        if (b.Length == 0) return false;
+        if (local.Shape == CollisionShape.Box)
+            return !ExactNarrowPhase.ObbObb(worldM, local.ExtentX + ObbPad, local.ExtentY + ObbPad, local.ExtentZ + ObbPad, b, b[16], b[17], b[18]);
+        if (local.Shape != CollisionShape.Mesh || local.MeshAabbMin is not { } aMin || local.MeshAabbMax is not { } aMax) return false;
+        var a = ObbInto(scratch.Obb, worldM, aMin, aMax);
+        return !ExactNarrowPhase.ObbObb(a, a[16], a[17], a[18], b, b[16], b[17], b[18]);
+    }
+
+    /// <summary>World OBB of a local AABB [mn, mx] under m: axes of m, centre m·c, half extents + pad (r[16..18]).</summary>
+    private static double[] ObbInto(double[] r, double[] m, double[] mn, double[] mx)
+    {
+        Array.Copy(m, r, 16);
+        double cx = (mn[0] + mx[0]) / 2, cy = (mn[1] + mx[1]) / 2, cz = (mn[2] + mx[2]) / 2;
+        r[3] = m[0] * cx + m[1] * cy + m[2] * cz + m[3];
+        r[7] = m[4] * cx + m[5] * cy + m[6] * cz + m[7];
+        r[11] = m[8] * cx + m[9] * cy + m[10] * cz + m[11];
+        for (var k = 0; k < 3; k++) r[16 + k] = (mx[k] - mn[k]) / 2 + ObbPad;
+        return r;
+    }
+
     public static CollisionObject Transform(CollisionObject local, double[] linkWorldMatrix)
     {
         var worldM = ComposeWorldMatrix(linkWorldMatrix, local.Pose);
