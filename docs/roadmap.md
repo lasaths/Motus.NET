@@ -222,7 +222,7 @@ Status (2026-11-13): a 1x2, 3-story bamboo tower (60 canes) places 7/60 with one
 
 Setups: 6-axis arm, arm + linear track, arm + 1- or 2-axis positioner (DKP), bamboo mobile robot; later 7-axis, gantry, two arms, mobile manipulator, remote TCP. Plan with files, gates and sizes: [next-steps-plan.md](next-steps-plan.md), Milestone 16. Defaults stay unchanged unless the owner agrees; the 2 mm check is not loosened.
 
-- [ ] G0 (P0): fix numerical IK (singularity estimate in `PoEJacobian`, step sign in the finite-difference branch); off-answer IK tests; UR analytic IK on the plain `ur10e.urdf` fixtures
+- [x] G0 (P0): fix numerical IK (PR #44) (singularity estimate in `PoEJacobian`, step sign in the finite-difference branch); off-answer IK tests; UR analytic IK on the plain `ur10e.urdf` fixtures
 - [ ] G1 (P0): link-to-link collision in `TreeFkCollisionChecker` (arm against positioner, arm against arm)
 - [ ] G2: prismatic joints in metres in `UrdfRobotLoader` and in export
 - [ ] G3: track: Cartesian goals and LIN with the rail; fixture and tests
@@ -233,4 +233,6 @@ Setups: 6-axis arm, arm + linear track, arm + 1- or 2-axis positioner (DKP), bam
 - [ ] G8: opt-in remote TCP for LIN / CIRC
 - [ ] G9: gantry and two-arm fixtures
 - [ ] G10: robot-code writers (URScript, KRL, RAPID): in or out of scope (owner's decision)
-- [ ] G11: bamboo tower stock spot (owner's decision); G12: merge #41 → #42 → #43 (owner's OK); G13: Rhino matrix pass (deferred)
+- [ ] G11: bamboo tower stock spot (owner's decision)
+- [x] G12: merge #41 → #42 → #43 (done 2026-11-17, with #44 to #51)
+- [ ] G13: Rhino matrix pass (deferred)

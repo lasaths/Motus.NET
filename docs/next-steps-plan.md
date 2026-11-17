@@ -1,7 +1,7 @@
 # Next steps plan (Milestone 15, after PR #42)
 
 This file is a hand-off plan. An agent or a person can continue from here without other context.
-Status on 2026-11-11 (Milestone 16 added 2026-11-13): PR #42 (branch `cursor/arch-deepening`) is stacked on PR #41 (`cursor/gridshell-3d-rigidity`). Neither PR is merged. Do the steps in order. Make one commit for each step.
+Status on 2026-11-17: PRs #41 to #51 are merged into `master` (no release, no tag, no package). G0 (PR #44) and G12 are done. Do the next steps in order. Make one commit for each step.
 
 ## Rules for every step
 
@@ -274,6 +274,8 @@ Proof: a tower run (heavy, one at a time), fresh replay, 2 mm scan. Defaults unc
 ### G12 – Merge #41, #42, #43
 
 Owner's OK. In this order: #41, then #42, then #43 (Tandem's ranker logging, based on #42). No tags, no package publish without the owner's OK.
+
+Done on 2026-11-17: #48, #49, #51, #41, #42, #44, #45, #46, #47, #50 and #43 are merged into `master` with merge commits. No tag. No package.
 
 ### G13 – Rhino matrix pass (deferred)
 
