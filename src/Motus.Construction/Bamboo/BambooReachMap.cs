@@ -153,7 +153,7 @@ public sealed class BambooReachMap
 
     /// <summary>
     /// Cache key: the layout fingerprint (covers the design environment and every scene setting), IK seeds, collision
-    /// flag, the clamp frame and the target line (pose, offsets, touch), all at the fingerprint's 6-decimal precision.
+    /// flag, the clamp frame and the target line (pose, offsets; touch only for collision-checked queries), all at the fingerprint's 6-decimal precision.
     /// </summary>
     string? Key(ClampSite site, TargetLine line)
     {
@@ -162,7 +162,8 @@ public sealed class BambooReachMap
         sb.Append(IkSeeds).Append('|').Append(Collision ? 'c' : 'k').Append('|').Append(site.On).Append('|');
         foreach (var v in site.BaseWorld) sb.Append(BambooTrussMotion.FingerprintNumber(v)).Append(',');
         var p = line.Pose;
-        sb.Append('|').Append(line.Touch).Append('|');
+        // Touch only matters for collision-checked queries: kinematic queries of lines with the same pose share one answer.
+        sb.Append('|').Append(Collision ? line.Touch : null).Append('|');
         foreach (var v in new[] { p.X, p.Y, p.Z, p.PitchDeg, p.YawDeg }) sb.Append(BambooTrussMotion.FingerprintNumber(v)).Append(',');
         sb.Append('|');
         foreach (var o in line.Offsets) sb.Append(BambooTrussMotion.FingerprintNumber(o)).Append(',');
