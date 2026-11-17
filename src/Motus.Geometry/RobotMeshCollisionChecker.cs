@@ -223,15 +223,16 @@ public sealed class RobotMeshCollisionChecker : ICollisionChecker, ICollisionCon
     /// </summary>
     [ThreadStatic] public static bool ReferencePath;
     private double[] _pc = Array.Empty<double>();
-    private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<CollisionObject, double[]?[]> Aabbs = new();
+    private static readonly double[] Unbounded = Array.Empty<double>();
 
     /// <summary>
     /// World AABB of an obstacle (min xyz, max xyz), padded outward by <see cref="AabbPad"/>; null = unbounded (plane)
-    /// or unknown, i.e. no prefilter. Objects are immutable, so the box is cached per instance.
+    /// or unknown, i.e. no prefilter. Objects are immutable, so the box is stored on the instance
+    /// (<see cref="CollisionObject.WorldAabbSlot"/>): no shared table, no lock, valid for every new object at once.
     /// </summary>
     internal static double[]? WorldAabb(CollisionObject o)
     {
-        if (Aabbs.TryGetValue(o, out var c)) return c[0];
+        if (o.WorldAabbSlot is { } c) return c.Length == 0 ? null : c;
         double[]? r = null;
         var m = Transforms.FromFrame(o.Pose);
         void Corners(double ax, double ay, double az, double bx, double by, double bz, double pad)
@@ -254,7 +255,7 @@ public sealed class RobotMeshCollisionChecker : ICollisionChecker, ICollisionCon
             case CollisionShape.Sphere: Corners(0, 0, 0, 0, 0, 0, o.ExtentX); break;
             case CollisionShape.Capsule: Corners(0, 0, -o.ExtentY, 0, 0, o.ExtentY, o.ExtentX); break;
         }
-        Aabbs.AddOrUpdate(o, new[] { r });
+        o.WorldAabbSlot = r ?? Unbounded;
         return r;
     }
 
@@ -391,14 +392,16 @@ public sealed class RobotMeshCollisionChecker : ICollisionChecker, ICollisionCon
         if (_sceneFingerprintValid && fp == _sceneFingerprint)
             return;
 
-        _meshBvhCache.Clear();
+        // Entries are keyed by local geometry content (pose-free), so entries of earlier scenes stay valid: keep them and
+        // only fetch new meshes (each fetch takes the process-wide cache lock). Bounded so it cannot grow without limit.
+        if (_meshBvhCache.Count > 4096) _meshBvhCache.Clear();
         for (var i = 0; i < scene.Objects.Count; i++)
         {
             var meshObj = scene.Objects[i];
             if (meshObj.Shape != CollisionShape.Mesh) continue;
             if (meshObj.MeshVertices is null || meshObj.MeshIndices is null) continue;
             var key = CollisionMeshCache.GeometryFingerprint(meshObj);
-            _meshBvhCache[key] = CollisionMeshCache.GetOrBuild(meshObj);
+            if (!_meshBvhCache.ContainsKey(key)) _meshBvhCache[key] = CollisionMeshCache.GetOrBuild(meshObj);
         }
         _sceneFingerprint = fp;
         _sceneFingerprintValid = true;

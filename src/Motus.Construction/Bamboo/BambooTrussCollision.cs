@@ -43,7 +43,14 @@ public static class BambooTrussCollision
         var hubIds = placedList.Select(p => p.Name["placed-".Length..]).ToList();
         if (activeId is not null && hold == 2 && released is not null) hubIds.Add(activeId);
         env.AddRange(BambooTrussLayout.HubObjects(hubIds));
-        if (activeId is null)
+        if (BambooTrussLayout.UsesFeedSpots)
+        {
+            // Stock spots: every spot's pegs; a cane lies only on the active cane's own spot (laid there when it is next).
+            var activeSpot = activeId is null ? -1 : BambooTrussLayout.Def(activeId)?.FeedIndex ?? -1;
+            foreach (var k in BambooTrussLayout.FeedSpotsInUse) env.AddRange(BambooTrussLayout.FeedPegObjects(k, k == activeSpot));
+            if (activeId is null) return env;
+        }
+        else if (activeId is null)
         {
             env.Add(cell.StrutAt(rest ?? BambooIcdCell.PlacementWorld(BambooTrussLayout.Store), BambooIcdCell.Strut));
             return env;

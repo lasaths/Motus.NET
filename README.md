@@ -24,6 +24,7 @@ Licensed under [MIT](LICENSE).
 - [Assembly planning](#assembly-planning)
 - [Experimental surface](#experimental-surface)
 - [Planners](#planners)
+- [Methods](#methods)
 - [Algorithms and references](#algorithms-and-references)
 - [Context: attach, groups, SRDF](#context-attach-groups-srdf)
 - [Units and export](#units--export)
@@ -139,6 +140,60 @@ Pick/place programs support explicit gripper contact, obstacle-aware transfers, 
 
 Robot-independent task data (`TaskInstance`, `TaskPath`, `CoreTasks`) and sequence rules describe pick, place, walk, and relay park operations. `TaskPathValidator` checks reachability and sampled joint-space collision; it does not execute tasks. See [docs/tasks.md](docs/tasks.md).
 
+## Methods
+
+This section tells what Motus does, in simple words. The full table with units, failure codes and citations is in [docs/METHODS.md](docs/METHODS.md).
+
+### Robot models and kinematics
+
+- `UrdfRobotLoader` reads a URDF file. It also reads a small subset of xacro.
+- Motus calculates forward kinematics (FK) with the Product of Exponentials (PoE) method.
+- Analytic IK solves Universal Robots arms. Numerical IK solves other serial chains with the body Jacobian.
+- Stewart platforms use leg lengths in meters. Legged robots use joint angles in radians.
+
+### Collision checks
+
+Motus checks each pose against the robot links, the tool, attached bodies and the scene objects.
+
+- Spheres, bounding boxes and BVH trees are the broad phase. They only remove pairs that cannot touch.
+- An exact narrow phase gives the result for each remaining pair.
+- An allowed pair (for example, jaw plates on the clamped object) does not count as a contact.
+- A clearance margin grows each obstacle. Then any part closer than the margin is a contact.
+
+### Path planning
+
+- `JointLinearPlanner` interpolates in joint space. It can check each sample for collision.
+- `CartesianLinearPathPlanner` moves the TCP on a straight line. It solves IK at each sample.
+- `SamplingPlanner` finds a path around obstacles. RRT-Connect is the default. PRM* is also available.
+- CHOMP-lite smooths a path after planning. It keeps each changed segment collision-free.
+- `IndustrialMotionPlanner` runs mixed PTP, LIN and CIRC programs.
+
+### Constraints and timing
+
+- Path constraints limit the TCP position and orientation during a plan.
+- The TOTG retimer adds time to a path. It obeys the velocity and acceleration limit of each joint.
+
+### Groups and mobile bases
+
+- A planning group plans only the selected joints. The other joints stay at the start values.
+- Holonomic SE(2) mobility adds base x, y and yaw to the sampling space.
+- Holonomic SE(3) mobility adds x, y, z, roll, pitch and yaw for a free-flyer.
+- Legged gait uses a duty factor schedule. Motus checks the static stability margin (SSM) of each step.
+
+### Assembly planning
+
+`Motus.Construction` plans how a robot builds a structure of members.
+
+1. The planner finds a build order for the members.
+2. For each member, it plans pick, carry, place and walk motions.
+3. A replay checks every motion with the same Motus collision check.
+
+Experimental options are off by default:
+
+- A frame stability check rejects a partial structure that is not anchored or sags too much. This check is approximate.
+- Certified segments prove that a motion between two samples has no robot-to-environment contact.
+- TAMP search aids change the order in which the planner tries candidates. The planner still confirms each kept choice.
+
 ## Algorithms and references
 
 Canonical detail (API, units, failure codes): [docs/METHODS.md](docs/METHODS.md). BibTeX: [docs/REFERENCES.bib](docs/REFERENCES.bib).
@@ -221,6 +276,21 @@ libraries (glibc / Windows CRT / Apple libm) can lead it to a different, equally
   `BAMBOO_TRUSS_WRITE_PLAN=1 dotnet test tests/Motus.Core.Tests --filter ShippedDefaultPlan_IsIdenticalToLivePlanning`.
 - **Every platform** checks that the shipped plan loads, builds all 7 members PTP-only and replays Motus
   collision-clear, and that its own live plan is complete and collision-clear.
+
+### 3×3 gridshell dome example (experimental)
+
+The file `tests/fixtures/gridshell_dome3x3/dome3x3.site.json` is a `BambooTrussLayout.Site` in JSON. It has 16 nodes,
+24 canes, 12 anchors and one stock spot for each cane. The two canes at the start corner P00 use the site stock.
+Load it with `JsonSerializer.Deserialize<BambooTrussLayout.Site>`. It is example data. The `bamboo_icd` fixture and
+the Warren defaults do not change.
+
+To build the dome and check it, do the steps that follow (Linux x64, approximately 40–50 min on 8 cores):
+
+1. Run `MOTUS_DOME_BUILD=1 dotnet test tests/Motus.Core.Tests -c Release --filter Dome3x3_Example_BuildsComplete_ReplaysAndIsClear`.
+2. Make sure that the test passes. The test uses `AnchorWalks`, `LandPrecheck`, `ConstrainedFirst` and `MaxRejected = 250`.
+   It makes sure that the search places 24/24, that a fresh planner builds the same order, and that the 2 mm scan is clear.
+
+Without `MOTUS_DOME_BUILD=1` the test does nothing. The default test suite does not build the dome.
 
 ## Releases
 

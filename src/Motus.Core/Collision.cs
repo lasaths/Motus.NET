@@ -31,6 +31,12 @@ public sealed class CollisionObject
     /// <summary>Stable content key computed once at construction (verts/indices or primitive extents).</summary>
     public int ContentHash { get; }
 
+    /// <summary>
+    /// Broad-phase slot for Motus.Geometry: world AABB of this (immutable) object, filled on first use. A plain field,
+    /// so a parallel worker reads it without a lock; a race only computes the same box twice.
+    /// </summary>
+    internal double[]? WorldAabbSlot;
+
     // PONYTAIL: Sphere/Box/Capsule/Plane constructor
     private CollisionObject(string name, Frame pose, CollisionShape shape, double extentX, double extentY, double extentZ)
     {

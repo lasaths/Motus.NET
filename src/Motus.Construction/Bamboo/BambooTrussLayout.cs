@@ -64,8 +64,19 @@ public static class BambooTrussLayout
     /// <summary>A structure node (viewer coordinates, metres, Y-up).</summary>
     public sealed record StructureNode(string Name, double X, double Y, double Z);
 
-    /// <summary>A structure member (one cane) between two nodes; Length (metres) null = the site's uniform <see cref="Site.Length"/>.</summary>
-    public sealed record StructureMember(string Id, string Label, string Glyph, string NodeA, string NodeB, double? Length = null);
+    /// <summary>
+    /// A structure member (one cane) between two nodes; Length (metres) null = the site's uniform <see cref="Site.Length"/>.
+    /// <paramref name="Feed"/>: the stock spot this member's cane is picked from (null = the site's stock).
+    /// </summary>
+    public sealed record StructureMember(string Id, string Label, string Glyph, string NodeA, string NodeB, double? Length = null, FeedSpot? Feed = null);
+
+    /// <summary>
+    /// A stock spot: one cane lies flat on two pegs (like the site stock, <see cref="Site.FeedTop"/> high) at (X, Z), its
+    /// axis at <paramref name="YawDeg"/>. Opt-in per member (<see cref="StructureMember.Feed"/>) for structures one stock
+    /// spot cannot serve. A cane lies on a spot only while it is the active cane (it is laid there when its member is next,
+    /// like the site stock between members); the pegs of every spot in use are always there.
+    /// </summary>
+    public sealed record FeedSpot(double X, double Z, double YawDeg);
 
     /// <summary>
     /// The structure to assemble: nodes and members, members listed in the default build order. Supports are the nodes
@@ -92,7 +103,7 @@ public static class BambooTrussLayout
     public static void Use(Site site)
     {
         Current = site;
-        _fixtures = null; _members = null; _hubs.Clear(); _lengths.Clear();
+        _fixtures = null; _members = null; _hubs.Clear(); _lengths.Clear(); _feeds = null; _usesFeeds = null; _feedPegs.Clear();
     }
 
     /// <summary>Cane length (metres): panel − 2 × node gap, the same for every member.</summary>
@@ -121,7 +132,7 @@ public static class BambooTrussLayout
     public static void UseScene(SceneDescription scene)
     {
         Scene = scene;
-        _fixtures = null; _members = null; _hubs.Clear();
+        _fixtures = null; _members = null; _hubs.Clear(); _feedPegs.Clear();
     }
 
     public static double JawClosedMm => Scene.JawClosedMm;
@@ -180,8 +191,6 @@ public static class BambooTrussLayout
     public static double FeedZ => Current.FeedZ;
     public const double RackSeatGap = 0.0005;
     public static double StrutY => RackTop + 0.007 + RackSeatGap;
-    static (double X, double Z) FeedAxis => (Math.Sin(Current.FeedYawDeg * Math.PI / 180), Math.Cos(Current.FeedYawDeg * Math.PI / 180));
-    static bool FeedAlongX => Math.Abs(FeedAxis.X) > 0.5;
 
     /// <summary>Ground surfaces at support level (top y = 0): <see cref="Site.Ground"/> or <see cref="DerivedGround"/>.</summary>
     public static IReadOnlyList<(string Name, double X, double Z, double HalfX, double HalfZ)> Pads => (Current.Ground ?? DerivedGround()).Pads;
@@ -222,19 +231,48 @@ public static class BambooTrussLayout
     public static IReadOnlyList<(string Name, double X, double Z, double Top, double Radius)> Posts =>
         Stakes.Select(st => (st.Name, st.X, st.Z, st.Top, AnchorPostRadius)).ToList();
 
-    public static IReadOnlyList<(string Name, double X, double Z, double HalfX, double HalfZ, double Top)> Racks
+    /// <summary>Stock pegs: the site stock's two pegs, or with <see cref="UsesFeedSpots"/> the pegs of every spot in use.</summary>
+    public static IReadOnlyList<(string Name, double X, double Z, double HalfX, double HalfZ, double Top)> Racks =>
+        UsesFeedSpots ? FeedSpotsInUse.SelectMany(k => PegsAt(FeedSpots[k], $"store-peg-{k}-")).ToList() : PegsAt(FeedSpots[0], "store-peg-");
+
+    static List<(string Name, double X, double Z, double HalfX, double HalfZ, double Top)> PegsAt(FeedSpot f, string prefix)
     {
-        get
-        {
-            var (ax, az) = FeedAxis; var o = RackPegOffset;
-            var hx = FeedAlongX ? RackHalfAlong : RackHalfAcross; var hz = FeedAlongX ? RackHalfAcross : RackHalfAlong;
-            return
-            [
-                ("store-peg-1", FeedX - ax * o, FeedZ - az * o, hx, hz, RackTop),
-                ("store-peg-2", FeedX + ax * o, FeedZ + az * o, hx, hz, RackTop)
-            ];
-        }
+        double ax = Math.Sin(f.YawDeg * Math.PI / 180), az = Math.Cos(f.YawDeg * Math.PI / 180), o = RackPegOffset;
+        var along = Math.Abs(ax) > 0.5;
+        var hx = along ? RackHalfAlong : RackHalfAcross; var hz = along ? RackHalfAcross : RackHalfAlong;
+        return
+        [
+            (prefix + "1", f.X - ax * o, f.Z - az * o, hx, hz, RackTop),
+            (prefix + "2", f.X + ax * o, f.Z + az * o, hx, hz, RackTop)
+        ];
     }
+
+    // ---------------- stock spots (opt-in, StructureMember.Feed) ----------------
+
+    static IReadOnlyList<FeedSpot>? _feeds;
+    /// <summary>Stock spots: [0] the site stock, then every distinct <see cref="StructureMember.Feed"/>.</summary>
+    public static IReadOnlyList<FeedSpot> FeedSpots => _feeds ??=
+        new[] { new FeedSpot(Current.FeedX, Current.FeedZ, Current.FeedYawDeg) }
+            .Concat(Structure.Members.Select(m => m.Feed).OfType<FeedSpot>()).Distinct().ToList();
+
+    /// <summary>Some member names its own stock spot (<see cref="StructureMember.Feed"/>): pegs per spot, a cane only on the active one.</summary>
+    public static bool UsesFeedSpots => _usesFeeds ??= Structure.Members.Any(m => m.Feed is not null);
+    static bool? _usesFeeds;
+
+    /// <summary>Spots at least one member is picked from (ascending).</summary>
+    public static IReadOnlyList<int> FeedSpotsInUse => Members.Select(m => m.FeedIndex).Distinct().Order().ToList();
+
+    /// <summary>Stock cane pose on spot <paramref name="k"/>.</summary>
+    public static BambooIcdCell.StrutPlacement StoreAt(int k) => new(FeedSpots[k].X, StrutY, FeedSpots[k].Z, 0, FeedSpots[k].YawDeg);
+
+    static readonly System.Collections.Concurrent.ConcurrentDictionary<(int, bool), IReadOnlyList<CollisionObject>> _feedPegs = new();
+    /// <summary>
+    /// Peg objects of spot <paramref name="k"/>. Only the active cane's own spot is named "store-peg-…" (the held cane may
+    /// rest on it, <see cref="BambooTrussCollision"/>); every other spot's pegs are plain obstacles ("rack-peg-…").
+    /// </summary>
+    public static IReadOnlyList<CollisionObject> FeedPegObjects(int k, bool active) =>
+        _feedPegs.GetOrAdd((k, active), key => PegsAt(FeedSpots[key.Item1], $"{(key.Item2 ? "store" : "rack")}-peg-{key.Item1}-")
+            .Select(r => BambooIcdCell.BoxAt(r.Name, r.X, r.Top / 2, r.Z, r.HalfX, r.Top / 2, r.HalfZ)).ToList());
 
     /// <summary>
     /// Every ground object (ground surfaces, columns, pegs) as an x-extent. Only the A/D anchor columns may touch the
@@ -250,7 +288,7 @@ public static class BambooTrussLayout
     /// <summary>Motus objects for the anchor columns, stock pegs, pit walls/floor and the A / D connectors (cached per site).</summary>
     public static IReadOnlyList<CollisionObject> FixtureObjects =>
         _fixtures ??= Posts.Select(p => BambooIcdCell.PostAt(p.Name, p.X, p.Z, 0, p.Top, p.Radius))
-            .Concat(Racks.Select(r => BambooIcdCell.BoxAt(r.Name, r.X, r.Top / 2, r.Z, r.HalfX, r.Top / 2, r.HalfZ)))
+            .Concat(UsesFeedSpots ? [] : Racks.Select(r => BambooIcdCell.BoxAt(r.Name, r.X, r.Top / 2, r.Z, r.HalfX, r.Top / 2, r.HalfZ)))
             .Concat(PitBoxes.Select(b => BambooIcdCell.BoxAt(b.Name, b.X, b.Y, b.Z, b.HalfX, b.HalfY, b.HalfZ)))
             .Concat(SupportNodes.Select(HubObject))
             .Concat(Current.Obstacles ?? [])
@@ -300,7 +338,8 @@ public static class BambooTrussLayout
         (double X, double Y, double Z) EdgeB,
         string NodeA = "",
         string NodeB = "",
-        double? CaneLength = null)
+        double? CaneLength = null,
+        int FeedIndex = 0)
     {
         /// <summary>Cane length of this member (metres): <see cref="CaneLength"/> or the site's uniform length.</summary>
         public double Length => CaneLength ?? StrutLength;
@@ -333,8 +372,8 @@ public static class BambooTrussLayout
             var n = FootNodes.First(f => f.Name == node);
             return (n.X, n.Y, n.Z);
         }
-        var edges = Structure.Members.Select(m => (m.Id, m.Label, m.Glyph, P: m.NodeA, Q: m.NodeB, m.Length));
-        return edges.Select(e => new MemberDef(e.Id, e.Label, e.Glyph, Store, AlongEdge(At(e.P), At(e.Q), e.Length), At(e.P), At(e.Q), e.P, e.Q, e.Length)).ToList();
+        var edges = Structure.Members.Select(m => (m.Id, m.Label, m.Glyph, P: m.NodeA, Q: m.NodeB, m.Length, Feed: m.Feed is null ? 0 : FeedSpots.ToList().IndexOf(m.Feed)));
+        return edges.Select(e => new MemberDef(e.Id, e.Label, e.Glyph, StoreAt(e.Feed), AlongEdge(At(e.P), At(e.Q), e.Length), At(e.P), At(e.Q), e.P, e.Q, e.Length, e.Feed)).ToList();
     }
 
     /// <summary>
@@ -445,11 +484,12 @@ public static class BambooTrussLayout
         if (m is not null || !IsRelay(id)) return m;
         var n = FootNodes.First(f => f.Name == RelayNode(id));
         var d = RelayDir(id);
-        var cane = Members.FirstOrDefault(x => x.Id == RelayMember(id))?.CaneLength;
+        var owner = Members.FirstOrDefault(x => x.Id == RelayMember(id));
+        var cane = owner?.CaneLength;
         var len = (cane ?? StrutLength) + 2 * NodeGap;
         var a = (n.X, n.Y, n.Z);
         var b = (n.X + d.X * len, n.Y + d.Y * len, n.Z + d.Z * len);
-        return new MemberDef(id, $"{RelayMember(id)} parked at {RelayNode(id)}", "·", Store, AlongEdge(a, b, cane), a, b, RelayNode(id), "", cane);
+        return new MemberDef(id, $"{RelayMember(id)} parked at {RelayNode(id)}", "·", owner?.Store ?? Store, AlongEdge(a, b, cane), a, b, RelayNode(id), "", cane, owner?.FeedIndex ?? 0);
     }
 
     /// <summary>Members no allowed support can reach, with the reason (reported, never faked).</summary>

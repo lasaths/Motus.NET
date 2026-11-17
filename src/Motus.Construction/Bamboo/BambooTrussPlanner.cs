@@ -113,6 +113,9 @@ public sealed class BambooTrussPlanner
         public double NextDouble() { _log.Add(-1); return _r.NextDouble(); }
         public int Next(int max) { _log.Add(max); return _r.Next(max); }
         public int[] Save() => _log.ToArray();
+        public int Count => _log.Count;
+        public int[] Since(int n) => _log.GetRange(n, _log.Count - n).ToArray();
+        public void Advance(IEnumerable<int> calls) { foreach (var c in calls) { if (c < 0) NextDouble(); else Next(c); } }
         public void Restore(IReadOnlyList<int> history)
         {
             _r = new Random(seed);
@@ -388,11 +391,63 @@ public sealed class BambooTrussPlanner
             if (!PoseOk(v, _gR, _gL, _hold, _lOn, _rOn)) continue;
             if (Seg(qa, v) && Seg(v, qb)) return new List<double[]> { v };
         }
+        var key = TransitCache is null ? null : TransitKey(qa, qb);
+        if (key is not null && TransitCache!.TryGetValue(key, out var cached))
+        {
+            var ok = true;
+            for (var i = 0; ok && i <= cached.Path.Count; i++)
+                ok = Seg(i == 0 ? qa : cached.Path[i - 1], i == cached.Path.Count ? qb : cached.Path[i]);
+            if (ok)
+            {
+                TransitCacheHits++;
+                _rng.Advance(cached.Rng); // the random stream moves on as the RRT did, so a re-run from the same state is identical
+                return cached.Path.Select(v => v.ToArray()).ToList();
+            }
+        }
+        var rng0 = _rng.Count;
         // Up to three RRT-Connect attempts (the shared seeded RNG moves on, so each attempt explores differently).
         for (var i = 0; i < RrtAttempts; i++)
-            if (Rrt(qa, qb) is { } path) return path;
+        {
+            RrtRuns++;
+            if (Rrt(qa, qb) is { } path)
+            {
+                if (key is not null) TransitCache![key] = (path.Select(v => v.ToArray()).ToList(), _rng.Since(rng0));
+                return path;
+            }
+        }
+        if (StagedIters > 0 && RrtAttempts == 1 && RrtIters == StagedIters) StagedMisses++;
         return null;
     }
+
+    /// <summary>RRT paths keyed by every input of <see cref="TransitPath"/> (null = off; on in the build search): stand,
+    /// hold, clamps, jaws, held cane, scene (placed members, active cane), exact start / goal, RRT budget and the
+    /// random-stream position. A hit is exactly what a fresh run from this state computes, so a search with the cache
+    /// confirms only what a replay without it rebuilds (a path from a rolled-back branch is never reused). A hit is
+    /// still re-checked in the current scene.</summary>
+    internal Dictionary<string, (List<double[]> Path, int[] Rng)>? TransitCache { get; set; }
+    internal int TransitCacheHits { get; private set; }
+    internal int RrtRuns { get; private set; }
+
+    string TransitKey(double[] qa, double[] qb)
+    {
+        var sb = new System.Text.StringBuilder(1024);
+        void N(double v) => sb.Append(v.ToString("R", System.Globalization.CultureInfo.InvariantCulture)).Append(',');
+        void A(IEnumerable<double>? v) { if (v is null) sb.Append('-'); else foreach (var x in v) N(x); sb.Append('|'); }
+        sb.Append(BaseName).Append('|').Append(_hold).Append('|').Append(_lOn ?? "-").Append('|').Append(_rOn ?? "-").Append('|');
+        N(_gR); N(_gL);
+        sb.Append(_rng.Count).Append('|').Append(RrtIters).Append('|').Append(RrtAttempts).Append('|').Append(StagedIters).Append('|');
+        A(_baseWorld); A(qa); A(qb);
+        sb.Append(_activeId ?? "-").Append('|');
+        A(_activeRest); A(_activeReleased);
+        A(_held is { } h ? new[] { h.X, h.Y, h.Z, h.Qw, h.Qx, h.Qy, h.Qz } : null);
+        foreach (var (name, w) in _placed) { sb.Append(name).Append(':'); A(w); }
+        return sb.ToString();
+    }
+
+    /// <summary>Staged confirmation (<see cref="BambooBuildSearch.Options.StagedRrtIters"/>): the short-stage RRT budget
+    /// (0 = off) and how many transits ran out of it. A transit that ran out says "not yet", never "no path".</summary>
+    internal int StagedIters { get; set; }
+    internal int StagedMisses { get; private set; }
 
     /// <summary>RRT-Connect attempts per transit (walk searches lower it: a failing candidate step costs every attempt).</summary>
     public int RrtAttempts { get; set; } = 3;
@@ -874,7 +929,8 @@ public sealed class BambooTrussPlanner
     /// Walk with base swaps to another outboard stake. R clamps <paramref name="anchor"/> — a placed cane fixed at both
     /// ends (brachiation onto the built structure) or a stake — the base swaps to R, L slides up off its stake's free
     /// top, transits over <paramref name="target"/> and slides down onto it, L clamps, the base swaps back to L, and R
-    /// opens, backs off and parks.
+    /// opens, backs off and parks. When that fails, an anchor column (node connector above its top) is left sideways out
+    /// of the L-grip's open side and/or clamped from the side instead.
     /// </summary>
     public bool Walk(string anchor, BambooTrussLayout.Stake target)
     {
@@ -910,17 +966,57 @@ public sealed class BambooTrussPlanner
                 Restore(snap, startKeys);
                 if (!RGrasp(g, g.On, 0, pickActive: false, solutionIndex: idx)) continue;
                 if (!SwapTo(K.Gripper.R, g.On)) continue;
-                if (!LSlide(from, up: true)) continue;
-                if (!LOnto(target)) continue;
-                if (!SwapTo(K.Gripper.L, target.Name)) continue;
-                if (!RRetreat(g)) continue;
-                if (!RPark()) continue;
-                _lStake = target.Name;
-                Notes.Add($"{_cycle}: R clamps {g.On} at ({g.X:F3},{g.Y:F3},{g.Z:F3}); L {from.Name} → {target.Name}; R parks");
-                return true;
+                var k1 = Keys.Count; var s1 = Snapshot();
+                // Over the free tops first; an anchor column (connector above, as in WalkStep) may instead be left
+                // sideways out of the L-grip's open side and clamped from the side.
+                foreach (var sideways in new[] { false, true })
+                {
+                    Restore(s1, k1);
+                    if (!sideways) { if (!LSlide(from, up: true)) continue; }
+                    else
+                    {
+                        if (!IsColumn(from) && !IsColumn(target)) continue;
+                        var lf0 = K.Free(_base, _baseWorld, _q);
+                        if (IsColumn(from) ? !LBackOff(new K.GripTarget(lf0[3], lf0[7], lf0[11], 0, 1, 0, from.Name)) : !LSlide(from, up: true)) continue;
+                    }
+                    if (!LOnto(target) && !(sideways && IsColumn(target) && LSideGrasp(target.Grip, target.Name))) continue;
+                    if (!SwapTo(K.Gripper.L, target.Name)) continue;
+                    if (!RRetreat(g)) continue;
+                    if (!RPark()) continue;
+                    _lStake = target.Name;
+                    Notes.Add($"{_cycle}: R clamps {g.On} at ({g.X:F3},{g.Y:F3},{g.Z:F3}); L {from.Name} → {target.Name}{(sideways ? " (sideways)" : "")}; R parks");
+                    return true;
+                }
             }
         Restore(snap, startKeys);
         return Fail(string.IsNullOrEmpty(Error) ? $"walk: no Motus-clear {from.Name}→{target.Name} swap via {anchor}" : "walk: " + Error);
+    }
+
+    static bool IsColumn(BambooTrussLayout.Stake s) => s.Name.StartsWith("anchor-", StringComparison.Ordinal);
+
+    /// <summary>
+    /// Anchor-to-anchor walk: L moves from the anchor it stands on to anchor <paramref name="target"/> with
+    /// <see cref="Walk"/>, R clamping the first that works of: the site's walk anchor, then clampable placed members and
+    /// other anchors, nearest the midpoint of the two anchors first (at most <paramref name="maxRAnchors"/>).
+    /// </summary>
+    public bool WalkToAnchor(string target, int maxRAnchors = 6)
+    {
+        if (!BambooTrussLayout.IsSupport(_lStake)) return Fail($"walk → {target}: L is not on an anchor ({_lStake})");
+        var (from, to) = (BambooTrussLayout.StakeNamed(_lStake), BambooTrussLayout.StakeNamed(target));
+        double mx = (from.X + to.X) / 2, my = (from.ClampY + to.ClampY) / 2, mz = (from.Z + to.Z) / 2;
+        double D(double x, double y, double z) => Math.Sqrt((x - mx) * (x - mx) + (y - my) * (y - my) + (z - mz) * (z - mz));
+        var members = Clampable(PlacedIds).Select(id => BambooTrussLayout.Members.First(m => m.Id == id))
+            .Select(m => ("placed-" + m.Id, D(m.Place.X, m.Place.Y, m.Place.Z)));
+        var stakes = BambooTrussLayout.Stakes.Where(st => st.Name != from.Name && st.Name != to.Name).Select(st => (st.Name, D(st.X, st.ClampY, st.Z)));
+        var anchors = new[] { BambooTrussLayout.Current.WalkRAnchor }
+            .Concat(members.Concat(stakes).OrderBy(x => x.Item2).Select(x => x.Item1)).Distinct().Take(maxRAnchors);
+        var errors = new List<string>();
+        foreach (var a in anchors)
+        {
+            if (Walk(a, to)) return true;
+            errors.Add($"via {a}: {Error}");
+        }
+        return Fail($"walk {from.Name} → {target}: " + string.Join("; ", errors));
     }
 
     /// <summary>Placed member as a StrutPlacement-equivalent grip line (uses the actual released pose).</summary>
