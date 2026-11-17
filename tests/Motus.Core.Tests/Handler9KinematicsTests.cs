@@ -137,4 +137,48 @@ public class Handler9KinematicsTests
         Assert.False(k.TrySolveCane(new[] { 0, 0, z0 + 1.0 }, new[] { 1.0, 0, 0 }, zero, out _, out var why));
         Assert.Contains("lift", why);
     }
+
+    [Theory]
+    [InlineData(0.0, 0.1)]
+    [InlineData(0.05, 0.2)]
+    [InlineData(-0.08, 0.15)]
+    public void Rod_OuterClampsAlone_HoldATiltedRodInTheBeamPlane(double tilt, double raise)
+    {
+        var k = Load();
+        var seed = RandomQ(k, new Random(5));
+        var z0 = k.ClampFrame(new double[9], "handler_1_clamp")[11];
+        var p = new[] { 0.4, 0, z0 + raise };
+        var a = new[] { Math.Cos(tilt), 0, Math.Sin(tilt) };
+
+        Assert.True(k.TrySolveRod(p, a, seed, out var q, out var why), why);
+        var f1 = k.ClampFrame(q, "handler_1_clamp");
+        var f2 = k.ClampFrame(q, "handler_2_clamp");
+        foreach (var f in new[] { f1, f2 })
+        {
+            double dx = f[3] - p[0], dy = f[7] - p[1], dz = f[11] - p[2];
+            Assert.True(Norm(dy * a[2] - dz * a[1], dz * a[0] - dx * a[2], dx * a[1] - dy * a[0]) < 1e-9);
+            Assert.True(Math.Abs(f[0] * a[1] - f[4] * a[0]) < 1e-9); // clamp +x = rod heading
+        }
+        // Closed chain: fixed horizontal spacing, so the clamp distance along the rod is spacing / cos(tilt).
+        var span = Norm(f2[3] - f1[3], f2[7] - f1[7], f2[11] - f1[11]);
+        Assert.Equal(Math.Abs(f2[3] - f1[3]) / Math.Cos(tilt), span, 9);
+        for (var i = 0; i < 9; i++)
+            if (!k.Tree.Joints[k.Tree.DriverJointIndices[i]].Name.StartsWith("handler_", StringComparison.Ordinal))
+                Assert.Equal(seed[i], q[i]);
+    }
+
+    [Fact]
+    public void Rod_OutOfPlaneSteepOrVertical_Fails()
+    {
+        var k = Load();
+        var zero = new double[9];
+        var z0 = k.ClampFrame(zero, "handler_1_clamp")[11];
+
+        Assert.False(k.TrySolveRod(new[] { 0, 0.05, z0 }, new[] { 1.0, 0, 0 }, zero, out _, out _));
+        Assert.False(k.TrySolveRod(new[] { 0, 0, z0 }, new[] { Math.Cos(0.3), Math.Sin(0.3), 0 }, zero, out _, out _));
+        Assert.False(k.TrySolveRod(new[] { 0, 0, z0 + 0.2 }, new[] { Math.Cos(0.3), 0, Math.Sin(0.3) }, zero, out _, out var why));
+        Assert.Contains("lift", why);
+        Assert.False(k.TrySolveRod(new[] { 0, 0, z0 }, new[] { 0, 0, 1.0 }, zero, out _, out why));
+        Assert.Contains("vertical", why);
+    }
 }

@@ -81,6 +81,37 @@ public sealed class Handler9Kinematics
         return true;
     }
 
+    /// <summary>
+    /// Two-clamp solve: Handler_1 and Handler_2 hold one rod without the MainClamp. The rod moves in the vertical plane
+    /// through both yaw axes: the two lifts set its height and tilt. The horizontal clamp spacing is fixed by the beam,
+    /// so the clamp distance along the rod is spacing / cos(tilt) and the rod must slide in the clamps (docs/handler9.md).
+    /// Each clamp origin lands on the rod axis; each clamp +x is the rod's horizontal heading (a tilt needs passive pitch).
+    /// MainClamp joints keep the seed.
+    /// </summary>
+    public bool TrySolveRod(double[] point, double[] axis, IReadOnlyList<double> seed, out double[] q, out string? reason)
+    {
+        q = seed.ToArray();
+        if (!Validate(point, axis, seed, out reason))
+            return false;
+        var h2 = axis[0] * axis[0] + axis[1] * axis[1];
+        if (h2 < 1e-12)
+        {
+            reason = "Rod axis must not be vertical.";
+            return false;
+        }
+        var heading = new[] { axis[0], axis[1], 0 };
+        foreach (var clamp in new[] { "handler_1_clamp", "handler_2_clamp" })
+        {
+            // Rod point above the clamp: project the clamp position (xy) onto the rod's horizontal projection.
+            var f = ClampFrame(q, clamp);
+            var s = ((f[3] - point[0]) * axis[0] + (f[7] - point[1]) * axis[1]) / h2;
+            var target = new[] { point[0] + s * axis[0], point[1] + s * axis[1], point[2] + s * axis[2] };
+            if (!SolveStation(clamp, target, heading, q, alongFree: false, out reason))
+                return false;
+        }
+        return true;
+    }
+
     private bool SolveStation(string clampLink, double[] p, double[] axis, double[] q, bool alongFree, out string? reason)
     {
         if (!ClampLinks.Contains(clampLink))

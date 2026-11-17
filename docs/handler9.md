@@ -59,12 +59,30 @@ IK is closed form, because each chain is yaw + lift (+ slide):
 
 `TrySolveClamp` puts one clamp on a given point and axis.
 `TrySolveCane` puts all four clamp frames on one straight cane line. The grip position along the cane is free. The MainClamp slide keeps its seed value.
+`TrySolveRod` uses only Handler_1 and Handler_2. See "Two outer clamps hold a rod".
 A failure returns `false` and a reason. The seed is not changed.
 
 Limits of this model:
 
 - The clamps have no pitch joint. Thus the cane axis must be horizontal.
 - At yaw 0, every clamp origin is above the beam centre line. Thus a cane that all three stations hold must be above that line, along x.
+
+## Two outer clamps hold a rod
+
+Handler_1 and Handler_2 can hold a rod without the MainClamp. `TrySolveRod` solves this case. The MainClamp joints keep their seed values.
+
+- Plane: the vertical plane through the two yaw axes (the beam plane, y = 0 at the default layout).
+- In-plane motion: the two lifts set the rod height and the rod tilt. The rod can also move along its own axis.
+- Yaw: each clamp +x points along the rod heading (the horizontal part of the rod axis). In this plane the heading is 0 or 180°.
+- Each clamp origin is on the rod axis, at the rod point above the yaw axis.
+
+Closed-chain constraint:
+
+- The beam fixes the horizontal distance `d` between the two clamps (3.6 m at the placeholder layout).
+- The distance between the clamps along the rod is `d / cos(tilt)`. It changes when the tilt changes.
+- Thus the rod must slide in at least one clamp when the tilt changes. A rod held tight in both clamps can only move up and down without tilt.
+- A tilted rod also needs a passive pitch at each clamp. The URDF has no pitch joint. The clamp +x stays horizontal.
+- The tilt is limited only by the lift range.
 
 ## Placeholder dimensions
 
@@ -85,7 +103,9 @@ All values are estimates from the slide proportions. They are approximate. Chang
 
 - Is the MainClamp "Linear Movement" along the cane or across the beam?
 - Do the blue and yellow clamps turn independently? What are their limits?
-- Can a clamp tilt (pitch)? If not, the cane must stay horizontal.
+- Can a clamp tilt (pitch)? If not, the cane must stay horizontal and the two-clamp rod cannot tilt. What is the pitch range?
+- Does the rod slide in the outer clamps during a tilt, or does one clamp open?
+- Is the outer clamp centre offset from its yaw axis? With an offset, the two outer clamps could also move the rod in the horizontal plane. The current model has no offset.
 - Is a clamp centre on its yaw axis, or offset from it?
 - What are the real dimensions and stroke lengths?
 - What is the real cane diameter range (minimum and maximum)?
