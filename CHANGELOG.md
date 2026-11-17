@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Collision clearance (`MotionConstraints.ClearanceMarginM`, default 2 mm) is one setting. The planner and the final scan always use the same value. `Validate` rejects a non-finite value. The default does not change. The tower harness accepts `CLEARANCE_MM` (unset = 2). Path sampling must stay finer than the clearance.
+
 ### Fixed
 
 - Numerical IK (`NumericalInverseKinematics`) now converges from a seed that is not the answer. Before, it failed for all non-UR robots (0/40). Now: 40/40 each for UR10e URDF, rail + UR10e, Panda, KR 210 URDF, KR 10 and iiwa 7. Causes: `PoEJacobian.JacobianBody` multiplied the transforms in the wrong order; the finite-difference step had the wrong sign; a singularity estimate that was almost always infinite stopped the solve at iteration 1. `PoEJacobian.EstimateConditionJjT` is removed.
