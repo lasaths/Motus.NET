@@ -107,7 +107,7 @@ public static class XacroPreprocessor
 
                 if (macros.TryGetValue(local, out var macro))
                 {
-                    var expanded = InstantiateMacro(macro, child, scope).ToList();
+                    var expanded = InstantiateMacro(local, macro, child, scope, macros).ToList();
                     child.ReplaceWith(expanded);
                     foreach (var el in expanded)
                     {
@@ -131,8 +131,13 @@ public static class XacroPreprocessor
         SubstituteText(element, scope);
     }
 
-    private static IEnumerable<XElement> InstantiateMacro(XElement macro, XElement call, Dictionary<string, string> parentScope)
+    private static IEnumerable<XElement> InstantiateMacro(
+        string name, XElement macro, XElement call, Dictionary<string, string> parentScope, Dictionary<string, XElement> macros)
     {
+        // Macro bodies are expanded without the macro table, so a nested call (or a self-call) would silently vanish.
+        if (macro.Descendants().FirstOrDefault(e => e.Name.Namespace == Xacro && macros.ContainsKey(e.Name.LocalName)) is { } inner)
+            throw new NotSupportedException(
+                $"Xacro macro '{name}' calls macro '{inner.Name.LocalName}'. Nested and recursive macro calls are not supported; expand xacro offline.");
         var localScope = new Dictionary<string, string>(parentScope, StringComparer.Ordinal);
         var paramAttr = macro.Attribute("params")?.Value;
         if (!string.IsNullOrWhiteSpace(paramAttr))
