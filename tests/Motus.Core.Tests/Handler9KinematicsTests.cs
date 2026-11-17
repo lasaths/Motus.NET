@@ -1,0 +1,140 @@
+using Motus.Construction;
+using Motus.Geometry;
+using Motus.Presets;
+
+namespace Motus.Core.Tests;
+
+public class Handler9KinematicsTests
+{
+    private static Handler9Kinematics Load() =>
+        new(UrdfRobotLoader.LoadTree(Path.GetFullPath(Path.Combine(
+            AppContext.BaseDirectory, "..", "..", "..", "..", "fixtures", "handler9", "handler9.urdf"))));
+
+    private static double[] RandomQ(Handler9Kinematics k, Random rng) =>
+        k.Tree.DriverJointIndices.Select(i => k.Tree.Joints[i])
+            .Select(j => j.Lower + rng.NextDouble() * (j.Upper - j.Lower)).ToArray();
+
+    private static double[] P(double[] f) => new[] { f[3], f[7], f[11] };
+    private static double[] X(double[] f) => new[] { f[0], f[4], f[8] };
+
+    private static void AssertOnLine(double[] f, double[] p, double[] a)
+    {
+        double dx = f[3] - p[0], dy = f[7] - p[1], dz = f[11] - p[2];
+        var n = Math.Sqrt(a[0] * a[0] + a[1] * a[1] + a[2] * a[2]);
+        double ux = a[0] / n, uy = a[1] / n, uz = a[2] / n;
+        // |d x u| = distance to the line; |x x u| = axis misalignment
+        Assert.True(Norm(dy * uz - dz * uy, dz * ux - dx * uz, dx * uy - dy * ux) < 1e-9);
+        Assert.True(Norm(f[4] * uz - f[8] * uy, f[8] * ux - f[0] * uz, f[0] * uy - f[4] * ux) < 1e-9);
+    }
+
+    private static double Norm(double x, double y, double z) => Math.Sqrt(x * x + y * y + z * z);
+
+    [Fact]
+    public void Fixture_HasNineActuatedJointsWithSlideLimits()
+    {
+        var k = Load();
+        Assert.Equal(9, k.Tree.DriverCount);
+        foreach (var s in new[] { "handler_1", "main_clamp", "handler_2" })
+        {
+            var yaw = k.Tree.Joints.Single(j => j.Name == $"{s}_yaw");
+            Assert.Equal(-Math.PI, yaw.Lower, 6);
+            Assert.Equal(Math.PI, yaw.Upper, 6);
+            Assert.Equal(KinematicJointType.Prismatic, k.Tree.Joints.Single(j => j.Name == $"{s}_lift").Type);
+        }
+    }
+
+    [Fact]
+    public void FkIk_RoundTrip_RandomInLimitConfigurations()
+    {
+        var k = Load();
+        var rng = new Random(9);
+        for (var i = 0; i < 200; i++)
+        {
+            var q = RandomQ(k, rng);
+            var seed = RandomQ(k, rng);
+            foreach (var clamp in Handler9Kinematics.ClampLinks)
+            {
+                var f = k.ClampFrame(q, clamp);
+                Assert.True(k.TrySolveClamp(clamp, P(f), X(f), seed, out var sol, out var why), why);
+                var g = k.ClampFrame(sol, clamp);
+                for (var r = 0; r < 3; r++)
+                    Assert.Equal(f[4 * r + 3], g[4 * r + 3], 9);
+                AssertOnLine(g, P(f), X(f));
+                Assert.All(k.Tree.DriverJointIndices, ji =>
+                {
+                    var j = k.Tree.Joints[ji];
+                    Assert.InRange(sol[j.DriverIndex], j.Lower - 1e-12, j.Upper + 1e-12);
+                });
+            }
+        }
+    }
+
+    [Fact]
+    public void Limits_LiftAndSlideOutOfRange_FailWithReason()
+    {
+        var k = Load();
+        var zero = new double[9];
+        var f = k.ClampFrame(zero, "main_clamp_blue");
+
+        var high = P(f); high[2] += 1.0;
+        Assert.False(k.TrySolveClamp("handler_1_clamp", new[] { -1.8, 0, high[2] }, X(f), zero, out _, out var why));
+        Assert.Contains("lift", why);
+
+        var far = P(f); far[0] += 1.0;
+        Assert.False(k.TrySolveClamp("main_clamp_blue", far, X(f), zero, out _, out why));
+        Assert.Contains("slide", why);
+    }
+
+    [Fact]
+    public void Unreachable_FailsCleanly()
+    {
+        var k = Load();
+        var zero = new double[9];
+        var f = k.ClampFrame(zero, "handler_1_clamp");
+
+        var side = P(f); side[1] += 0.1;
+        Assert.False(k.TrySolveClamp("handler_1_clamp", side, X(f), zero, out var q, out var why));
+        Assert.Contains("off the station", why);
+        Assert.Equal(zero, q);
+
+        Assert.False(k.TrySolveClamp("handler_1_clamp", P(f), new[] { 1.0, 0, 0.2 }, zero, out _, out why));
+        Assert.Contains("horizontal", why);
+        Assert.False(k.TrySolveClamp("handler_1_clamp", new[] { double.NaN, 0, 0 }, X(f), zero, out _, out _));
+        Assert.False(k.TrySolveClamp("not_a_clamp", P(f), X(f), zero, out _, out _));
+        Assert.False(k.TrySolveCane(P(f), new[] { 0.0, 0, 0 }, zero, out _, out _));
+    }
+
+    [Theory]
+    [InlineData(1.0, 0.0)]
+    [InlineData(1.0, 0.25)]
+    [InlineData(-1.0, 0.4)]
+    public void Cane_AllStationsHoldOneStraightCane(double dirX, double raise)
+    {
+        var k = Load();
+        var rng = new Random(3);
+        var seed = RandomQ(k, rng);
+        seed[k.Slot("main_clamp_lift")] = 0;
+        var z0 = k.ClampFrame(new double[9], "handler_1_clamp")[11];
+        var p = new[] { 0.3, 0, z0 + raise };
+        var a = new[] { dirX, 0, 0 };
+
+        Assert.True(k.TrySolveCane(p, a, seed, out var q, out var why), why);
+        foreach (var clamp in Handler9Kinematics.ClampLinks)
+            AssertOnLine(k.ClampFrame(q, clamp), p, a);
+        Assert.Equal(seed[k.Slot("main_clamp_slide")], q[k.Slot("main_clamp_slide")]);
+    }
+
+    [Fact]
+    public void Cane_OffBeamTiltedOrTooHigh_Fails()
+    {
+        var k = Load();
+        var zero = new double[9];
+        var z0 = k.ClampFrame(zero, "handler_1_clamp")[11];
+
+        Assert.False(k.TrySolveCane(new[] { 0, 0.05, z0 }, new[] { 1.0, 0, 0 }, zero, out _, out _));
+        Assert.False(k.TrySolveCane(new[] { 0, 0, z0 }, new[] { Math.Cos(0.5), Math.Sin(0.5), 0 }, zero, out _, out _));
+        Assert.False(k.TrySolveCane(new[] { 0, 0, z0 }, new[] { 1.0, 0, 0.1 }, zero, out _, out _));
+        Assert.False(k.TrySolveCane(new[] { 0, 0, z0 + 1.0 }, new[] { 1.0, 0, 0 }, zero, out _, out var why));
+        Assert.Contains("lift", why);
+    }
+}
