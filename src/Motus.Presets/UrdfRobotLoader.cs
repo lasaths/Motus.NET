@@ -278,37 +278,28 @@ public static class UrdfRobotLoader
         var axis = el.Element("axis");
         var limit = el.Element("limit");
         var mimic = el.Element("mimic");
-        var xyz = ParseTriple(origin?.Attribute("xyz")?.Value, 0, 0, 0);
-        var rpy = ParseTriple(origin?.Attribute("rpy")?.Value, 0, 0, 0);
-        var ax = ParseTriple(axis?.Attribute("xyz")?.Value, 0, 0, 1);
+        var name = el.Attribute("name")?.Value ?? "";
+        var at = $"joint '{name}'";
+        var xyz = UrdfNumbers.Triple(origin?.Attribute("xyz")?.Value, 0, 0, 0, $"{at} origin xyz");
+        var rpy = UrdfNumbers.Triple(origin?.Attribute("rpy")?.Value, 0, 0, 0, $"{at} origin rpy");
+        var ax = UrdfNumbers.Triple(axis?.Attribute("xyz")?.Value, 0, 0, 1, $"{at} axis xyz");
         var len = Math.Sqrt(ax.x * ax.x + ax.y * ax.y + ax.z * ax.z);
         if (len > 1e-12) { ax = (ax.x / len, ax.y / len, ax.z / len); }
 
         return new ParsedJoint(
-            el.Attribute("name")?.Value ?? "",
+            name,
             el.Attribute("type")?.Value ?? "fixed",
             el.Element("parent")?.Attribute("link")?.Value ?? "",
             el.Element("child")?.Attribute("link")?.Value ?? "",
             xyz.x, xyz.y, xyz.z, rpy.x, rpy.y, rpy.z,
             ax.x, ax.y, ax.z,
-            ParseDouble(limit?.Attribute("lower")?.Value, -Math.PI),
-            ParseDouble(limit?.Attribute("upper")?.Value, Math.PI),
-            limit?.Attribute("velocity") is { } v ? ParseDouble(v.Value, Math.PI) : null,
+            UrdfNumbers.Parse(limit?.Attribute("lower")?.Value, -Math.PI, $"{at} limit lower"),
+            UrdfNumbers.Parse(limit?.Attribute("upper")?.Value, Math.PI, $"{at} limit upper"),
+            limit?.Attribute("velocity") is { } v ? UrdfNumbers.Parse(v.Value, Math.PI, $"{at} limit velocity") : null,
             mimic?.Attribute("joint")?.Value,
-            ParseDouble(mimic?.Attribute("multiplier")?.Value, 1),
-            ParseDouble(mimic?.Attribute("offset")?.Value, 0));
+            UrdfNumbers.Parse(mimic?.Attribute("multiplier")?.Value, 1, $"{at} mimic multiplier"),
+            UrdfNumbers.Parse(mimic?.Attribute("offset")?.Value, 0, $"{at} mimic offset"));
     }
-
-    private static (double x, double y, double z) ParseTriple(string? s, double dx, double dy, double dz)
-    {
-        if (string.IsNullOrWhiteSpace(s)) return (dx, dy, dz);
-        var p = s.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
-        if (p.Length < 3) return (dx, dy, dz);
-        return (ParseDouble(p[0], dx), ParseDouble(p[1], dy), ParseDouble(p[2], dz));
-    }
-
-    private static double ParseDouble(string? s, double fallback) =>
-        double.TryParse(s, NumberStyles.Float, CultureInfo.InvariantCulture, out var v) ? v : fallback;
 
     private sealed record ParsedJoint(
         string Name, string Type, string ParentLink, string ChildLink,

@@ -53,8 +53,8 @@ public static class UrdfCollisionLoader
             foreach (var collision in linkEl.Elements("collision"))
             {
                 var origin = collision.Element("origin");
-                var xyz = ParseTriple(origin?.Attribute("xyz")?.Value);
-                var rpy = ParseTriple(origin?.Attribute("rpy")?.Value);
+                var xyz = ParseTriple(origin?.Attribute("xyz")?.Value, $"link '{linkName}' collision origin xyz");
+                var rpy = ParseTriple(origin?.Attribute("rpy")?.Value, $"link '{linkName}' collision origin rpy");
                 var pose = FrameFromRpy(xyz.x, xyz.y, xyz.z, rpy.x, rpy.y, rpy.z);
                 var geom = collision.Element("geometry") ?? throw new InvalidOperationException($"collision on {linkName} missing geometry");
                 // URDF <collision name="..."> when present (stable, human-readable hit reports); else {link}_col{i}.
@@ -82,8 +82,8 @@ public static class UrdfCollisionLoader
         var collision = linkEl.Elements("collision").FirstOrDefault();
         if (collision is null) return null;
         var origin = collision.Element("origin");
-        var xyz = ParseTriple(origin?.Attribute("xyz")?.Value);
-        var rpy = ParseTriple(origin?.Attribute("rpy")?.Value);
+        var xyz = ParseTriple(origin?.Attribute("xyz")?.Value, $"link '{tipLinkName}' collision origin xyz");
+        var rpy = ParseTriple(origin?.Attribute("rpy")?.Value, $"link '{tipLinkName}' collision origin rpy");
         var pose = FrameFromRpy(xyz.x, xyz.y, xyz.z, rpy.x, rpy.y, rpy.z);
         var geom = collision.Element("geometry") ?? throw new InvalidOperationException($"collision on {tipLinkName} missing geometry");
         return ParseGeometry($"{tipLinkName}_tool_col", pose, geom, urdfDirectory);
@@ -104,18 +104,18 @@ public static class UrdfCollisionLoader
     {
         if (geom.Element("box") is { } box)
         {
-            var size = ParseTriple(box.Attribute("size")?.Value, 0.1, 0.1, 0.1);
+            var size = UrdfNumbers.Triple(box.Attribute("size")?.Value, 0.1, 0.1, 0.1, $"collision '{name}' box size");
             return CollisionObject.Box(name, pose, size.x / 2, size.y / 2, size.z / 2);
         }
         if (geom.Element("cylinder") is { } cyl)
         {
-            var radius = ParseDouble(cyl.Attribute("radius")?.Value, 0.05);
-            var length = ParseDouble(cyl.Attribute("length")?.Value, 0.1);
+            var radius = UrdfNumbers.Parse(cyl.Attribute("radius")?.Value, 0.05, $"collision '{name}' cylinder radius");
+            var length = UrdfNumbers.Parse(cyl.Attribute("length")?.Value, 0.1, $"collision '{name}' cylinder length");
             return CollisionObject.Capsule(name, pose, radius, length / 2);
         }
         if (geom.Element("sphere") is { } sph)
         {
-            var radius = ParseDouble(sph.Attribute("radius")?.Value, 0.05);
+            var radius = UrdfNumbers.Parse(sph.Attribute("radius")?.Value, 0.05, $"collision '{name}' sphere radius");
             return CollisionObject.Sphere(name, pose, radius);
         }
         if (geom.Element("mesh") is { } mesh)
@@ -162,14 +162,5 @@ public static class UrdfCollisionLoader
         return Transforms.ToFrame(m);
     }
 
-    private static (double x, double y, double z) ParseTriple(string? s, double dx = 0, double dy = 0, double dz = 0)
-    {
-        if (string.IsNullOrWhiteSpace(s)) return (dx, dy, dz);
-        var p = s.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
-        if (p.Length < 3) return (dx, dy, dz);
-        return (ParseDouble(p[0], dx), ParseDouble(p[1], dy), ParseDouble(p[2], dz));
-    }
-
-    private static double ParseDouble(string? s, double fallback) =>
-        double.TryParse(s, NumberStyles.Float, CultureInfo.InvariantCulture, out var v) ? v : fallback;
+    private static (double x, double y, double z) ParseTriple(string? s, string what) => UrdfNumbers.Triple(s, 0, 0, 0, what);
 }
