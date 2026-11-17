@@ -48,6 +48,21 @@ public sealed class BambooReachMap
 
     // ---------------- sites ----------------
 
+    /// <summary>
+    /// The clamp-site grid the scene check and the build search share: every anchor column (heading step
+    /// <paramref name="anchorStepDeg"/>), then every member at <paramref name="caneOffsets"/> (fraction of half length − 3 cm)
+    /// × <paramref name="rolls"/>; <c>Owner[i]</c> is the anchor name or member id of <c>Sites[i]</c>.
+    /// </summary>
+    public static (List<ClampSite> Sites, List<string> Owner) SiteGrid(IEnumerable<double> caneOffsets, IEnumerable<double> rolls, double anchorStepDeg = 30)
+    {
+        var (sites, owner) = (new List<ClampSite>(), new List<string>());
+        foreach (var a in BambooTrussLayout.Stakes)
+            foreach (var s in AnchorSites(a.Name, anchorStepDeg)) { sites.Add(s); owner.Add(a.Name); }
+        foreach (var m in BambooTrussLayout.Members)
+            foreach (var s in CaneSites("placed-" + m.Id, m.Place, caneOffsets.Select(f => f * (m.Length / 2 - 0.03)), rolls)) { sites.Add(s); owner.Add(m.Id); }
+        return (sites, owner);
+    }
+
     /// <summary>Clamp sites on an anchor column: the configured clamp height, headings in <paramref name="stepDeg"/> steps (configured first).</summary>
     public static List<ClampSite> AnchorSites(string anchor, double stepDeg = 30)
     {

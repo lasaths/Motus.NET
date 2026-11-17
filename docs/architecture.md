@@ -35,6 +35,7 @@ See [rhino-host.md](rhino-host.md) for Windows/macOS deployment (managed-first).
 | `ICollisionChecker` | `SphereCollisionChecker`, `RobotMeshCollisionChecker`, `AttachAwareCollisionChecker`, `FclCollisionChecker` |
 | `PlanningContext` | Attach geometry at TCP; hide scene obstacles on pick |
 | `MotionSegment` | Program segment contracts (`PtpSegment`, `LinSegment`, `CircSegment`) |
+| `ICertifiableSegment` | One joint-space segment for `SegmentCertifier`. The robot gives the motion bound and the exact clear check against grown obstacles. `BambooSegmentCertifier` is the bamboo adapter. |
 
 ## Units
 

@@ -49,12 +49,7 @@ public static class BambooSceneCheck
         var map = new BambooReachMap(cell) { Collision = o.Collision && cell is not null };
 
         // Sites: every anchor column, and every member (optimistic: any of them may be fixed by then).
-        var siteOwner = new List<string>();
-        var sites = new List<BambooReachMap.ClampSite>();
-        foreach (var a in BambooTrussLayout.Stakes)
-            foreach (var s in BambooReachMap.AnchorSites(a.Name, o.AnchorHeadingStepDeg)) { sites.Add(s); siteOwner.Add(a.Name); }
-        foreach (var m in BambooTrussLayout.Members)
-            foreach (var s in BambooReachMap.CaneSites("placed-" + m.Id, m.Place, o.CaneOffsets.Select(f => f * (m.Length / 2 - 0.03)), o.Rolls)) { sites.Add(s); siteOwner.Add(m.Id); }
+        var (sites, siteOwner) = BambooReachMap.SiteGrid(o.CaneOffsets, o.Rolls, o.AnchorHeadingStepDeg);
 
         // Lines: stock, each member's place, and the parked poses relays may use.
         // Stock lines first (S of them: the spots the members are picked from; the site stock alone without feed spots).

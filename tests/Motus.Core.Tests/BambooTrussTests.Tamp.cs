@@ -18,7 +18,7 @@ public partial class BambooTrussTests
             var r = BambooBuildSearch.Run(Cell, new BambooBuildSearch.Options { Tamp = new BambooBuildSearch.TampSettings { OutcomeLogPath = logPath } }, _out.WriteLine);
             Assert.True(r.Complete, string.Join("\n", r.Log));
             Assert.Equal(System.Text.Json.JsonSerializer.Serialize(BambooTrussMotion.ShippedTasks()), System.Text.Json.JsonSerializer.Serialize(r.Tasks));
-            var outcomes = BambooTampMemory.Read(new[] { logPath });
+            var outcomes = Motus.Construction.Search.OutcomeLog.Read(new[] { logPath });
             Assert.Equal(r.Attempts, outcomes.Count);
             Assert.Equal(r.Confirmed, outcomes.Count(o => o.Ok));
 
@@ -35,19 +35,19 @@ public partial class BambooTrussTests
     [Fact]
     public void TampPrior_OrdersByTheSmoothedConfirmRate()
     {
-        BambooTampMemory.Outcome O(string member, string mode, bool ok, string layout = "L") => new(layout, member, mode, null, 0, "", 0, ok, 0);
-        var log = new List<BambooTampMemory.Outcome>
+        Motus.Construction.Search.OutcomeLog.Outcome O(string member, string mode, bool ok, string layout = "L") => new(layout, member, mode, null, 0, "", 0, ok, 0);
+        var log = new List<Motus.Construction.Search.OutcomeLog.Outcome>
         {
             O("A", "Direct", false), O("A", "Direct", false), O("B", "Direct", true), O("B", "Direct", true),
             O("C", "Direct", false, layout: "other"), O("A", "Land", true),
         };
-        var prior = BambooTampMemory.Prior(log, "L");
-        Assert.True(prior("A", BambooBuildSearch.Mode.Direct) > prior("B", BambooBuildSearch.Mode.Direct));
+        var prior = Motus.Construction.Search.OutcomeLog.Prior(log, "L");
+        Assert.True(prior("A", "Direct") > prior("B", "Direct"));
         // Mode rate over every layout: Direct 2/5 → p̂ = 3/7; an unseen member gets −ln(2·(3/7)/2).
-        Assert.Equal(-Math.Log(3.0 / 7), prior("Z", BambooBuildSearch.Mode.Direct), 12);
+        Assert.Equal(-Math.Log(3.0 / 7), prior("Z", "Direct"), 12);
         // Member C only failed on another layout: on this layout it is unseen.
-        Assert.Equal(prior("Z", BambooBuildSearch.Mode.Direct), prior("C", BambooBuildSearch.Mode.Direct), 12);
-        Assert.Equal(-Math.Log(0.5), BambooTampMemory.Prior(new List<BambooTampMemory.Outcome>(), "L")("A", BambooBuildSearch.Mode.Relay), 12);
+        Assert.Equal(prior("Z", "Direct"), prior("C", "Direct"), 12);
+        Assert.Equal(-Math.Log(0.5), Motus.Construction.Search.OutcomeLog.Prior(new List<Motus.Construction.Search.OutcomeLog.Outcome>(), "L")("A", "Relay"), 12);
         Assert.Throws<ArgumentOutOfRangeException>(() => BambooBuildSearch.Run(Cell, new BambooBuildSearch.Options { Tamp = new BambooBuildSearch.TampSettings { PriorWeight = -1 } }));
     }
 }
