@@ -12,6 +12,15 @@ using var logFile = new StreamWriter(Path.Combine(outDir, tag + ".log")) { AutoF
 void Log(string s) { var line = $"[{clock.Elapsed.TotalSeconds,7:F1}s] {s}"; Console.WriteLine(line); logFile.WriteLine(line); }
 
 BambooTrussLayout.Use(site);
+var clearanceMm = 2.0;
+if (Environment.GetEnvironmentVariable("CLEARANCE_MM") is { Length: > 0 } raw)
+{
+    if (!double.TryParse(raw, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out clearanceMm))
+        throw new ArgumentException($"CLEARANCE_MM must be a finite number in [0, 20], got '{raw}'");
+    MotionConstraints.Current = (MotionConstraints.Current with { ClearanceMarginM = clearanceMm / 1000 }).Validate();
+}
+// BOXPRE=1: box prefilter before exact pose checks (verdicts unchanged, only faster).
+Motus.Geometry.RobotMeshCollisionChecker.BoxPrefilter = Environment.GetEnvironmentVariable("BOXPRE") == "1";
 var st = site.Structure!;
 Log($"input {tag}: {st.Nodes.Count} nodes, {st.Members.Count} members, {site.Stakes.Count} anchors, cane lengths " +
     $"{st.Members.Min(m => m.Length):F3}–{st.Members.Max(m => m.Length):F3} m, node Y {st.Nodes.Min(x => x.Y):F3}–{st.Nodes.Max(x => x.Y):F3} m");
@@ -32,6 +41,8 @@ var cell = BambooIcdCell.Load(File.ReadAllText(urdfPath), BambooTrussLayout.Stru
 BambooTrussMotion.UseCell(cell);
 Log($"constraints: {JsonSerializer.Serialize(MotionConstraints.Current)}");
 
+// Footholds rule first: the layout fingerprint includes it, so the build search's own scene check reuses this one's reach cache.
+if (Environment.GetEnvironmentVariable("FOOTHOLDS") == "1") MotionConstraints.Current = MotionConstraints.Current with { FixedMemberRule = false };
 var check = BambooSceneCheck.Run(null, BambooTrussLayout.Members);
 Log(check.Summary);
 foreach (var d in check.Details) Log("  scene check · " + d);
@@ -53,10 +64,14 @@ var opts = new BambooBuildSearch.Options
     MaxRejected = int.TryParse(Environment.GetEnvironmentVariable("MAXREJ"), out var mr) ? mr : 40,
     Tamp = mode == "tamp" ? new BambooBuildSearch.TampSettings { OutcomeLogPath = Path.Combine(outDir, tag + ".outcomes.jsonl") } : null
 };
-if (opts.PlacedFootholds) MotionConstraints.Current = MotionConstraints.Current with { FixedMemberRule = false }; // replay uses the same rule
 var r = BambooBuildSearch.Run(cell, opts, s => Log("search · " + s));
 Log($"RESULT {tag}: placed {r.Order.Count}/{BambooTrussLayout.Members.Count}, complete={r.Complete}, stop='{r.StopReason}', " +
     $"confirmed {r.Confirmed}, rejected {r.Rejected}, deferred {r.Deferred}, search {r.Seconds:F0} s");
+if (Motus.Geometry.RobotMeshCollisionChecker.BoxPrefilter)
+{
+    var (tested, cleared) = Motus.Geometry.RobotMeshCollisionChecker.BoxPrefilterStats();
+    Log($"box prefilter: {cleared}/{tested} pairs cleared on the search thread ({100.0 * cleared / Math.Max(1, tested):F1}%)");
+}
 Log("order: " + string.Join(" → ", r.Order.Select(c => $"{(c.RepositionTo is null ? "" : "[reposition " + c.RepositionTo + "] ")}{c.MemberId}({c.Mode}{(c.Relay is null ? "" : " " + c.Relay)})")));
 if (r.Order.Count == 0) return;
 File.WriteAllText(Path.Combine(outDir, tag + ".tasks.json"), JsonSerializer.Serialize(new { order = r.Order.Select(c => c.MemberId), tasks = r.Tasks }));
@@ -67,16 +82,16 @@ Log($"replay: built {build.Built.Count} [{string.Join(",", build.Built)}], keys 
 if (build.Keys.Count == 0) return;
 var members = BambooTrussLayout.Members.ToList();
 var scan = new BambooTrussScan(cell, build.Keys, build.Cycles, members, BambooTrussLayout.JawClosedMm); scan.RunToEnd();
-Log($"scan @2 mm: {(scan.FirstHit is { } h ? $"collision t={h.T:F4} {h.Label}: {h.Describe()}" : scan.TrackMiss is { } tm ? "tracking miss " + tm : "collision-free")}");
-var passed = 0.0;
-foreach (var mm in new[] { 3.0, 4, 5, 6, 8, 10, 12, 15, 20 })
+Log($"scan @{clearanceMm} mm: {(scan.FirstHit is { } h ? $"collision t={h.T:F4} {h.Label}: {h.Describe()}" : scan.TrackMiss is { } tm ? "tracking miss " + tm : "collision-free")}");
+var passed = clearanceMm;
+foreach (var mm in new[] { 3.0, 4, 5, 6, 8, 10, 12, 15, 20 }.Where(mm => mm > clearanceMm))
 {
     var c = MotionConstraints.Current with { ClearanceMarginM = mm / 1000 };
     var s2 = new BambooTrussScan(cell, build.Keys, build.Cycles, members, BambooTrussLayout.JawClosedMm, constraints: c).RunToEnd();
     if (s2.FirstHit is not null) { Log($"margin sweep: fails at {mm} mm ({s2.FirstHit.Label}: {s2.FirstHit.Describe()})"); break; }
     passed = mm;
 }
-Log($"min clearance (non-exempt pairs, sampled scan) ≥ {Math.Max(2, passed)} mm");
+Log($"min clearance (non-exempt pairs, sampled scan) ≥ {passed} mm");
 File.WriteAllText(Path.Combine(outDir, tag + ".keys.json"), JsonSerializer.Serialize(new
 {
     keys = build.Keys, built = build.Built, members = members.Select(m => new { m.Id, m.Length, m.Place.X, m.Place.Y, m.Place.Z, m.Place.PitchDeg, m.Place.YawDeg })

@@ -24,6 +24,22 @@ public class PoEJacobianTests
     }
 
     [Fact]
+    public void JacobianBody_AgreesWithFiniteDiff_Ur10e()
+    {
+        // Non-planar chain: catches a wrong adjoint product order that the planar two-link hides.
+        var robot = UrdfRobotLoader.Load(FixturePath("ur10e/ur10e.urdf"), new UrdfLoadOptions
+        {
+            BaseLink = "base_link",
+            TipLink = "tool0"
+        });
+        var poe = ProductOfExponentials.FromSerialChain(robot.Chain);
+        double[] q = [0.2, -0.5, 0.7, -0.4, 0.3, -0.2];
+        var analytic = PoEJacobian.JacobianBody(poe, q);
+        var numeric = FiniteDiffBodyJacobian(poe, q);
+        AssertJacobianClose(analytic, numeric, 5e-4);
+    }
+
+    [Fact]
     public void JacobianSpace_AgreesWithFiniteDiff_Ur10e()
     {
         var robot = UrdfRobotLoader.Load(FixturePath("ur10e/ur10e.urdf"), new UrdfLoadOptions

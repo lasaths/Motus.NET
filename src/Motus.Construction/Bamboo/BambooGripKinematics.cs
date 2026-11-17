@@ -34,6 +34,13 @@ public static class BambooGripKinematics
     public static double[] Mul(double[] a, double[] b)
     {
         var c = new double[16];
+        MulInto(c, a, b);
+        return c;
+    }
+
+    // c must not alias a or b.
+    static void MulInto(Span<double> c, ReadOnlySpan<double> a, ReadOnlySpan<double> b)
+    {
         for (var r = 0; r < 4; r++)
             for (var k = 0; k < 4; k++)
             {
@@ -41,19 +48,24 @@ public static class BambooGripKinematics
                 for (var j = 0; j < 4; j++) s += a[r * 4 + j] * b[j * 4 + k];
                 c[r * 4 + k] = s;
             }
-        return c;
     }
 
     /// <summary>Rigid inverse.</summary>
     public static double[] Inv(double[] m)
     {
         var r = new double[16];
+        InvInto(r, m);
+        return r;
+    }
+
+    // r must be zeroed and must not alias m.
+    static void InvInto(Span<double> r, ReadOnlySpan<double> m)
+    {
         for (var i = 0; i < 3; i++)
             for (var j = 0; j < 3; j++) r[i * 4 + j] = m[j * 4 + i];
         for (var i = 0; i < 3; i++)
             r[i * 4 + 3] = -(r[i * 4] * m[3] + r[i * 4 + 1] * m[7] + r[i * 4 + 2] * m[11]);
         r[15] = 1;
-        return r;
     }
 
     public static double[] Trans(double x, double y, double z)
@@ -86,6 +98,15 @@ public static class BambooGripKinematics
     /// <summary>Mount (L-grip) → tool0 (R-grip) for joint angles in degrees.</summary>
     public static double[] Tlr(IReadOnlyList<double> qDeg)
     {
+        Span<double> q = stackalloc double[5];
+        for (var i = 0; i < 5; i++) q[i] = qDeg[i];
+        var m = new double[16];
+        TlrInto(m, q);
+        return m;
+    }
+
+    static void TlrInto(Span<double> m, ReadOnlySpan<double> qDeg)
+    {
         // Columns of R (c0, c1, c2) and origin p; R·Rx / R·Ry update two columns in place.
         double c0x = 1, c0y = 0, c0z = 0, c1x = 0, c1y = 1, c1z = 0, c2x = 0, c2y = 0, c2z = 1;
         double px = 0, py = 0, pz = 0;
@@ -107,7 +128,91 @@ public static class BambooGripKinematics
             }
         }
         px -= Seg[5] * c1x; py -= Seg[5] * c1y; pz -= Seg[5] * c1z;
-        return new[] { c0x, c1x, c2x, px, c0y, c1y, c2y, py, c0z, c1z, c2z, pz, 0, 0, 0, 1 };
+        m[0] = c0x; m[1] = c1x; m[2] = c2x; m[3] = px; m[4] = c0y; m[5] = c1y; m[6] = c2y; m[7] = py;
+        m[8] = c0z; m[9] = c1z; m[10] = c2z; m[11] = pz; m[12] = 0; m[13] = 0; m[14] = 0; m[15] = 1;
+    }
+
+    // Chain state before joint i, 12 values: columns c0, c1, c2 and origin p of TlrInto's loop.
+    const int StateLen = 12;
+    static ReadOnlySpan<double> StartState => new double[] { 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0 };
+
+    /// <summary>
+    /// TlrInto's loop from joint <paramref name="from"/> on, starting at that joint's state, with the cosines and sines
+    /// given (joint <paramref name="from"/> uses <paramref name="cFirst"/>, <paramref name="sFirst"/>). Same operations in
+    /// the same order as TlrInto, so <paramref name="m"/> is bitwise the same. States after each joint go to
+    /// <paramref name="rec"/> (index (i + 1)·12) when it is not empty.
+    /// </summary>
+    static void ChainFrom(Span<double> m, ReadOnlySpan<double> start, int from, ReadOnlySpan<double> cs, ReadOnlySpan<double> sn,
+        double cFirst, double sFirst, Span<double> rec)
+    {
+        double c0x = start[0], c0y = start[1], c0z = start[2], c1x = start[3], c1y = start[4], c1z = start[5];
+        double c2x = start[6], c2y = start[7], c2z = start[8], px = start[9], py = start[10], pz = start[11];
+        for (var i = from; i < 5; i++)
+        {
+            px -= Seg[i] * c1x; py -= Seg[i] * c1y; pz -= Seg[i] * c1z;
+            var c = i == from ? cFirst : cs[i]; var s = i == from ? sFirst : sn[i];
+            if (Axes[i] == 'X')
+            {
+                double n1x = c * c1x + s * c2x, n1y = c * c1y + s * c2y, n1z = c * c1z + s * c2z;
+                double n2x = -s * c1x + c * c2x, n2y = -s * c1y + c * c2y, n2z = -s * c1z + c * c2z;
+                c1x = n1x; c1y = n1y; c1z = n1z; c2x = n2x; c2y = n2y; c2z = n2z;
+            }
+            else
+            {
+                double n0x = c * c0x - s * c2x, n0y = c * c0y - s * c2y, n0z = c * c0z - s * c2z;
+                double n2x = s * c0x + c * c2x, n2y = s * c0y + c * c2y, n2z = s * c0z + c * c2z;
+                c0x = n0x; c0y = n0y; c0z = n0z; c2x = n2x; c2y = n2y; c2z = n2z;
+            }
+            if (rec.Length > 0)
+            {
+                var r = rec.Slice((i + 1) * StateLen, StateLen);
+                r[0] = c0x; r[1] = c0y; r[2] = c0z; r[3] = c1x; r[4] = c1y; r[5] = c1z;
+                r[6] = c2x; r[7] = c2y; r[8] = c2z; r[9] = px; r[10] = py; r[11] = pz;
+            }
+        }
+        px -= Seg[5] * c1x; py -= Seg[5] * c1y; pz -= Seg[5] * c1z;
+        m[0] = c0x; m[1] = c1x; m[2] = c2x; m[3] = px; m[4] = c0y; m[5] = c1y; m[6] = c2y; m[7] = py;
+        m[8] = c0z; m[9] = c1z; m[10] = c2z; m[11] = pz; m[12] = 0; m[13] = 0; m[14] = 0; m[15] = 1;
+    }
+
+    // Slot axis and origin of q's free gripper into g (FinishFree), and q's cosines, sines and chain states for ChainFrom.
+    static void FreeRecord(Span<double> g, Gripper bg, double[] bw, ReadOnlySpan<double> q, double backoff,
+        Span<double> cs, Span<double> sn, Span<double> st)
+    {
+        for (var i = 0; i < 5; i++) { var a = q[i] * Deg; cs[i] = Math.Cos(a); sn[i] = Math.Sin(a); }
+        StartState.CopyTo(st);
+        Span<double> t = stackalloc double[16];
+        ChainFrom(t, st, 0, cs, sn, cs[0], sn[0], st);
+        FinishFree(g, bg, bw, t, backoff);
+    }
+
+    /// <summary>
+    /// The part of <see cref="Free"/> after T_LR (base frame, inverse for an R base, back-off as in
+    /// <see cref="GripResidual"/>), without heap allocation. Only the slot axis and the origin (rows 0–2 of columns 2
+    /// and 3, all that Refine reads) are written to <paramref name="g"/>, with the same sums as <see cref="Mul"/>.
+    /// </summary>
+    static void FinishFree(Span<double> g, Gripper bg, double[] bw, ReadOnlySpan<double> t, double backoff)
+    {
+        Span<double> u = stackalloc double[16];
+        scoped ReadOnlySpan<double> right = t;
+        if (bg == Gripper.R) { InvInto(u, t); right = u; }
+        if (backoff == 0) { MulSlotOrigin(g, bw, right); return; }
+        Span<double> m = stackalloc double[16];
+        MulInto(m, bw, right);
+        u.Clear(); u[0] = 1; u[5] = 1; u[10] = 1; u[15] = 1; u[3] = 0; u[7] = -backoff; u[11] = 0; // Trans(0, −backoff, 0)
+        MulSlotOrigin(g, m, u);
+    }
+
+    // Rows 0–2 of columns 2 and 3 of a·b, each with MulInto's sum.
+    static void MulSlotOrigin(Span<double> c, ReadOnlySpan<double> a, ReadOnlySpan<double> b)
+    {
+        for (var r = 0; r < 3; r++)
+            for (var k = 2; k < 4; k++)
+            {
+                var s = 0.0;
+                for (var j = 0; j < 4; j++) s += a[r * 4 + j] * b[j * 4 + k];
+                c[r * 4 + k] = s;
+            }
     }
 
     /// <summary>World poses of both grippers given which one is the clamped base and its world frame.</summary>
@@ -209,69 +314,94 @@ public static class BambooGripKinematics
         return Residual(g, target);
     }
 
-    static double[] ErrorVec(Gripper bg, double[] bw, GripTarget t, double[] q, double backoff, int axisSign)
+    // Error of the free gripper frame g (already backed off) against t, as 6 values (position, w · slot-axis cross).
+    static void ErrorOf(Span<double> e, ReadOnlySpan<double> g, GripTarget t, int axisSign)
     {
-        var g = Free(bg, bw, q);
-        if (backoff != 0) g = Mul(g, Trans(0, -backoff, 0));
         var zx = g[2]; var zy = g[6]; var zz = g[10];
         var dot = zx * t.Ax + zy * t.Ay + zz * t.Az;
         var sgn = axisSign != 0 ? axisSign : dot >= 0 ? 1.0 : -1.0;
         var ux = t.Ax * sgn; var uy = t.Ay * sgn; var uz = t.Az * sgn;
         const double w = 0.1; // metres per radian
-        return new[]
-        {
-            t.X - g[3], t.Y - g[7], t.Z - g[11],
-            w * (zy * uz - zz * uy), w * (zz * ux - zx * uz), w * (zx * uy - zy * ux)
-        };
+        e[0] = t.X - g[3]; e[1] = t.Y - g[7]; e[2] = t.Z - g[11];
+        e[3] = w * (zy * uz - zz * uy); e[4] = w * (zz * ux - zx * uz); e[5] = w * (zx * uy - zy * ux);
     }
 
+    // Same arithmetic as Residual(g, t).
+    static (double PosM, double AxisDeg) ResidualOf(ReadOnlySpan<double> grip, GripTarget t)
+    {
+        var dx = grip[3] - t.X; var dy = grip[7] - t.Y; var dz = grip[11] - t.Z;
+        var dot = Math.Abs(grip[2] * t.Ax + grip[6] * t.Ay + grip[10] * t.Az);
+        return (Math.Sqrt(dx * dx + dy * dy + dz * dz), Math.Acos(Math.Min(1, dot)) / Deg);
+    }
+
+    // ResidualOf(g, t) is (pe, ae) and pe < 1e-7 && ae < 1e-5, without the Acos when the position test fails.
+    static bool Converged(ReadOnlySpan<double> grip, GripTarget t)
+    {
+        var dx = grip[3] - t.X; var dy = grip[7] - t.Y; var dz = grip[11] - t.Z;
+        if (!(Math.Sqrt(dx * dx + dy * dy + dz * dz) < 1e-7)) return false;
+        var dot = Math.Abs(grip[2] * t.Ax + grip[6] * t.Ay + grip[10] * t.Az);
+        return Math.Acos(Math.Min(1, dot)) / Deg < 1e-5;
+    }
+
+    // Allocation-free: all scratch is on the stack. The free-gripper frame of the current q is kept (gq), so each
+    // iteration does not compute it a second time; every value is computed in the same order as before.
     static double[]? Refine(Gripper bg, double[] bw, GripTarget t, double[] seed, double backoff, int axisSign)
     {
         var q = seed.ToArray();
         for (var k = 0; k < 5; k++) q[k] = Math.Clamp(q[k], BambooIcdMotion.LimitsDeg[k].Min, BambooIcdMotion.LimitsDeg[k].Max);
+        Span<double> gq = stackalloc double[16], gp = stackalloc double[16];
+        Span<double> e = stackalloc double[6], ep = stackalloc double[6], en2 = stackalloc double[6];
+        Span<double> qn = stackalloc double[5], b = stackalloc double[5], dq = stackalloc double[5];
+        Span<double> J = stackalloc double[30], A = stackalloc double[25];
+        // Cosines, sines and chain states of q (base) and of the trial step qn: a Jacobian column only re-runs the
+        // chain from its own joint, and only that joint's angle needs a new cosine / sine. Results are bitwise the same.
+        Span<double> cs = stackalloc double[5], sn = stackalloc double[5], csN = stackalloc double[5], snN = stackalloc double[5];
+        Span<double> st = stackalloc double[6 * StateLen], stN = stackalloc double[6 * StateLen], tl = stackalloc double[16];
         var lambda = 0.01;
-        var e = ErrorVec(bg, bw, t, q, backoff, axisSign);
+        FreeRecord(gq, bg, bw, q, backoff, cs, sn, st);
+        ErrorOf(e, gq, t, axisSign);
         var en = Norm(e);
         for (var it = 0; it < 120; it++)
         {
-            var (pe, ae) = GripResidual(bg, bw, t, q, backoff);
-            if (pe < 1e-7 && ae < 1e-5) break;
-            // Numerical Jacobian (6×5) of the error w.r.t. q (radians).
-            var J = new double[6, 5];
+            if (Converged(gq, t)) break;
+            // Numerical Jacobian (6×5, row-major J[r·5 + k]) of the error w.r.t. q (radians).
             const double h = 1e-6;
             for (var k = 0; k < 5; k++)
             {
-                var qp = q.ToArray(); qp[k] += h / Deg;
-                var ep = ErrorVec(bg, bw, t, qp, backoff, axisSign);
-                for (var r = 0; r < 6; r++) J[r, k] = -(ep[r] - e[r]) / h;
+                var ak = (q[k] + h / Deg) * Deg;
+                ChainFrom(tl, st.Slice(k * StateLen, StateLen), k, cs, sn, Math.Cos(ak), Math.Sin(ak), default);
+                FinishFree(gp, bg, bw, tl, backoff);
+                ErrorOf(ep, gp, t, axisSign);
+                for (var r = 0; r < 6; r++) J[r * 5 + k] = -(ep[r] - e[r]) / h;
             }
             // (JᵀJ + λ²I) dq = Jᵀ e
-            var A = new double[5, 5]; var b = new double[5];
             for (var i = 0; i < 5; i++)
             {
                 for (var j = 0; j < 5; j++)
                 {
+                    // Symmetric: the products commute exactly and the sum runs in the same r order.
+                    if (j < i) { A[i * 5 + j] = A[j * 5 + i]; continue; }
                     var s = 0.0;
-                    for (var r = 0; r < 6; r++) s += J[r, i] * J[r, j];
-                    A[i, j] = s + (i == j ? lambda * lambda : 0);
+                    for (var r = 0; r < 6; r++) s += J[r * 5 + i] * J[r * 5 + j];
+                    A[i * 5 + j] = s + (i == j ? lambda * lambda : 0);
                 }
                 var sb = 0.0;
-                for (var r = 0; r < 6; r++) sb += J[r, i] * e[r];
+                for (var r = 0; r < 6; r++) sb += J[r * 5 + i] * e[r];
                 b[i] = sb;
             }
-            var dq = Solve5(A, b);
-            if (dq is null) return null;
+            if (!Solve5(A, b, dq)) return null;
             var maxStep = 0.0;
             for (var k = 0; k < 5; k++) maxStep = Math.Max(maxStep, Math.Abs(dq[k]));
             var scale = maxStep > 0.35 ? 0.35 / maxStep : 1.0;
-            var qn = q.ToArray();
             for (var k = 0; k < 5; k++)
                 qn[k] = Math.Clamp(q[k] + dq[k] * scale / Deg, BambooIcdMotion.LimitsDeg[k].Min, BambooIcdMotion.LimitsDeg[k].Max);
-            var en2 = ErrorVec(bg, bw, t, qn, backoff, axisSign);
+            FreeRecord(gp, bg, bw, qn, backoff, csN, snN, stN);
+            ErrorOf(en2, gp, t, axisSign);
             var nn = Norm(en2);
             if (nn < en)
             {
-                q = qn; e = en2; en = nn;
+                qn.CopyTo(q); en2.CopyTo(e); gp.CopyTo(gq); en = nn;
+                csN.CopyTo(cs); snN.CopyTo(sn); stN.CopyTo(st);
                 lambda = Math.Max(1e-5, lambda * 0.5);
             }
             else
@@ -280,7 +410,7 @@ public static class BambooGripKinematics
                 if (lambda > 1e3) break;
             }
         }
-        var (p, a) = GripResidual(bg, bw, t, q, backoff);
+        var (p, a) = ResidualOf(gq, t);
         if (p > GripPosTolM || a > GripAxisTolDeg) return null;
         if (axisSign != 0)
         {
@@ -290,29 +420,29 @@ public static class BambooGripKinematics
         return WithinLimits(q) ? q : null;
     }
 
-    static double Norm(double[] v) { var s = 0.0; foreach (var x in v) s += x * x; return Math.Sqrt(s); }
+    static double Norm(ReadOnlySpan<double> v) { var s = 0.0; foreach (var x in v) s += x * x; return Math.Sqrt(s); }
 
-    static double[]? Solve5(double[,] A, double[] b)
+    // A is 5×5 row-major; the result goes to x. False when a pivot is (near) zero.
+    static bool Solve5(ReadOnlySpan<double> A, ReadOnlySpan<double> b, Span<double> x)
     {
-        const int n = 5;
-        var M = new double[n, n + 1];
-        for (var i = 0; i < n; i++) { for (var j = 0; j < n; j++) M[i, j] = A[i, j]; M[i, n] = b[i]; }
+        const int n = 5, w = n + 1;
+        Span<double> M = stackalloc double[n * w];
+        for (var i = 0; i < n; i++) { for (var j = 0; j < n; j++) M[i * w + j] = A[i * n + j]; M[i * w + n] = b[i]; }
         for (var c = 0; c < n; c++)
         {
             var piv = c;
-            for (var r = c + 1; r < n; r++) if (Math.Abs(M[r, c]) > Math.Abs(M[piv, c])) piv = r;
-            if (Math.Abs(M[piv, c]) < 1e-14) return null;
-            if (piv != c) for (var j = 0; j <= n; j++) (M[c, j], M[piv, j]) = (M[piv, j], M[c, j]);
+            for (var r = c + 1; r < n; r++) if (Math.Abs(M[r * w + c]) > Math.Abs(M[piv * w + c])) piv = r;
+            if (Math.Abs(M[piv * w + c]) < 1e-14) return false;
+            if (piv != c) for (var j = 0; j <= n; j++) (M[c * w + j], M[piv * w + j]) = (M[piv * w + j], M[c * w + j]);
             for (var r = 0; r < n; r++)
             {
                 if (r == c) continue;
-                var f = M[r, c] / M[c, c];
-                for (var j = c; j <= n; j++) M[r, j] -= f * M[c, j];
+                var f = M[r * w + c] / M[c * w + c];
+                for (var j = c; j <= n; j++) M[r * w + j] -= f * M[c * w + j];
             }
         }
-        var x = new double[n];
-        for (var i = 0; i < n; i++) x[i] = M[i, n] / M[i, i];
-        return x;
+        for (var i = 0; i < n; i++) x[i] = M[i * w + n] / M[i * w + i];
+        return true;
     }
 
     /// <summary>

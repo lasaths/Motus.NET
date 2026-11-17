@@ -130,24 +130,33 @@ public static class UrdfWriter
         var links = new List<UrdfLink>();
         var joints = new List<UrdfJoint>();
 
-        foreach (var linkEl in robot.Elements().Where(e => e.Name.LocalName == "link"))
+        try
         {
-            if (!TryParseLink(linkEl, out var link, out var linkErr))
+            foreach (var linkEl in robot.Elements().Where(e => e.Name.LocalName == "link"))
             {
-                errs.Add(linkErr!);
-                continue;
+                if (!TryParseLink(linkEl, out var link, out var linkErr))
+                {
+                    errs.Add(linkErr!);
+                    continue;
+                }
+                links.Add(link!);
             }
-            links.Add(link!);
-        }
 
-        foreach (var jointEl in robot.Elements().Where(e => e.Name.LocalName == "joint"))
-        {
-            if (!TryParseJoint(jointEl, out var joint, out var jointErr))
+            foreach (var jointEl in robot.Elements().Where(e => e.Name.LocalName == "joint"))
             {
-                errs.Add(jointErr!);
-                continue;
+                if (!TryParseJoint(jointEl, out var joint, out var jointErr))
+                {
+                    errs.Add(jointErr!);
+                    continue;
+                }
+                joints.Add(joint!);
             }
-            joints.Add(joint!);
+        }
+        catch (InvalidDataException ex)
+        {
+            errs.Add(ex.Message);
+            errors = errs;
+            return false;
         }
 
         if (errs.Count > 0)
@@ -201,10 +210,8 @@ public static class UrdfWriter
 
         var inertial = linkEl.Elements().FirstOrDefault(e => e.Name.LocalName == "inertial");
         var massEl = inertial?.Elements().FirstOrDefault(e => e.Name.LocalName == "mass");
-        if (massEl?.Attribute("value") is { } mv &&
-            double.TryParse(mv.Value, NumberStyles.Float, CultureInfo.InvariantCulture, out var massVal) &&
-            IsFinite(massVal))
-            mass = massVal;
+        if (massEl?.Attribute("value") is { } mv && !string.IsNullOrWhiteSpace(mv.Value))
+            mass = UrdfNumbers.Parse(mv.Value, 0, $"link '{linkName}' mass");
 
         link = new UrdfLink(linkName, visuals, collisions, mass, r, g, b, a);
         return true;
@@ -225,7 +232,7 @@ public static class UrdfWriter
         var box = geometry.Elements().FirstOrDefault(e => e.Name.LocalName == "box");
         if (box is not null)
         {
-            var size = ParseTriple(box.Attribute("size")?.Value, 0.1, 0.1, 0.1);
+            var size = UrdfNumbers.Triple(box.Attribute("size")?.Value, 0.1, 0.1, 0.1, "box size");
             if (!IsFinite(size.x) || !IsFinite(size.y) || !IsFinite(size.z))
             {
                 error = "Box size must be finite.";
@@ -238,8 +245,8 @@ public static class UrdfWriter
         var cyl = geometry.Elements().FirstOrDefault(e => e.Name.LocalName == "cylinder");
         if (cyl is not null)
         {
-            var radius = ParseDouble(cyl.Attribute("radius")?.Value, 0.05);
-            var length = ParseDouble(cyl.Attribute("length")?.Value, 0.1);
+            var radius = UrdfNumbers.Parse(cyl.Attribute("radius")?.Value, 0.05, "cylinder radius");
+            var length = UrdfNumbers.Parse(cyl.Attribute("length")?.Value, 0.1, "cylinder length");
             if (!IsFinite(radius) || !IsFinite(length))
             {
                 error = "Cylinder radius/length must be finite.";
@@ -252,7 +259,7 @@ public static class UrdfWriter
         var sphere = geometry.Elements().FirstOrDefault(e => e.Name.LocalName == "sphere");
         if (sphere is not null)
         {
-            var radius = ParseDouble(sphere.Attribute("radius")?.Value, 0.05);
+            var radius = UrdfNumbers.Parse(sphere.Attribute("radius")?.Value, 0.05, "sphere radius");
             if (!IsFinite(radius))
             {
                 error = "Sphere radius must be finite.";
@@ -270,7 +277,7 @@ public static class UrdfWriter
             double[]? scale = null;
             if (!string.IsNullOrWhiteSpace(scaleAttr))
             {
-                var s = ParseTriple(scaleAttr, 1, 1, 1);
+                var s = UrdfNumbers.Triple(scaleAttr, 1, 1, 1, "mesh scale");
                 scale = [s.x, s.y, s.z];
             }
 
@@ -314,15 +321,15 @@ public static class UrdfWriter
             return false;
         }
 
-        var origin = ParseTriple(
+        var origin = UrdfNumbers.Triple(
             jointEl.Elements().FirstOrDefault(e => e.Name.LocalName == "origin")?.Attribute("xyz")?.Value,
-            0, 0, 0);
-        var axis = ParseTriple(
+            0, 0, 0, $"joint '{jName}' origin xyz");
+        var axis = UrdfNumbers.Triple(
             jointEl.Elements().FirstOrDefault(e => e.Name.LocalName == "axis")?.Attribute("xyz")?.Value,
-            0, 0, 1);
+            0, 0, 1, $"joint '{jName}' axis xyz");
         var limit = jointEl.Elements().FirstOrDefault(e => e.Name.LocalName == "limit");
-        var lower = ParseDouble(limit?.Attribute("lower")?.Value, -Math.PI);
-        var upper = ParseDouble(limit?.Attribute("upper")?.Value, Math.PI);
+        var lower = UrdfNumbers.Parse(limit?.Attribute("lower")?.Value, -Math.PI, $"joint '{jName}' limit lower");
+        var upper = UrdfNumbers.Parse(limit?.Attribute("upper")?.Value, Math.PI, $"joint '{jName}' limit upper");
         if (!IsFinite(origin.x) || !IsFinite(origin.y) || !IsFinite(origin.z) ||
             !IsFinite(axis.x) || !IsFinite(axis.y) || !IsFinite(axis.z) ||
             !IsFinite(lower) || !IsFinite(upper))
@@ -338,8 +345,8 @@ public static class UrdfWriter
         if (mimicEl is not null)
         {
             mimic = mimicEl.Attribute("joint")?.Value;
-            mult = ParseDouble(mimicEl.Attribute("multiplier")?.Value, 1);
-            offset = ParseDouble(mimicEl.Attribute("offset")?.Value, 0);
+            mult = UrdfNumbers.Parse(mimicEl.Attribute("multiplier")?.Value, 1, $"joint '{jName}' mimic multiplier");
+            offset = UrdfNumbers.Parse(mimicEl.Attribute("offset")?.Value, 0, $"joint '{jName}' mimic offset");
         }
 
         try
@@ -362,8 +369,8 @@ public static class UrdfWriter
     private static Frame ParseOrigin(XElement? originEl)
     {
         if (originEl is null) return Frame.Identity;
-        var xyz = ParseTriple(originEl.Attribute("xyz")?.Value, 0, 0, 0);
-        var rpy = ParseTriple(originEl.Attribute("rpy")?.Value, 0, 0, 0);
+        var xyz = UrdfNumbers.Triple(originEl.Attribute("xyz")?.Value, 0, 0, 0, "origin xyz");
+        var rpy = UrdfNumbers.Triple(originEl.Attribute("rpy")?.Value, 0, 0, 0, "origin rpy");
         if (!IsFinite(xyz.x) || !IsFinite(xyz.y) || !IsFinite(xyz.z) ||
             !IsFinite(rpy.x) || !IsFinite(rpy.y) || !IsFinite(rpy.z))
             return Frame.Identity;
@@ -473,17 +480,6 @@ public static class UrdfWriter
             BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(i * 4, 4), indices[i]);
         return Convert.ToBase64String(bytes);
     }
-
-    private static (double x, double y, double z) ParseTriple(string? s, double dx, double dy, double dz)
-    {
-        if (string.IsNullOrWhiteSpace(s)) return (dx, dy, dz);
-        var p = s.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
-        if (p.Length < 3) return (dx, dy, dz);
-        return (ParseDouble(p[0], dx), ParseDouble(p[1], dy), ParseDouble(p[2], dz));
-    }
-
-    private static double ParseDouble(string? s, double fallback) =>
-        double.TryParse(s, NumberStyles.Float, CultureInfo.InvariantCulture, out var v) ? v : fallback;
 
     private static bool IsFinite(double v) => !double.IsNaN(v) && !double.IsInfinity(v);
 

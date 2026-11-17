@@ -170,6 +170,9 @@ public sealed class BambooIcdCell
     bool _mountIsHang = true;
     int _mountKey;
 
+    /// <summary>Per-hold-state setup of <see cref="BambooTrussCollision.Contacts"/> on this cell (one thread per cell).</summary>
+    internal BambooTrussCollision.MarginCache? MarginCache;
+
     /// <summary>
     /// Full-pose L-grip (URDF <c>mount</c>) frame in viewer coordinates (4×4 row-major; origin = L grasp centre,
     /// local Z = L slot axis). Brachiation: the mount is wherever the L-grip is — clamped on a fixed object (L-base)
@@ -618,6 +621,13 @@ public sealed class BambooIcdCell
         // L-grip is the clamped base the mount does not move, so almost every pose reuses the previous answer.
         if (RobotMeshCollisionChecker.ReferencePath) return MountEnvironmentContactsCore(gLmm, environment, allowed);
         if (_lastMountKey is not null && _lastMountKey.Matches(MountWorld, gLmm, environment, allowed, _mountCheckerGeneration)) return _lastMountRes!;
+        // Second slot: the clearance-margin check alternates the pass-1 and pass-2 environments (as in PoseContacts).
+        if (_prevMountKey is not null && _prevMountKey.Matches(MountWorld, gLmm, environment, allowed, _mountCheckerGeneration))
+        {
+            (_lastMountKey, _prevMountKey) = (_prevMountKey, _lastMountKey);
+            (_lastMountRes, _prevMountRes) = (_prevMountRes, _lastMountRes);
+            return _lastMountRes!;
+        }
         var key = new MountMemoKey(MountWorld, gLmm, environment, allowed, _mountCheckerGeneration);
         if (!_mountMemo.TryGetValue(key, out var res))
         {
@@ -625,6 +635,7 @@ public sealed class BambooIcdCell
             if (_mountMemo.Count > 4096) _mountMemo.Clear();
             _mountMemo[key] = res;
         }
+        (_prevMountKey, _prevMountRes) = (_lastMountKey, _lastMountRes);
         _lastMountKey = key; _lastMountRes = res;
         return res;
     }
@@ -632,6 +643,8 @@ public sealed class BambooIcdCell
     readonly Dictionary<MountMemoKey, CollisionContact[]> _mountMemo = new();
     MountMemoKey? _lastMountKey;
     CollisionContact[]? _lastMountRes;
+    MountMemoKey? _prevMountKey;
+    CollisionContact[]? _prevMountRes;
     int _mountCheckerGeneration;
 
     sealed class MountMemoKey : IEquatable<MountMemoKey>
