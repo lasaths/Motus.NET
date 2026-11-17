@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `CollisionCheckerSessionCache`: the cache key now includes the tool geometry, the link geometry, the base frame, the tool frame and the tree driver home. A cache hit must also pass a full equality check. Before this fix, a changed tool, base or tool frame could get the old checker, and a pose that collides could show as clear. Results for unchanged inputs do not change.
+
 ## [2.2.0] - 2026-10-29
 
 ### Added
