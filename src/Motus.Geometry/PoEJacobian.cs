@@ -33,7 +33,7 @@ public static class PoEJacobian
         var t = Transforms.Identity();
         for (var i = n - 2; i >= 0; i--)
         {
-            t = Transforms.Multiply(ScrewMath.MatrixExp6(bodyScrews[i + 1], -theta[i + 1]), t);
+            t = Transforms.Multiply(t, ScrewMath.MatrixExp6(bodyScrews[i + 1], -theta[i + 1]));
             WriteColumn(jb, i, ScrewMath.AdjointMultiply(ScrewMath.Adjoint(t), bodyScrews[i]));
         }
         return jb;
@@ -55,41 +55,6 @@ public static class PoEJacobian
         for (var c = 0; c < cols; c++)
             max = Math.Max(max, Math.Abs(j[r, c]));
         return max;
-    }
-
-    /// <summary>Rough condition estimate via √(λmax/λmin) of J Jᵀ (6×6) using power iteration lite.</summary>
-    public static double EstimateConditionJjT(double[,] j)
-    {
-        var m = j.GetLength(0);
-        var n = j.GetLength(1);
-        var a = new double[m, m];
-        for (var i = 0; i < m; i++)
-        for (var k = 0; k < m; k++)
-        {
-            var sum = 0.0;
-            for (var c = 0; c < n; c++)
-                sum += j[i, c] * j[k, c];
-            a[i, k] = sum;
-        }
-
-        // Gershgorin: λmax ≤ max row sum; λmin ≥ max(0, min diag − offdiag sum)
-        var lambdaMax = 0.0;
-        var lambdaMin = double.PositiveInfinity;
-        for (var i = 0; i < m; i++)
-        {
-            var rowSum = 0.0;
-            var off = 0.0;
-            for (var k = 0; k < m; k++)
-            {
-                var v = Math.Abs(a[i, k]);
-                rowSum += v;
-                if (k != i) off += v;
-            }
-            lambdaMax = Math.Max(lambdaMax, rowSum);
-            lambdaMin = Math.Min(lambdaMin, Math.Max(0, Math.Abs(a[i, i]) - off));
-        }
-        if (lambdaMin < 1e-16) return double.PositiveInfinity;
-        return Math.Sqrt(lambdaMax / lambdaMin);
     }
 
     private static void WriteColumn(double[,] j, int col, double[] v6)
