@@ -116,4 +116,36 @@ internal sealed class BambooFrontier
         }
         return options;
     }
+
+    /// <summary>Version of <see cref="Features"/>; bump it when a feature changes meaning.</summary>
+    public const int FeatureVersion = 1;
+
+    /// <summary>
+    /// Layout-free features of one candidate for the outcome log (frontier ranker step 1, docs/plans/frontier-ranker.md).
+    /// Geometry only: no IK, no planner call, no random draw, so logging cannot change the search. Distances are viewer
+    /// metres (Y up) over <see cref="BambooReachMap.MaxReachM"/>. 0–4: mode one-hot (Direct, Land, Walk, Relay,
+    /// Reposition); 5: stand → place; 6: stand → stock; 7: place height above the stand; 8: relay, stand → park place
+    /// (else 0); 9: the stand is on an anchor (1) or a member (0); 10: placed / total; 11: ln(1 + fixed foothold sites
+    /// within two arm reaches of the stand). 5–8 are 0 for a reposition.
+    /// </summary>
+    public double[] Features(string id, Mode mode, string? relay, List<string> placed, BambooReachMap.ClampSite stand)
+    {
+        var f = new double[12];
+        f[mode switch { Mode.Direct => 0, Mode.Land => 1, Mode.Walk => 2, Mode.Relay => 3, _ => 4 }] = 1;
+        var (r, s) = (BambooReachMap.MaxReachM, stand.Origin);
+        if (mode != Mode.Reposition && BambooTrussLayout.Def(id) is { } m)
+        {
+            var store = BambooReachMap.Stock(m).Pose;
+            f[5] = Dist(s, (m.Place.X, m.Place.Y, m.Place.Z)) / r;
+            f[6] = Dist(s, (store.X, store.Y, store.Z)) / r;
+            f[7] = (m.Place.Y - s.Y) / r;
+            if (mode == Mode.Relay && BambooTrussLayout.Def(relay!) is { } park) f[8] = Dist(s, (park.Place.X, park.Place.Y, park.Place.Z)) / r;
+        }
+        f[9] = BambooTrussLayout.IsSupport(stand.On) ? 1 : 0;
+        f[10] = placed.Count / (double)graph.Edges.Count;
+        var fixedIds = BambooBuildSearch.Footholds(graph, placed, o);
+        f[11] = Math.Log(1 + Enumerable.Range(0, grid.Sites.Count).Count(i =>
+            (BambooTrussLayout.IsSupport(grid.Owner[i]) || fixedIds.Contains(grid.Owner[i])) && Near(stand, grid.Sites[i])));
+        return f;
+    }
 }

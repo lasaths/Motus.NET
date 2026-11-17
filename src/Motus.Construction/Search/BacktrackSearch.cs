@@ -58,8 +58,10 @@ internal sealed class BacktrackSearch<T, TChoice, TSave>(IPlanningState<TChoice,
         public bool Staged { get; init; }
         public bool FailureMemory { get; init; }
         public bool DeadEndMemory { get; init; }
-        /// <summary>Every confirmation that is not "not yet": candidate, order before it, kept, seconds.</summary>
-        public Action<Candidate<T>, IReadOnlyList<TChoice>, bool, double>? Outcome { get; init; }
+        /// <summary>Every confirmation that is not "not yet": candidate, order before it, kept, seconds, node, position in the node's sorted order.</summary>
+        public Action<Candidate<T>, IReadOnlyList<TChoice>, bool, double, int, int>? Outcome { get; init; }
+        /// <summary>Every expansion, before any try: node id, its candidates in try order, order before it. Observes only.</summary>
+        public Action<int, IReadOnlyList<Candidate<T>>, IReadOnlyList<TChoice>>? Sorted { get; init; }
         /// <summary>After every placement: the order and whether it is complete.</summary>
         public Action<IReadOnlyList<TChoice>, bool>? Placed { get; init; }
     }
@@ -70,7 +72,7 @@ internal sealed class BacktrackSearch<T, TChoice, TSave>(IPlanningState<TChoice,
     List<TChoice> _best = new();
     readonly HashSet<string> _failed = new(StringComparer.Ordinal), _deadEnds = new(StringComparer.Ordinal);
     readonly System.Diagnostics.Stopwatch _clock = new();
-    int _confirmed, _rejected, _deferred, _parked;
+    int _confirmed, _rejected, _deferred, _parked, _nodes;
     bool _escalateAll;
     string _stop = "search exhausted";
 
@@ -100,11 +102,15 @@ internal sealed class BacktrackSearch<T, TChoice, TSave>(IPlanningState<TChoice,
         if (BudgetReached()) return false;
         var key = s.FailureMemory || s.DeadEndMemory ? state.Key(_order) : "";
         if (s.DeadEndMemory && _deadEnds.Contains(key)) { s.Log("  tamp: build state already found to be a dead end — skipped"); return false; }
-        var candidates = generator.For(_order, pending, onDeepest: _order.Count == _best.Count);
-        var notYet = new List<Candidate<T>>();
+        // OrderBy is stable, so this is the same order the loop below used before it was materialised.
+        var sorted = generator.For(_order, pending, onDeepest: _order.Count == _best.Count)
+            .OrderBy(x => x.Resumed ? 0 : 1).ThenBy(x => x.Rank).ToList();
+        var node = _nodes++;
+        s.Sorted?.Invoke(node, sorted, _order);
+        var notYet = new List<(Candidate<T> C, int Pos)>();
 
         // One confirmation; true when the search completes below it.
-        bool Try(Candidate<T> c, bool shortStage)
+        bool Try(Candidate<T> c, int pos, bool shortStage)
         {
             var cp = state.Save();
             var t0 = _clock.Elapsed.TotalSeconds;
@@ -113,11 +119,11 @@ internal sealed class BacktrackSearch<T, TChoice, TSave>(IPlanningState<TChoice,
             {
                 state.Restore(cp);
                 _deferred++;
-                notYet.Add(c);
+                notYet.Add((c, pos));
                 s.Log($"  {c.Label}: not yet — {r.Note} after {_clock.Elapsed.TotalSeconds - t0:F1} s");
                 return false;
             }
-            s.Outcome?.Invoke(c, _order, r.Verdict == Verdict.Yes, _clock.Elapsed.TotalSeconds - t0);
+            s.Outcome?.Invoke(c, _order, r.Verdict == Verdict.Yes, _clock.Elapsed.TotalSeconds - t0, node, pos);
             if (r.Verdict == Verdict.No) { _rejected++; _failed.Add($"{key}#{c.Key}"); state.Restore(cp); return false; }
             _confirmed++;
             if (!r.Places)
@@ -139,22 +145,23 @@ internal sealed class BacktrackSearch<T, TChoice, TSave>(IPlanningState<TChoice,
             return false;
         }
 
-        foreach (var c in candidates.OrderBy(x => x.Resumed ? 0 : 1).ThenBy(x => x.Rank))
+        for (var pos = 0; pos < sorted.Count; pos++)
         {
+            var c = sorted[pos];
             if (BudgetReached()) break;
             if (!c.Pre()) continue;
             if (s.FailureMemory && _failed.Contains($"{key}#{c.Key}")) { s.Log($"  {c.Label}: already rejected in this build state — skipped"); continue; }
-            if (Try(c, s.Staged && !c.Resumed)) return true;
+            if (Try(c, pos, s.Staged && !c.Resumed)) return true;
         }
         // "Not yet" candidates: the full budget only on the deepest branch (LazySP: evaluate only the current best plan).
         var parkedHere = false;
-        foreach (var c in notYet.ToList())
+        foreach (var (c, pos) in notYet.ToList())
         {
             if (!_escalateAll && _order.Count < _best.Count)
             { _parked++; parkedHere = true; s.Log($"  {c.Label}: not yet, off the deepest branch — left for a later pass"); continue; }
             if (BudgetReached()) break;
             s.Log($"  {c.Label}: retry at the full RRT budget");
-            if (Try(c, false)) return true;
+            if (Try(c, pos, false)) return true;
         }
         if (s.DeadEndMemory && !parkedHere && !BudgetReached()) _deadEnds.Add(key);
         return false;

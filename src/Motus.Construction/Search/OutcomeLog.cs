@@ -9,9 +9,23 @@ namespace Motus.Construction.Search;
 /// </summary>
 internal static class OutcomeLog
 {
-    /// <summary>One planner confirmation: what was tried, in which build state, and whether the planner kept it.</summary>
+    /// <summary>
+    /// One planner confirmation: what was tried, in which build state, and whether the planner kept it. Trailing fields
+    /// (null in old logs): <see cref="Stand"/> = stand origin (x, y, z) in metres, <see cref="F"/> = layout-free features
+    /// (<see cref="FeatureVersion"/>, see BambooFrontier.Features), <see cref="Node"/> = search expansion id,
+    /// <see cref="Pos"/> = position in that node's sorted order.
+    /// </summary>
     internal sealed record Outcome(string Layout, string Member, string Mode, string? Relay, int Placed, string State,
-        double Rank, bool Ok, double Seconds);
+        double Rank, bool Ok, double Seconds, double[]? Stand = null, double[]? F = null, int? FeatureVersion = null,
+        int? Node = null, int? Pos = null);
+
+    /// <summary>
+    /// One sorted candidate at a node, written before any try (tried or not). <see cref="Ok"/> is always null, so
+    /// <see cref="Read"/> (bool Ok) skips these rows and the confirm-rate prior never counts them. Untried = no
+    /// <see cref="Outcome"/> row with the same Node and Pos.
+    /// </summary>
+    internal sealed record Sorted(string Layout, string Member, string Mode, string? Relay, int Placed, string State,
+        double Rank, bool? Ok, double[]? Stand, double[]? F, int? FeatureVersion, int Node, int Pos);
 
     /// <summary>Short stable id of a layout (SHA-256 of its fingerprint, 12 hex digits).</summary>
     internal static string LayoutId(string fingerprint)
@@ -20,7 +34,10 @@ internal static class OutcomeLog
         return Convert.ToHexString(h, 0, 6).ToLowerInvariant();
     }
 
-    internal static void Append(string path, Outcome o) => File.AppendAllText(path, JsonSerializer.Serialize(o) + "\n");
+    internal static void Append<TRow>(string path, TRow o) => File.AppendAllText(path, JsonSerializer.Serialize(o) + "\n");
+
+    internal static void AppendAll<TRow>(string path, IEnumerable<TRow> rows) =>
+        File.AppendAllLines(path, rows.Select(o => JsonSerializer.Serialize(o)));
 
     /// <summary>Outcomes in the given JSONL files; missing files and unreadable lines are skipped.</summary>
     internal static List<Outcome> Read(IEnumerable<string> paths)
