@@ -10,6 +10,8 @@ Files:
 - Kinematics: `src/Motus.Construction/Bamboo/Handler9Kinematics.cs`.
 - Tests: `tests/Motus.Core.Tests/Handler9KinematicsTests.cs`.
 
+Three clamp stations hold one cane: Handler_1 and Handler_2 at the ends, MainClamp in the middle. The clamps take round profiles.
+
 This robot is not `bamboo_icd`. `bamboo_icd` is a 5R arm that hangs under a pole and walks with two grips. This robot is a fixed beam with three stations.
 
 ## DOF interpretation
@@ -40,7 +42,8 @@ The MainClamp chain is: beam → yaw → lift → slide → two roll clamps (two
 - World: z up. The beam runs along x. The beam bottom is at z = 0.
 - Each yaw axis is on the beam top, at the station x position.
 - Clamp frames: `handler_1_clamp`, `main_clamp_blue`, `main_clamp_yellow`, `handler_2_clamp`.
-- A clamp frame origin is on the cane axis. Its +x is along the cane.
+- A clamp frame origin is on the cane centreline. Its +x is along the cane.
+- The cane diameter does not move the clamp frames. It only sizes the jaws.
 - At yaw = 0, the clamp +x is world +x (along the beam).
 - The roll joints turn the clamp about its own +x. A roll does not move the cane axis.
 
@@ -69,7 +72,7 @@ All values are estimates from the slide proportions. They are approximate. Chang
 
 | Name | Value | Meaning |
 |------|-------|---------|
-| `cane_d` | 0.150 m | Maximum cane diameter (round profiles up to about 150 mm). The jaws close on this diameter. |
+| `cane_d` | 0.150 m | Cane diameter parameter. The default is a placeholder: the clamps take round profiles up to about 150 mm, and the exact size is not known. The jaws close on this diameter. |
 | `beam` | 4.0 × 0.30 × 0.30 m | Base beam length, width, height |
 | `station_x` | −1.80, 0, +1.80 m | Handler_1, MainClamp, Handler_2 positions along the beam |
 | `column_h` | 0.60 m | Beam top to cane axis at lift 0 |
@@ -85,3 +88,4 @@ All values are estimates from the slide proportions. They are approximate. Chang
 - Can a clamp tilt (pitch)? If not, the cane must stay horizontal.
 - Is a clamp centre on its yaw axis, or offset from it?
 - What are the real dimensions and stroke lengths?
+- What is the real cane diameter range (minimum and maximum)?

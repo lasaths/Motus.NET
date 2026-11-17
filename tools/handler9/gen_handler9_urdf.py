@@ -8,7 +8,7 @@ import math, pathlib
 
 # PLACEHOLDER dimensions in meters. Cane diameter 0.15 m is approximate (clamps take round profiles up to ~150 mm).
 DIMS = dict(
-    cane_d=0.150,                 # max cane diameter; jaws are drawn closed on this diameter
+    cane_d=0.150,                 # cane diameter PARAMETER (placeholder, exact size unknown); jaws close on it
     beam=(4.0, 0.30, 0.30),       # base beam length (x), width (y), height (z); beam bottom at z = 0
     station_x=(-1.80, 0.0, 1.80), # Handler_1, MainClamp, Handler_2 yaw axes along the beam
     column_h=0.60,                # beam top to cane axis at lift = 0
