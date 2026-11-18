@@ -3,36 +3,50 @@
 
 All dimensions are PLACEHOLDERS estimated from slide proportions. Edit DIMS, then run this script.
 Clamp open/close is gripper state, not a joint: the URDF has 9 actuated joints.
+Visuals and collisions are the same primitives. URDF has no half-round or trapezoid, so the cradle is a
+box under the cane and the MainClamp sled is two stacked boxes (a stepped trapezoid).
 """
 import math, pathlib
 
-# PLACEHOLDER dimensions in meters. Cane diameter 0.15 m is approximate (clamps take round profiles up to ~150 mm).
+# PLACEHOLDER dimensions in meters.
 DIMS = dict(
     cane_d=0.150,                 # cane diameter PARAMETER (placeholder, exact size unknown); jaws close on it
-    beam=(4.0, 0.30, 0.30),       # base beam length (x), width (y), height (z); beam bottom at z = 0
-    station_x=(-1.80, 0.0, 1.80), # Handler_1, MainClamp, Handler_2 yaw axes along the beam
-    column_h=0.60,                # beam top to cane axis at lift = 0
-    lift=(0.0, 0.40),             # axial vertical movement range
-    slide=(-0.25, 0.25),          # MainClamp linear movement along the cane axis
-    clamp_dx=0.15,                # MainClamp blue/yellow clamp offset from the carriage centre (+/- x)
-    jaw=(0.10, 0.03, 0.20),       # jaw plate size (x along cane, y thickness, z height)
+    beam=(4.0, 0.40, 0.15),       # long, low, flat base beam: length (x), width (y), height (z); bottom at z = 0
+    station_x=(-1.70, 0.0, 1.70), # Handler_1, MainClamp, Handler_2 yaw axes along the beam
+    turntable=(0.25, 0.06),       # round turntable radius, height; sits on the beam top
+    column_h=0.28,                # beam top to cane axis at lift = 0 (cane sits low)
+    lift=(0.0, 0.15),             # short axial vertical movement
+    slide=(-0.20, 0.20),          # MainClamp linear movement along the cane axis
+    clamp_dx=0.25,                # MainClamp blue/yellow clamp offset from the sled centre (+/- x)
+    block=(0.24, 0.40, 0.08),     # clamp base block (cradle) under the cane: x, y, z
+    jaw=(0.24, 0.08, 0.20),       # stationary / linear moving clamp block: x, y (thickness), z
+    sled=((0.90, 0.40, 0.05), (0.70, 0.30, 0.05)),  # MainClamp sled: bottom and top step (stepped trapezoid)
+    ring=(0.05, 0.10),            # blue/yellow rotating clamp: wall beyond the cane radius, length along x
 )
 YAW = (-math.pi, math.pi)         # slide: rotation about the vertical axis -180..+180
 ROLL = (-math.pi, math.pi)        # rotational freedom about the cane axis (limit not on the slide)
+ALONG_X = "0 1.5707963267948966 0"  # cylinder axis (local z) turned onto x
 
 D = DIMS
 r = D["cane_d"] / 2
 top = D["beam"][2]
+tt_r, tt_h = D["turntable"]
 
 def f(v):
     return " ".join(f"{x:.6g}" for x in v)
 
-def box(name, size, xyz):
-    return (f'    <visual name="{name}"><origin xyz="{f(xyz)}" rpy="0 0 0"/><geometry><box size="{f(size)}"/></geometry></visual>\n'
-            f'    <collision name="{name}"><origin xyz="{f(xyz)}" rpy="0 0 0"/><geometry><box size="{f(size)}"/></geometry></collision>\n')
+def shape(name, geom, xyz, rpy="0 0 0"):
+    o = f'<origin xyz="{f(xyz)}" rpy="{rpy}"/><geometry>{geom}</geometry>'
+    return f'    <visual name="{name}">{o}</visual>\n    <collision name="{name}">{o}</collision>\n'
 
-def link(name, boxes=()):
-    return f'  <link name="{name}">\n' + "".join(box(*b) for b in boxes) + "  </link>\n"
+def box(name, size, xyz):
+    return shape(name, f'<box size="{f(size)}"/>', xyz)
+
+def cyl(name, radius, length, xyz, rpy="0 0 0"):
+    return shape(name, f'<cylinder radius="{radius:.6g}" length="{length:.6g}"/>', xyz, rpy)
+
+def link(name, parts=""):
+    return f'  <link name="{name}">\n{parts}  </link>\n'
 
 def joint(name, kind, parent, child, xyz, axis=None, lim=None):
     s = f'  <joint name="{name}" type="{kind}">\n    <parent link="{parent}"/>\n    <child link="{child}"/>\n'
@@ -43,42 +57,53 @@ def joint(name, kind, parent, child, xyz, axis=None, lim=None):
         s += f'    <limit lower="{lim[0]:.6f}" upper="{lim[1]:.6f}" effort="100" velocity="0.5"/>\n'
     return s + "  </joint>\n"
 
-def jaws(prefix):
-    # Stationary clamp on -y, linear moving clamp on +y, both closed on the max cane diameter.
-    jy = r + D["jaw"][1] / 2
-    return [(f"{prefix} stationary jaw", D["jaw"], (0, -jy, 0)), (f"{prefix} moving jaw", D["jaw"], (0, jy, 0))]
+def jaws(prefix, x=0.0):
+    # Stationary clamp on -y, linear moving clamp on +y, both closed on the cane diameter.
+    jx, jy, jz = D["jaw"]
+    y = r + jy / 2
+    z = -r - D["block"][2] + jz / 2
+    return (box(f"{prefix} stationary clamp", D["jaw"], (x, -y, z)) +
+            box(f"{prefix} linear moving clamp", D["jaw"], (x, y, z)))
 
-col = (0.20, 0.20, D["column_h"] - r - D["jaw"][2] / 2)
+def lift_post(base_z):
+    # From below the turntable top (hidden at lift 0) up to base_z, so the post never floats when lifted.
+    lo = -D["column_h"] + tt_h - D["lift"][1]
+    return box("lift post", (0.16, 0.16, base_z - lo), (0, 0, (base_z + lo) / 2))
+
 out = ['<?xml version="1.0" encoding="utf-8"?>\n',
        "<!-- GENERATED by tools/handler9/gen_handler9_urdf.py - edit DIMS there, not this file. -->\n",
        "<!-- EXPERIMENTAL 9-DOF bamboo handler. All dimensions are PLACEHOLDERS (docs/handler9.md). -->\n",
        '<robot name="handler9">\n',
-       link("base_link", [("base beam", D["beam"], (0, 0, top / 2))])]
+       link("base_link", box("base beam", D["beam"], (0, 0, top / 2)))]
 
 def station_column(s, x):
-    global out
-    out += [joint(f"{s}_yaw", "revolute", "base_link", f"{s}_turntable", (x, 0, top), "0 0 1", YAW),
-            link(f"{s}_turntable", [("turntable", (0.30, 0.30, 0.05), (0, 0, 0.025))]),
-            # lift = 0 puts the cane axis column_h above the beam top
-            joint(f"{s}_lift", "prismatic", f"{s}_turntable", f"{s}_carriage", (0, 0, D["column_h"]), "0 0 1", D["lift"])]
+    out.extend([joint(f"{s}_yaw", "revolute", "base_link", f"{s}_turntable", (x, 0, top), "0 0 1", YAW),
+                link(f"{s}_turntable", cyl("turntable", tt_r, tt_h, (0, 0, tt_h / 2))),
+                # lift = 0 puts the cane axis column_h above the beam top
+                joint(f"{s}_lift", "prismatic", f"{s}_turntable", f"{s}_carriage", (0, 0, D["column_h"]), "0 0 1", D["lift"])])
 
+bx, by, bz = D["block"]
 for s, x in (("handler_1", D["station_x"][0]), ("handler_2", D["station_x"][2])):
     station_column(s, x)
-    out += [link(f"{s}_carriage", [("column", col, (0, 0, -D["column_h"] + col[2] / 2 + 0.05))] + jaws(s)),
+    base_z = -r - bz
+    out += [link(f"{s}_carriage", lift_post(base_z) + box("cradle block", D["block"], (0, 0, base_z + bz / 2)) + jaws(s)),
             joint(f"{s}_clamp_fixed", "fixed", f"{s}_carriage", f"{s}_clamp", (0, 0, 0)),
             link(f"{s}_clamp")]
 
 s = "main_clamp"
 station_column(s, D["station_x"][1])
-out += [link(f"{s}_carriage", [("column", col, (0, 0, -D["column_h"] + col[2] / 2 + 0.05))]),
+(s0, s1) = D["sled"]
+sled_top = -r - D["ring"][0]          # the rotating clamps stand on the sled top
+out += [link(f"{s}_carriage", lift_post(sled_top - s0[2] - s1[2])),
         joint(f"{s}_slide", "prismatic", f"{s}_carriage", f"{s}_sled", (0, 0, 0), "1 0 0", D["slide"]),
-        link(f"{s}_sled", [("sled", (2 * D["clamp_dx"] + 0.1, 0.30, 0.04), (0, 0, -r - D["jaw"][2] / 2 - 0.02))])]
+        link(f"{s}_sled", box("sled base", s0, (0, 0, sled_top - s1[2] - s0[2] / 2)) +
+             box("sled top", s1, (0, 0, sled_top - s1[2] / 2)) + jaws("main_clamp", 0.0))]
 for c, sign in (("blue", -1), ("yellow", 1)):
+    wall, length = D["ring"]
     out += [joint(f"{s}_{c}_roll", "revolute", f"{s}_sled", f"{s}_{c}", (sign * D["clamp_dx"], 0, 0), "1 0 0", ROLL),
-            link(f"{s}_{c}", jaws(f"{s} {c}"))]
+            link(f"{s}_{c}", cyl(f"{c} rotating clamp", r + wall, length, (0, 0, 0), ALONG_X))]
 out.append("</robot>\n")
 
-# Joint order above: handler_1 (yaw, lift), handler_2 (yaw, lift), main_clamp (yaw, lift, slide, blue_roll, yellow_roll).
 path = pathlib.Path(__file__).resolve().parents[2] / "tests/fixtures/handler9/handler9.urdf"
 path.write_text("".join(out), encoding="utf-8")
 print(path)

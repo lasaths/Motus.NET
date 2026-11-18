@@ -78,7 +78,7 @@ Handler_1 and Handler_2 can hold a rod without the MainClamp. `TrySolveRod` solv
 
 Closed-chain constraint:
 
-- The beam fixes the horizontal distance `d` between the two clamps (3.6 m at the placeholder layout).
+- The beam fixes the horizontal distance `d` between the two clamps (3.4 m at the placeholder layout).
 - The distance between the clamps along the rod is `d / cos(tilt)`. It changes when the tilt changes.
 - Thus the rod must slide in at least one clamp when the tilt changes. A rod held tight in both clamps can only move up and down without tilt.
 - A tilted rod also needs a passive pitch at each clamp. The URDF has no pitch joint. The clamp +x stays horizontal.
@@ -91,13 +91,22 @@ All values are estimates from the slide proportions. They are approximate. Chang
 | Name | Value | Meaning |
 |------|-------|---------|
 | `cane_d` | 0.150 m | Cane diameter parameter. The default is a placeholder: the clamps take round profiles up to about 150 mm, and the exact size is not known. The jaws close on this diameter. |
-| `beam` | 4.0 × 0.30 × 0.30 m | Base beam length, width, height |
-| `station_x` | −1.80, 0, +1.80 m | Handler_1, MainClamp, Handler_2 positions along the beam |
-| `column_h` | 0.60 m | Beam top to cane axis at lift 0 |
-| `lift` | 0 .. 0.40 m | Vertical movement range |
-| `slide` | −0.25 .. +0.25 m | MainClamp movement along the cane |
-| `clamp_dx` | 0.15 m | Blue and yellow clamp offset from the MainClamp centre |
-| `jaw` | 0.10 × 0.03 × 0.20 m | Jaw plate size |
+| `beam` | 4.0 × 0.40 × 0.15 m | Long, low, flat base beam: length, width, height |
+| `station_x` | −1.70, 0, +1.70 m | Handler_1, MainClamp, Handler_2 positions along the beam |
+| `turntable` | r 0.25 m, h 0.06 m | Round turntable on the beam top (one per station) |
+| `column_h` | 0.28 m | Beam top to cane axis at lift 0. The cane sits low. |
+| `lift` | 0 .. 0.15 m | Short vertical movement |
+| `slide` | −0.20 .. +0.20 m | MainClamp movement along the cane |
+| `clamp_dx` | 0.25 m | Blue and yellow clamp offset from the sled centre |
+| `block` | 0.24 × 0.40 × 0.08 m | Cradle block under the cane |
+| `jaw` | 0.24 × 0.08 × 0.20 m | Stationary clamp and linear moving clamp blocks |
+| `sled` | 0.90 × 0.40 × 0.05 m + 0.70 × 0.30 × 0.05 m | MainClamp sled: two stacked boxes (a stepped trapezoid) |
+| `ring` | wall 0.05 m, length 0.10 m | Blue and yellow rotating clamps: cylinders around the cane |
+
+Geometry notes:
+
+- URDF has no half-round or trapezoid shape. The cradle is a box under the cane. The sled is two stacked boxes.
+- The Motus collision loader loads a cylinder as a capsule. Thus the turntable and ring collision shapes are larger than the visuals.
 
 ## Open questions
 

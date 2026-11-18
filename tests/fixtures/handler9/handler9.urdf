@@ -3,34 +3,36 @@
 <!-- EXPERIMENTAL 9-DOF bamboo handler. All dimensions are PLACEHOLDERS (docs/handler9.md). -->
 <robot name="handler9">
   <link name="base_link">
-    <visual name="base beam"><origin xyz="0 0 0.15" rpy="0 0 0"/><geometry><box size="4 0.3 0.3"/></geometry></visual>
-    <collision name="base beam"><origin xyz="0 0 0.15" rpy="0 0 0"/><geometry><box size="4 0.3 0.3"/></geometry></collision>
+    <visual name="base beam"><origin xyz="0 0 0.075" rpy="0 0 0"/><geometry><box size="4 0.4 0.15"/></geometry></visual>
+    <collision name="base beam"><origin xyz="0 0 0.075" rpy="0 0 0"/><geometry><box size="4 0.4 0.15"/></geometry></collision>
   </link>
   <joint name="handler_1_yaw" type="revolute">
     <parent link="base_link"/>
     <child link="handler_1_turntable"/>
-    <origin xyz="-1.8 0 0.3" rpy="0 0 0"/>
+    <origin xyz="-1.7 0 0.15" rpy="0 0 0"/>
     <axis xyz="0 0 1"/>
     <limit lower="-3.141593" upper="3.141593" effort="100" velocity="0.5"/>
   </joint>
   <link name="handler_1_turntable">
-    <visual name="turntable"><origin xyz="0 0 0.025" rpy="0 0 0"/><geometry><box size="0.3 0.3 0.05"/></geometry></visual>
-    <collision name="turntable"><origin xyz="0 0 0.025" rpy="0 0 0"/><geometry><box size="0.3 0.3 0.05"/></geometry></collision>
+    <visual name="turntable"><origin xyz="0 0 0.03" rpy="0 0 0"/><geometry><cylinder radius="0.25" length="0.06"/></geometry></visual>
+    <collision name="turntable"><origin xyz="0 0 0.03" rpy="0 0 0"/><geometry><cylinder radius="0.25" length="0.06"/></geometry></collision>
   </link>
   <joint name="handler_1_lift" type="prismatic">
     <parent link="handler_1_turntable"/>
     <child link="handler_1_carriage"/>
-    <origin xyz="0 0 0.6" rpy="0 0 0"/>
+    <origin xyz="0 0 0.28" rpy="0 0 0"/>
     <axis xyz="0 0 1"/>
-    <limit lower="0.000000" upper="0.400000" effort="100" velocity="0.5"/>
+    <limit lower="0.000000" upper="0.150000" effort="100" velocity="0.5"/>
   </joint>
   <link name="handler_1_carriage">
-    <visual name="column"><origin xyz="0 0 -0.3375" rpy="0 0 0"/><geometry><box size="0.2 0.2 0.425"/></geometry></visual>
-    <collision name="column"><origin xyz="0 0 -0.3375" rpy="0 0 0"/><geometry><box size="0.2 0.2 0.425"/></geometry></collision>
-    <visual name="handler_1 stationary jaw"><origin xyz="0 -0.09 0" rpy="0 0 0"/><geometry><box size="0.1 0.03 0.2"/></geometry></visual>
-    <collision name="handler_1 stationary jaw"><origin xyz="0 -0.09 0" rpy="0 0 0"/><geometry><box size="0.1 0.03 0.2"/></geometry></collision>
-    <visual name="handler_1 moving jaw"><origin xyz="0 0.09 0" rpy="0 0 0"/><geometry><box size="0.1 0.03 0.2"/></geometry></visual>
-    <collision name="handler_1 moving jaw"><origin xyz="0 0.09 0" rpy="0 0 0"/><geometry><box size="0.1 0.03 0.2"/></geometry></collision>
+    <visual name="lift post"><origin xyz="0 0 -0.2625" rpy="0 0 0"/><geometry><box size="0.16 0.16 0.215"/></geometry></visual>
+    <collision name="lift post"><origin xyz="0 0 -0.2625" rpy="0 0 0"/><geometry><box size="0.16 0.16 0.215"/></geometry></collision>
+    <visual name="cradle block"><origin xyz="0 0 -0.115" rpy="0 0 0"/><geometry><box size="0.24 0.4 0.08"/></geometry></visual>
+    <collision name="cradle block"><origin xyz="0 0 -0.115" rpy="0 0 0"/><geometry><box size="0.24 0.4 0.08"/></geometry></collision>
+    <visual name="handler_1 stationary clamp"><origin xyz="0 -0.115 -0.055" rpy="0 0 0"/><geometry><box size="0.24 0.08 0.2"/></geometry></visual>
+    <collision name="handler_1 stationary clamp"><origin xyz="0 -0.115 -0.055" rpy="0 0 0"/><geometry><box size="0.24 0.08 0.2"/></geometry></collision>
+    <visual name="handler_1 linear moving clamp"><origin xyz="0 0.115 -0.055" rpy="0 0 0"/><geometry><box size="0.24 0.08 0.2"/></geometry></visual>
+    <collision name="handler_1 linear moving clamp"><origin xyz="0 0.115 -0.055" rpy="0 0 0"/><geometry><box size="0.24 0.08 0.2"/></geometry></collision>
   </link>
   <joint name="handler_1_clamp_fixed" type="fixed">
     <parent link="handler_1_carriage"/>
@@ -42,28 +44,30 @@
   <joint name="handler_2_yaw" type="revolute">
     <parent link="base_link"/>
     <child link="handler_2_turntable"/>
-    <origin xyz="1.8 0 0.3" rpy="0 0 0"/>
+    <origin xyz="1.7 0 0.15" rpy="0 0 0"/>
     <axis xyz="0 0 1"/>
     <limit lower="-3.141593" upper="3.141593" effort="100" velocity="0.5"/>
   </joint>
   <link name="handler_2_turntable">
-    <visual name="turntable"><origin xyz="0 0 0.025" rpy="0 0 0"/><geometry><box size="0.3 0.3 0.05"/></geometry></visual>
-    <collision name="turntable"><origin xyz="0 0 0.025" rpy="0 0 0"/><geometry><box size="0.3 0.3 0.05"/></geometry></collision>
+    <visual name="turntable"><origin xyz="0 0 0.03" rpy="0 0 0"/><geometry><cylinder radius="0.25" length="0.06"/></geometry></visual>
+    <collision name="turntable"><origin xyz="0 0 0.03" rpy="0 0 0"/><geometry><cylinder radius="0.25" length="0.06"/></geometry></collision>
   </link>
   <joint name="handler_2_lift" type="prismatic">
     <parent link="handler_2_turntable"/>
     <child link="handler_2_carriage"/>
-    <origin xyz="0 0 0.6" rpy="0 0 0"/>
+    <origin xyz="0 0 0.28" rpy="0 0 0"/>
     <axis xyz="0 0 1"/>
-    <limit lower="0.000000" upper="0.400000" effort="100" velocity="0.5"/>
+    <limit lower="0.000000" upper="0.150000" effort="100" velocity="0.5"/>
   </joint>
   <link name="handler_2_carriage">
-    <visual name="column"><origin xyz="0 0 -0.3375" rpy="0 0 0"/><geometry><box size="0.2 0.2 0.425"/></geometry></visual>
-    <collision name="column"><origin xyz="0 0 -0.3375" rpy="0 0 0"/><geometry><box size="0.2 0.2 0.425"/></geometry></collision>
-    <visual name="handler_2 stationary jaw"><origin xyz="0 -0.09 0" rpy="0 0 0"/><geometry><box size="0.1 0.03 0.2"/></geometry></visual>
-    <collision name="handler_2 stationary jaw"><origin xyz="0 -0.09 0" rpy="0 0 0"/><geometry><box size="0.1 0.03 0.2"/></geometry></collision>
-    <visual name="handler_2 moving jaw"><origin xyz="0 0.09 0" rpy="0 0 0"/><geometry><box size="0.1 0.03 0.2"/></geometry></visual>
-    <collision name="handler_2 moving jaw"><origin xyz="0 0.09 0" rpy="0 0 0"/><geometry><box size="0.1 0.03 0.2"/></geometry></collision>
+    <visual name="lift post"><origin xyz="0 0 -0.2625" rpy="0 0 0"/><geometry><box size="0.16 0.16 0.215"/></geometry></visual>
+    <collision name="lift post"><origin xyz="0 0 -0.2625" rpy="0 0 0"/><geometry><box size="0.16 0.16 0.215"/></geometry></collision>
+    <visual name="cradle block"><origin xyz="0 0 -0.115" rpy="0 0 0"/><geometry><box size="0.24 0.4 0.08"/></geometry></visual>
+    <collision name="cradle block"><origin xyz="0 0 -0.115" rpy="0 0 0"/><geometry><box size="0.24 0.4 0.08"/></geometry></collision>
+    <visual name="handler_2 stationary clamp"><origin xyz="0 -0.115 -0.055" rpy="0 0 0"/><geometry><box size="0.24 0.08 0.2"/></geometry></visual>
+    <collision name="handler_2 stationary clamp"><origin xyz="0 -0.115 -0.055" rpy="0 0 0"/><geometry><box size="0.24 0.08 0.2"/></geometry></collision>
+    <visual name="handler_2 linear moving clamp"><origin xyz="0 0.115 -0.055" rpy="0 0 0"/><geometry><box size="0.24 0.08 0.2"/></geometry></visual>
+    <collision name="handler_2 linear moving clamp"><origin xyz="0 0.115 -0.055" rpy="0 0 0"/><geometry><box size="0.24 0.08 0.2"/></geometry></collision>
   </link>
   <joint name="handler_2_clamp_fixed" type="fixed">
     <parent link="handler_2_carriage"/>
@@ -75,60 +79,62 @@
   <joint name="main_clamp_yaw" type="revolute">
     <parent link="base_link"/>
     <child link="main_clamp_turntable"/>
-    <origin xyz="0 0 0.3" rpy="0 0 0"/>
+    <origin xyz="0 0 0.15" rpy="0 0 0"/>
     <axis xyz="0 0 1"/>
     <limit lower="-3.141593" upper="3.141593" effort="100" velocity="0.5"/>
   </joint>
   <link name="main_clamp_turntable">
-    <visual name="turntable"><origin xyz="0 0 0.025" rpy="0 0 0"/><geometry><box size="0.3 0.3 0.05"/></geometry></visual>
-    <collision name="turntable"><origin xyz="0 0 0.025" rpy="0 0 0"/><geometry><box size="0.3 0.3 0.05"/></geometry></collision>
+    <visual name="turntable"><origin xyz="0 0 0.03" rpy="0 0 0"/><geometry><cylinder radius="0.25" length="0.06"/></geometry></visual>
+    <collision name="turntable"><origin xyz="0 0 0.03" rpy="0 0 0"/><geometry><cylinder radius="0.25" length="0.06"/></geometry></collision>
   </link>
   <joint name="main_clamp_lift" type="prismatic">
     <parent link="main_clamp_turntable"/>
     <child link="main_clamp_carriage"/>
-    <origin xyz="0 0 0.6" rpy="0 0 0"/>
+    <origin xyz="0 0 0.28" rpy="0 0 0"/>
     <axis xyz="0 0 1"/>
-    <limit lower="0.000000" upper="0.400000" effort="100" velocity="0.5"/>
+    <limit lower="0.000000" upper="0.150000" effort="100" velocity="0.5"/>
   </joint>
   <link name="main_clamp_carriage">
-    <visual name="column"><origin xyz="0 0 -0.3375" rpy="0 0 0"/><geometry><box size="0.2 0.2 0.425"/></geometry></visual>
-    <collision name="column"><origin xyz="0 0 -0.3375" rpy="0 0 0"/><geometry><box size="0.2 0.2 0.425"/></geometry></collision>
+    <visual name="lift post"><origin xyz="0 0 -0.2975" rpy="0 0 0"/><geometry><box size="0.16 0.16 0.145"/></geometry></visual>
+    <collision name="lift post"><origin xyz="0 0 -0.2975" rpy="0 0 0"/><geometry><box size="0.16 0.16 0.145"/></geometry></collision>
   </link>
   <joint name="main_clamp_slide" type="prismatic">
     <parent link="main_clamp_carriage"/>
     <child link="main_clamp_sled"/>
     <origin xyz="0 0 0" rpy="0 0 0"/>
     <axis xyz="1 0 0"/>
-    <limit lower="-0.250000" upper="0.250000" effort="100" velocity="0.5"/>
+    <limit lower="-0.200000" upper="0.200000" effort="100" velocity="0.5"/>
   </joint>
   <link name="main_clamp_sled">
-    <visual name="sled"><origin xyz="0 0 -0.195" rpy="0 0 0"/><geometry><box size="0.4 0.3 0.04"/></geometry></visual>
-    <collision name="sled"><origin xyz="0 0 -0.195" rpy="0 0 0"/><geometry><box size="0.4 0.3 0.04"/></geometry></collision>
+    <visual name="sled base"><origin xyz="0 0 -0.2" rpy="0 0 0"/><geometry><box size="0.9 0.4 0.05"/></geometry></visual>
+    <collision name="sled base"><origin xyz="0 0 -0.2" rpy="0 0 0"/><geometry><box size="0.9 0.4 0.05"/></geometry></collision>
+    <visual name="sled top"><origin xyz="0 0 -0.15" rpy="0 0 0"/><geometry><box size="0.7 0.3 0.05"/></geometry></visual>
+    <collision name="sled top"><origin xyz="0 0 -0.15" rpy="0 0 0"/><geometry><box size="0.7 0.3 0.05"/></geometry></collision>
+    <visual name="main_clamp stationary clamp"><origin xyz="0 -0.115 -0.055" rpy="0 0 0"/><geometry><box size="0.24 0.08 0.2"/></geometry></visual>
+    <collision name="main_clamp stationary clamp"><origin xyz="0 -0.115 -0.055" rpy="0 0 0"/><geometry><box size="0.24 0.08 0.2"/></geometry></collision>
+    <visual name="main_clamp linear moving clamp"><origin xyz="0 0.115 -0.055" rpy="0 0 0"/><geometry><box size="0.24 0.08 0.2"/></geometry></visual>
+    <collision name="main_clamp linear moving clamp"><origin xyz="0 0.115 -0.055" rpy="0 0 0"/><geometry><box size="0.24 0.08 0.2"/></geometry></collision>
   </link>
   <joint name="main_clamp_blue_roll" type="revolute">
     <parent link="main_clamp_sled"/>
     <child link="main_clamp_blue"/>
-    <origin xyz="-0.15 0 0" rpy="0 0 0"/>
+    <origin xyz="-0.25 0 0" rpy="0 0 0"/>
     <axis xyz="1 0 0"/>
     <limit lower="-3.141593" upper="3.141593" effort="100" velocity="0.5"/>
   </joint>
   <link name="main_clamp_blue">
-    <visual name="main_clamp blue stationary jaw"><origin xyz="0 -0.09 0" rpy="0 0 0"/><geometry><box size="0.1 0.03 0.2"/></geometry></visual>
-    <collision name="main_clamp blue stationary jaw"><origin xyz="0 -0.09 0" rpy="0 0 0"/><geometry><box size="0.1 0.03 0.2"/></geometry></collision>
-    <visual name="main_clamp blue moving jaw"><origin xyz="0 0.09 0" rpy="0 0 0"/><geometry><box size="0.1 0.03 0.2"/></geometry></visual>
-    <collision name="main_clamp blue moving jaw"><origin xyz="0 0.09 0" rpy="0 0 0"/><geometry><box size="0.1 0.03 0.2"/></geometry></collision>
+    <visual name="blue rotating clamp"><origin xyz="0 0 0" rpy="0 1.5707963267948966 0"/><geometry><cylinder radius="0.125" length="0.1"/></geometry></visual>
+    <collision name="blue rotating clamp"><origin xyz="0 0 0" rpy="0 1.5707963267948966 0"/><geometry><cylinder radius="0.125" length="0.1"/></geometry></collision>
   </link>
   <joint name="main_clamp_yellow_roll" type="revolute">
     <parent link="main_clamp_sled"/>
     <child link="main_clamp_yellow"/>
-    <origin xyz="0.15 0 0" rpy="0 0 0"/>
+    <origin xyz="0.25 0 0" rpy="0 0 0"/>
     <axis xyz="1 0 0"/>
     <limit lower="-3.141593" upper="3.141593" effort="100" velocity="0.5"/>
   </joint>
   <link name="main_clamp_yellow">
-    <visual name="main_clamp yellow stationary jaw"><origin xyz="0 -0.09 0" rpy="0 0 0"/><geometry><box size="0.1 0.03 0.2"/></geometry></visual>
-    <collision name="main_clamp yellow stationary jaw"><origin xyz="0 -0.09 0" rpy="0 0 0"/><geometry><box size="0.1 0.03 0.2"/></geometry></collision>
-    <visual name="main_clamp yellow moving jaw"><origin xyz="0 0.09 0" rpy="0 0 0"/><geometry><box size="0.1 0.03 0.2"/></geometry></visual>
-    <collision name="main_clamp yellow moving jaw"><origin xyz="0 0.09 0" rpy="0 0 0"/><geometry><box size="0.1 0.03 0.2"/></geometry></collision>
+    <visual name="yellow rotating clamp"><origin xyz="0 0 0" rpy="0 1.5707963267948966 0"/><geometry><cylinder radius="0.125" length="0.1"/></geometry></visual>
+    <collision name="yellow rotating clamp"><origin xyz="0 0 0" rpy="0 1.5707963267948966 0"/><geometry><cylinder radius="0.125" length="0.1"/></geometry></collision>
   </link>
 </robot>

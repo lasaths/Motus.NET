@@ -76,8 +76,8 @@ public class Handler9KinematicsTests
         var zero = new double[9];
         var f = k.ClampFrame(zero, "main_clamp_blue");
 
-        var high = P(f); high[2] += 1.0;
-        Assert.False(k.TrySolveClamp("handler_1_clamp", new[] { -1.8, 0, high[2] }, X(f), zero, out _, out var why));
+        var high = P(k.ClampFrame(zero, "handler_1_clamp")); high[2] += 1.0;
+        Assert.False(k.TrySolveClamp("handler_1_clamp", high, X(f), zero, out _, out var why));
         Assert.Contains("lift", why);
 
         var far = P(f); far[0] += 1.0;
@@ -106,8 +106,8 @@ public class Handler9KinematicsTests
 
     [Theory]
     [InlineData(1.0, 0.0)]
-    [InlineData(1.0, 0.25)]
-    [InlineData(-1.0, 0.4)]
+    [InlineData(1.0, 0.07)]
+    [InlineData(-1.0, 0.14)]
     public void Cane_AllStationsHoldOneStraightCane(double dirX, double raise)
     {
         var k = Load();
@@ -139,9 +139,9 @@ public class Handler9KinematicsTests
     }
 
     [Theory]
-    [InlineData(0.0, 0.1)]
-    [InlineData(0.05, 0.2)]
-    [InlineData(-0.08, 0.15)]
+    [InlineData(0.0, 0.07)]
+    [InlineData(0.015, 0.07)]
+    [InlineData(-0.015, 0.07)]
     public void Rod_OuterClampsAlone_HoldATiltedRodInTheBeamPlane(double tilt, double raise)
     {
         var k = Load();
