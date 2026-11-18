@@ -1,109 +1,125 @@
 #!/usr/bin/env python3
-"""Generate tests/fixtures/handler9/handler9.urdf (EXPERIMENTAL 9-DOF bamboo handler, docs/handler9.md).
+"""Generate tests/fixtures/handler9/handler9.urdf (EXPERIMENTAL bamboo handler, docs/handler9.md).
 
-All dimensions are PLACEHOLDERS estimated from slide proportions. Edit DIMS, then run this script.
-Clamp open/close is gripper state, not a joint: the URDF has 9 actuated joints.
-Visuals and collisions are the same primitives. URDF has no half-round or trapezoid, so the cradle is a
-box under the cane and the MainClamp sled is two stacked boxes (a stepped trapezoid).
+Source: Lassie's CAD 'Bambino Kinematic Schematics.step' (Autodesk export, mm, Y-up).
+All numbers below are CAD length units (LU). The STEP header says mm; the part names say 'LengthUnits'.
+LU sets the scale of the whole robot in one place. Meshes come from tools/handler9/export_meshes.py.
+Joints follow the CAD movers: per handler yaw + lift + linear moving clamp (feed); MainClamp yaw + lift +
+per gripper linear translation + axial rotation. Clamp open/close is not in the CAD and is gripper state.
 """
 import math, pathlib
 
-# PLACEHOLDER dimensions in meters.
+LU = 0.001  # meters per CAD length unit (STEP header: mm)
+
+# CAD dimensions in LU, Motus frame (x along the beam, z up; CAD y -> Motus z, CAD z -> Motus -y).
 DIMS = dict(
-    cane_d=0.150,                 # cane diameter PARAMETER (placeholder, exact size unknown); jaws close on it
-    beam=(4.0, 0.40, 0.15),       # long, low, flat base beam: length (x), width (y), height (z); bottom at z = 0
-    station_x=(-1.70, 0.0, 1.70), # Handler_1, MainClamp, Handler_2 yaw axes along the beam
-    turntable=(0.25, 0.06),       # round turntable radius, height; sits on the beam top
-    column_h=0.28,                # beam top to cane axis at lift = 0 (cane sits low)
-    lift=(0.0, 0.15),             # short axial vertical movement
-    slide=(-0.20, 0.20),          # MainClamp linear movement along the cane axis
-    clamp_dx=0.25,                # MainClamp blue/yellow clamp offset from the sled centre (+/- x)
-    block=(0.24, 0.40, 0.08),     # clamp base block (cradle) under the cane: x, y, z
-    jaw=(0.24, 0.08, 0.20),       # stationary / linear moving clamp block: x, y (thickness), z
-    sled=((0.90, 0.40, 0.05), (0.70, 0.30, 0.05)),  # MainClamp sled: bottom and top step (stepped trapezoid)
-    ring=(0.05, 0.10),            # blue/yellow rotating clamp: wall beyond the cane radius, length along x
+    cane_d=60.0,                  # 'Bamboo/60LU_Dia'; the gripper cradles have radius 30
+    beam=(1000.0, 220.0, 80.0),   # 'Backbone': length (x), depth (y), height (z); bottom at z = 0
+    station_x=375.0,              # Handler_1 / Handler_2 yaw axes at -/+375; MainClamp at 0
+    cane_z=242.0,                 # cane centreline height (beam top 80 + 162)
+    static_dx=50.4,               # static gripper centre: 50.4 from the handler axis, toward the beam centre
+    active_dx=50.4,               # active gripper centre: 50.4 from the handler axis, toward the beam end
+    feed=95.0,                    # 'ActiveGriper - 95 LegthUnits Extention': stroke away from the static gripper
+    main_dx=170.0,                # MainClamp grippers at -/+170 (blue = -x side, yellow = +x side)
+    main_slide=110.0,             # MainClamp linear translation toward the centre (plate half-length 230, gripper 120 wide)
+    lift=(90.0, 95.0),            # lift stroke: handler, MainClamp (shaft length below the beam; inferred)
+    roll_deg=40.0,                # 'Axial Rotation_+-40Deg'
 )
 YAW = (-math.pi, math.pi)         # slide: rotation about the vertical axis -180..+180
-ROLL = (-math.pi, math.pi)        # rotational freedom about the cane axis (limit not on the slide)
-ALONG_X = "0 1.5707963267948966 0"  # cylinder axis (local z) turned onto x
 
 D = DIMS
-r = D["cane_d"] / 2
 top = D["beam"][2]
-tt_r, tt_h = D["turntable"]
 
 def f(v):
     return " ".join(f"{x:.6g}" for x in v)
 
-def shape(name, geom, xyz, rpy="0 0 0"):
-    o = f'<origin xyz="{f(xyz)}" rpy="{rpy}"/><geometry>{geom}</geometry>'
-    return f'    <visual name="{name}">{o}</visual>\n    <collision name="{name}">{o}</collision>\n'
+def m(v):
+    return [x * LU for x in v]
 
-def box(name, size, xyz):
-    return shape(name, f'<box size="{f(size)}"/>', xyz)
-
-def cyl(name, radius, length, xyz, rpy="0 0 0"):
-    return shape(name, f'<cylinder radius="{radius:.6g}" length="{length:.6g}"/>', xyz, rpy)
+def mesh(name, box_c, box_s):
+    s = f"{LU:g} {LU:g} {LU:g}"
+    return (f'    <visual name="{name}"><origin xyz="0 0 0" rpy="0 0 0"/><geometry><mesh filename="meshes/{name}.stl" scale="{s}"/></geometry></visual>\n'
+            f'    <collision name="{name}"><origin xyz="{f(m(box_c))}" rpy="0 0 0"/><geometry><box size="{f(m(box_s))}"/></geometry></collision>\n')
 
 def link(name, parts=""):
     return f'  <link name="{name}">\n{parts}  </link>\n'
 
 def joint(name, kind, parent, child, xyz, axis=None, lim=None):
     s = f'  <joint name="{name}" type="{kind}">\n    <parent link="{parent}"/>\n    <child link="{child}"/>\n'
-    s += f'    <origin xyz="{f(xyz)}" rpy="0 0 0"/>\n'
+    s += f'    <origin xyz="{f(m(xyz))}" rpy="0 0 0"/>\n'
     if axis:
         s += f'    <axis xyz="{axis}"/>\n'
     if lim:
         s += f'    <limit lower="{lim[0]:.6f}" upper="{lim[1]:.6f}" effort="100" velocity="0.5"/>\n'
     return s + "  </joint>\n"
 
-def jaws(prefix, x=0.0):
-    # Stationary clamp on -y, linear moving clamp on +y, both closed on the cane diameter.
-    jx, jy, jz = D["jaw"]
-    y = r + jy / 2
-    z = -r - D["block"][2] + jz / 2
-    return (box(f"{prefix} stationary clamp", D["jaw"], (x, -y, z)) +
-            box(f"{prefix} linear moving clamp", D["jaw"], (x, y, z)))
+# Link frames at q = 0 in world LU, used by export_meshes.py to put each CAD part into its link frame.
+# Every gripper/clamp frame is on the cane centreline with +x along the cane.
+FRAMES = {"base_link": (0, 0, 0)}
+# CAD part -> link. Collision boxes are the part bounding boxes in the link frame (see export_meshes.py).
+PARTS = {
+    "backbone": "base_link",
+    "handler_1_plate": "handler_1_carriage", "handler_1_static": "handler_1_clamp", "handler_1_active": "handler_1_active",
+    "handler_2_plate": "handler_2_carriage", "handler_2_static": "handler_2_clamp", "handler_2_active": "handler_2_active",
+    "main_clamp_plate": "main_clamp_carriage",
+    "main_clamp_blue_translation": "main_clamp_blue_sled", "main_clamp_blue_rotation": "main_clamp_blue",
+    "main_clamp_yellow_translation": "main_clamp_yellow_sled", "main_clamp_yellow_rotation": "main_clamp_yellow",
+}
 
-def lift_post(base_z):
-    # From below the turntable top (hidden at lift 0) up to base_z, so the post never floats when lifted.
-    lo = -D["column_h"] + tt_h - D["lift"][1]
-    return box("lift post", (0.16, 0.16, base_z - lo), (0, 0, (base_z + lo) / 2))
+def build(boxes):
+    out = ['<?xml version="1.0" encoding="utf-8"?>\n',
+           "<!-- GENERATED by tools/handler9/gen_handler9_urdf.py - edit it, not this file. -->\n",
+           "<!-- EXPERIMENTAL bamboo handler from 'Bambino Kinematic Schematics.step' (docs/handler9.md). -->\n",
+           '<robot name="handler9">\n']
+    parts_of = {}
+    for p, l in PARTS.items():
+        parts_of.setdefault(l, []).append(p)
+    def L(name):
+        return link(name, "".join(mesh(p, *boxes[p]) for p in parts_of.get(name, [])))
 
-out = ['<?xml version="1.0" encoding="utf-8"?>\n',
-       "<!-- GENERATED by tools/handler9/gen_handler9_urdf.py - edit DIMS there, not this file. -->\n",
-       "<!-- EXPERIMENTAL 9-DOF bamboo handler. All dimensions are PLACEHOLDERS (docs/handler9.md). -->\n",
-       '<robot name="handler9">\n',
-       link("base_link", box("base beam", D["beam"], (0, 0, top / 2)))]
+    out.append(L("base_link"))
+    h = D["cane_z"] - top
+    for s, sign in (("handler_1", -1), ("handler_2", 1)):
+        x = sign * D["station_x"]
+        out += [joint(f"{s}_yaw", "revolute", "base_link", f"{s}_turntable", (x, 0, top), "0 0 1", YAW),
+                link(f"{s}_turntable"),
+                joint(f"{s}_lift", "prismatic", f"{s}_turntable", f"{s}_carriage", (0, 0, h), "0 0 1", (0, D["lift"][0] * LU)),
+                L(f"{s}_carriage"),
+                joint(f"{s}_clamp_fixed", "fixed", f"{s}_carriage", f"{s}_clamp", (-sign * D["static_dx"], 0, 0)),
+                L(f"{s}_clamp"),
+                # feed moves the active gripper away from the static one (toward the beam end)
+                joint(f"{s}_feed", "prismatic", f"{s}_carriage", f"{s}_active", (sign * D["active_dx"], 0, 0), "1 0 0",
+                      (0, D["feed"] * LU) if sign > 0 else (-D["feed"] * LU, 0)),
+                L(f"{s}_active")]
+        FRAMES[f"{s}_carriage"] = (x, 0, D["cane_z"])
+        FRAMES[f"{s}_clamp"] = (x - sign * D["static_dx"], 0, D["cane_z"])
+        FRAMES[f"{s}_active"] = (x + sign * D["active_dx"], 0, D["cane_z"])
 
-def station_column(s, x):
-    out.extend([joint(f"{s}_yaw", "revolute", "base_link", f"{s}_turntable", (x, 0, top), "0 0 1", YAW),
-                link(f"{s}_turntable", cyl("turntable", tt_r, tt_h, (0, 0, tt_h / 2))),
-                # lift = 0 puts the cane axis column_h above the beam top
-                joint(f"{s}_lift", "prismatic", f"{s}_turntable", f"{s}_carriage", (0, 0, D["column_h"]), "0 0 1", D["lift"])])
+    s = "main_clamp"
+    out += [joint(f"{s}_yaw", "revolute", "base_link", f"{s}_turntable", (0, 0, top), "0 0 1", YAW),
+            link(f"{s}_turntable"),
+            joint(f"{s}_lift", "prismatic", f"{s}_turntable", f"{s}_carriage", (0, 0, h), "0 0 1", (0, D["lift"][1] * LU)),
+            L(f"{s}_carriage")]
+    FRAMES[f"{s}_carriage"] = (0, 0, D["cane_z"])
+    r = math.radians(D["roll_deg"])
+    for c, sign in (("blue", -1), ("yellow", 1)):
+        x = sign * D["main_dx"]
+        # translation toward the centre only
+        lim = (0, D["main_slide"] * LU) if sign < 0 else (-D["main_slide"] * LU, 0)
+        out += [joint(f"{s}_{c}_slide", "prismatic", f"{s}_carriage", f"{s}_{c}_sled", (x, 0, 0), "1 0 0", lim),
+                L(f"{s}_{c}_sled"),
+                joint(f"{s}_{c}_roll", "revolute", f"{s}_{c}_sled", f"{s}_{c}", (0, 0, 0), "1 0 0", (-r, r)),
+                L(f"{s}_{c}")]
+        FRAMES[f"{s}_{c}_sled"] = FRAMES[f"{s}_{c}"] = (x, 0, D["cane_z"])
+    out.append("</robot>\n")
+    return "".join(out)
 
-bx, by, bz = D["block"]
-for s, x in (("handler_1", D["station_x"][0]), ("handler_2", D["station_x"][2])):
-    station_column(s, x)
-    base_z = -r - bz
-    out += [link(f"{s}_carriage", lift_post(base_z) + box("cradle block", D["block"], (0, 0, base_z + bz / 2)) + jaws(s)),
-            joint(f"{s}_clamp_fixed", "fixed", f"{s}_carriage", f"{s}_clamp", (0, 0, 0)),
-            link(f"{s}_clamp")]
+HERE = pathlib.Path(__file__).resolve().parents[2] / "tests/fixtures/handler9"
 
-s = "main_clamp"
-station_column(s, D["station_x"][1])
-(s0, s1) = D["sled"]
-sled_top = -r - D["ring"][0]          # the rotating clamps stand on the sled top
-out += [link(f"{s}_carriage", lift_post(sled_top - s0[2] - s1[2])),
-        joint(f"{s}_slide", "prismatic", f"{s}_carriage", f"{s}_sled", (0, 0, 0), "1 0 0", D["slide"]),
-        link(f"{s}_sled", box("sled base", s0, (0, 0, sled_top - s1[2] - s0[2] / 2)) +
-             box("sled top", s1, (0, 0, sled_top - s1[2] / 2)) + jaws("main_clamp", 0.0))]
-for c, sign in (("blue", -1), ("yellow", 1)):
-    wall, length = D["ring"]
-    out += [joint(f"{s}_{c}_roll", "revolute", f"{s}_sled", f"{s}_{c}", (sign * D["clamp_dx"], 0, 0), "1 0 0", ROLL),
-            link(f"{s}_{c}", cyl(f"{c} rotating clamp", r + wall, length, (0, 0, 0), ALONG_X))]
-out.append("</robot>\n")
-
-path = pathlib.Path(__file__).resolve().parents[2] / "tests/fixtures/handler9/handler9.urdf"
-path.write_text("".join(out), encoding="utf-8")
-print(path)
+if __name__ == "__main__":
+    import json
+    boxes = json.loads((HERE / "meshes/boxes.json").read_text())
+    (HERE / "handler9.urdf").write_text(build(boxes), encoding="utf-8")
+    print(HERE / "handler9.urdf")
+else:
+    build({p: ((0, 0, 0), (1, 1, 1)) for p in PARTS})  # fills FRAMES for export_meshes.py

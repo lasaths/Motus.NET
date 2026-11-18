@@ -3,13 +3,16 @@ using Motus.Geometry;
 namespace Motus.Construction;
 
 /// <summary>
-/// EXPERIMENTAL closed-form FK/IK for the 9-DOF bamboo handler (docs/handler9.md, tests/fixtures/handler9/handler9.urdf).
+/// EXPERIMENTAL closed-form FK/IK for the bamboo handler from Lassie's CAD (docs/handler9.md, tests/fixtures/handler9/handler9.urdf).
+/// 12 joints: each handler yaw, lift, feed; MainClamp yaw, lift, and per gripper slide + roll.
 /// Each clamp frame has its origin on the cane axis and +x along the cane. Clamp open/close is gripper state, not a joint.
 /// Joint positions are tree driver order (<see cref="KinematicTree.DriverJointIndices"/>).
 /// </summary>
 public sealed class Handler9Kinematics
 {
-    public static readonly string[] ClampLinks = { "handler_1_clamp", "main_clamp_blue", "main_clamp_yellow", "handler_2_clamp" };
+    /// <summary>Static clamps (<c>handler_N_clamp</c>), moving clamps (<c>handler_N_active</c>) and the MainClamp grippers.</summary>
+    public static readonly string[] ClampLinks =
+        { "handler_1_clamp", "handler_1_active", "main_clamp_blue", "main_clamp_yellow", "handler_2_clamp", "handler_2_active" };
 
     private const double Tol = 1e-6;
     private static readonly string[] Stations = { "handler_1", "main_clamp", "handler_2" };
@@ -30,11 +33,13 @@ public sealed class Handler9Kinematics
             Expect($"{s}_yaw", KinematicJointType.Revolute, 0, 0, 1);
             Expect($"{s}_lift", KinematicJointType.Prismatic, 0, 0, 1);
         }
-        Expect("main_clamp_slide", KinematicJointType.Prismatic, 1, 0, 0);
+        foreach (var c in ClampLinks)
+            if (SlideOf(c) is { } slide)
+                Expect(slide, KinematicJointType.Prismatic, 1, 0, 0);
         Expect("main_clamp_blue_roll", KinematicJointType.Revolute, 1, 0, 0);
         Expect("main_clamp_yellow_roll", KinematicJointType.Revolute, 1, 0, 0);
-        if (tree.DriverCount != 9)
-            throw new ArgumentException($"handler9: expected 9 actuated joints, got {tree.DriverCount}.");
+        if (tree.DriverCount != 12)
+            throw new ArgumentException($"handler9: expected 12 actuated joints, got {tree.DriverCount}.");
         foreach (var c in ClampLinks)
             tree.IndexOfLink(c); // throws on a missing clamp link
 
@@ -46,7 +51,7 @@ public sealed class Handler9Kinematics
 
     public KinematicTree Tree => _tree;
 
-    /// <summary>Driver slot of a named joint, for example <c>main_clamp_slide</c>.</summary>
+    /// <summary>Driver slot of a named joint, for example <c>main_clamp_blue_slide</c>.</summary>
     public int Slot(string jointName) => Joint(jointName).DriverIndex;
 
     /// <summary>World transform (row-major 4x4) of a clamp frame.</summary>
@@ -68,14 +73,14 @@ public sealed class Handler9Kinematics
 
     /// <summary>
     /// Coupled solve: all three stations hold one straight cane. Every clamp origin lands on the cane line and every
-    /// clamp +x is parallel to it. Where a clamp grips along the cane is free; the MainClamp slide keeps the seed.
+    /// clamp +x is parallel to it. Where a clamp grips along the cane is free; the feeds and MainClamp slides keep the seed.
     /// </summary>
     public bool TrySolveCane(double[] point, double[] axis, IReadOnlyList<double> seed, out double[] q, out string? reason)
     {
         q = seed.ToArray();
         if (!Validate(point, axis, seed, out reason))
             return false;
-        foreach (var clamp in new[] { "handler_1_clamp", "main_clamp_blue", "handler_2_clamp" })
+        foreach (var clamp in ClampLinks)
             if (!SolveStation(clamp, point, axis, q, alongFree: true, out reason))
                 return false;
         return true;
@@ -85,8 +90,9 @@ public sealed class Handler9Kinematics
     /// Two-clamp solve: Handler_1 and Handler_2 hold one rod without the MainClamp. The rod moves in the vertical plane
     /// through both yaw axes: the two lifts set its height and tilt. The horizontal clamp spacing is fixed by the beam,
     /// so the clamp distance along the rod is spacing / cos(tilt) and the rod must slide in the clamps (docs/handler9.md).
-    /// Each clamp origin lands on the rod axis; each clamp +x is the rod's horizontal heading (a tilt needs passive pitch).
-    /// MainClamp joints keep the seed.
+    /// Each static clamp origin lands on the rod axis; each clamp +x is the rod's horizontal heading (a tilt needs passive
+    /// pitch). The moving clamps share their station's lift, so with a tilt they miss the rod by tan(tilt) x their offset.
+    /// Feeds and MainClamp joints keep the seed.
     /// </summary>
     public bool TrySolveRod(double[] point, double[] axis, IReadOnlyList<double> seed, out double[] q, out string? reason)
     {
@@ -102,7 +108,13 @@ public sealed class Handler9Kinematics
         var heading = new[] { axis[0], axis[1], 0 };
         foreach (var clamp in new[] { "handler_1_clamp", "handler_2_clamp" })
         {
-            // Rod point above the clamp: project the clamp position (xy) onto the rod's horizontal projection.
+            // Turn the station to the rod heading (branch nearest the seed), then take the rod point above the clamp:
+            // the static clamp is off the yaw axis, so its xy depends on the yaw.
+            var yaw = Slot($"{clamp[.."handler_1".Length]}_yaw");
+            var t = Math.Atan2(axis[1], axis[0]);
+            if (Math.Abs(Math.IEEERemainder(t - q[yaw], 2 * Math.PI)) > Math.PI / 2)
+                t = t > 0 ? t - Math.PI : t + Math.PI;
+            q[yaw] = t;
             var f = ClampFrame(q, clamp);
             var s = ((f[3] - point[0]) * axis[0] + (f[7] - point[1]) * axis[1]) / h2;
             var target = new[] { point[0] + s * axis[0], point[1] + s * axis[1], point[2] + s * axis[2] };
@@ -119,7 +131,7 @@ public sealed class Handler9Kinematics
             reason = $"Unknown clamp link '{clampLink}'.";
             return false;
         }
-        var station = clampLink.StartsWith("main_clamp", StringComparison.Ordinal) ? "main_clamp" : clampLink[..^"_clamp".Length];
+        var station = clampLink.StartsWith("main_clamp", StringComparison.Ordinal) ? "main_clamp" : clampLink[.."handler_1".Length];
         var n = Math.Sqrt(axis[0] * axis[0] + axis[1] * axis[1] + axis[2] * axis[2]);
         if (Math.Abs(axis[2] / n) > Tol)
         {
@@ -129,7 +141,7 @@ public sealed class Handler9Kinematics
 
         var yaw = Joint($"{station}_yaw");
         var lift = Joint($"{station}_lift");
-        var slide = station == "main_clamp" ? Joint("main_clamp_slide") : null;
+        var slide = SlideOf(clampLink) is { } slideName ? Joint(slideName) : null;
 
         // Reference: station yaw/lift/slide at 0. Clamp = C + Rz(yaw)(o + slide x) + lift z.
         var refQ = q.ToArray();
@@ -183,6 +195,16 @@ public sealed class Handler9Kinematics
             : null;
         return reason == null;
     }
+
+    // Prismatic joint along the cane that moves this clamp (null for a static clamp).
+    private static string? SlideOf(string clampLink) => clampLink switch
+    {
+        "handler_1_active" => "handler_1_feed",
+        "handler_2_active" => "handler_2_feed",
+        "main_clamp_blue" => "main_clamp_blue_slide",
+        "main_clamp_yellow" => "main_clamp_yellow_slide",
+        _ => null,
+    };
 
     private static bool InLimits(KinematicJoint j, double v) => v >= j.Lower - 1e-12 && v <= j.Upper + 1e-12;
 

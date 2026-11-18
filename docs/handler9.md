@@ -1,65 +1,88 @@
-# 9-DOF bamboo handler (Experimental)
+# Bamboo handler `handler9` (Experimental)
 
 Status: **Experimental**. This robot is not in the Supported list. Promotion needs an ADR, a METHODS entry and a Rhino matrix proof.
 
-Source: Lassie's slide "9 Degrees of Freedom".
+Sources:
+
+- Lassie's slide "9 Degrees of Freedom".
+- Lassie's CAD "Bambino Kinematic Schematics.step" (Autodesk export, mm, Y-up). The CAD is the authority for geometry.
+
 Files:
 
 - URDF: `tests/fixtures/handler9/handler9.urdf`. Do not edit it by hand.
-- Generator: `tools/handler9/gen_handler9_urdf.py`. All dimensions are in `DIMS` at the top.
+- Meshes: `tests/fixtures/handler9/meshes/*.stl` (one per CAD part, in its link frame, CAD units) and `meshes/boxes.json` (collision box per part).
+- Generator: `tools/handler9/gen_handler9_urdf.py`. All dimensions are in `DIMS`. `LU` sets the scale.
+- Mesh export: `tools/handler9/export_meshes.py model.step` (needs `cadquery-ocp` and `trimesh`).
 - Kinematics: `src/Motus.Construction/Bamboo/Handler9Kinematics.cs`.
 - Tests: `tests/Motus.Core.Tests/Handler9KinematicsTests.cs`.
 
-Three clamp stations hold one cane: Handler_1 and Handler_2 at the ends, MainClamp in the middle. The clamps take round profiles.
-
 This robot is not `bamboo_icd`. `bamboo_icd` is a 5R arm that hangs under a pole and walks with two grips. This robot is a fixed beam with three stations.
 
-## DOF interpretation
+## CAD parts and joints
 
-The slide shows 12 labels. The title says 9 DOF.
-We count a clamp open/close as gripper state, not as a joint.
-Each station has one clamp open/close (the Linear Moving Clamp against the Stationary Clamp).
-Thus 12 labels − 3 clamp open/close = 9 joints.
+The CAD has 13 solids. Each moving part maps to one link.
 
-| Station | Slide label | Model | Joint | Limits |
-|---------|-------------|-------|-------|--------|
-| Handler_1 | Rotation about the vertical axis | revolute, z | `handler_1_yaw` | −180°..+180° |
-| Handler_1 | Axial linear vertical movement | prismatic, z | `handler_1_lift` | placeholder |
-| Handler_1 | Gripper (moving + stationary clamp) | gripper state | none | — |
-| MainClamp | Rotation about the vertical axis | revolute, z | `main_clamp_yaw` | −180°..+180° |
-| MainClamp | Axial linear vertical movement | prismatic, z | `main_clamp_lift` | placeholder |
-| MainClamp | Linear Movement | prismatic, along the cane (local x) | `main_clamp_slide` | placeholder |
-| MainClamp | Rotational Freedom (blue clamp) | revolute, about the cane axis | `main_clamp_blue_roll` | ±180° (placeholder) |
-| MainClamp | Rotational Freedom (yellow clamp) | revolute, about the cane axis | `main_clamp_yellow_roll` | ±180° (placeholder) |
-| MainClamp | Linear Moving Clamp | gripper state | none | — |
-| Handler_2 | Same as Handler_1 | | `handler_2_yaw`, `handler_2_lift` | as Handler_1 |
+| CAD part | Link | Moves with |
+|----------|------|------------|
+| Backbone (unnamed solid) | `base_link` | fixed |
+| HandlingGripper1 / HG_Plate+ExtentionAxis (round plate + vertical shaft) | `handler_1_carriage` | `handler_1_yaw`, `handler_1_lift` |
+| HandlingGripper1 / StaticGripper | `handler_1_clamp` | the carriage (fixed joint) |
+| HandlingGripper1 / ActiveGriper - 95 LegthUnits Extention | `handler_1_active` | `handler_1_feed` |
+| HandlingGripper1(Mirror) / … | `handler_2_*` | the same joints of Handler_2 |
+| CenterPlate / CP_Plate+ExtentionAxis | `main_clamp_carriage` | `main_clamp_yaw`, `main_clamp_lift` |
+| CP_Active+Rotational Gripper(Mirror) / Linear Translation(Mirror) | `main_clamp_blue_sled` | `main_clamp_blue_slide` |
+| CP_Active+Rotational Gripper(Mirror) / Axial Rotation_+-40Deg(Mirror) | `main_clamp_blue` | `main_clamp_blue_roll` |
+| CP_Active+Rotational Gripper / Linear Translation, Axial Rotation_+-40Deg | `main_clamp_yellow_sled`, `main_clamp_yellow` | `main_clamp_yellow_slide`, `main_clamp_yellow_roll` |
+| Bamboo / 60LU_Dia | not a robot part | — |
 
-Joint chain per station: beam → yaw → lift → clamp.
-The MainClamp chain is: beam → yaw → lift → slide → two roll clamps (two branches).
+Handler_1 is the non-mirror handler at −x. Blue is the MainClamp gripper at −x (as on the slide).
+
+## DOF interpretation (changed by the CAD)
+
+The CAD and the slide labels show 12 joints: 3 + 6 + 3. The slide title says 9.
+The model follows the CAD: 12 joints.
+
+| Station | Slide label | Joint | Type, axis | Range |
+|---------|-------------|-------|------------|-------|
+| Handler_1, Handler_2 | Rotation about the vertical axis | `handler_N_yaw` | revolute, z | −180°..+180° (slide) |
+| Handler_1, Handler_2 | Axial linear vertical movement | `handler_N_lift` | prismatic, z | 0..90 LU (inferred) |
+| Handler_1, Handler_2 | Linear Moving Clamp | `handler_N_feed` | prismatic, along the cane | 0..95 LU away from the static clamp (part name) |
+| MainClamp | Rotation about the vertical axis | `main_clamp_yaw` | revolute, z | −180°..+180° (slide) |
+| MainClamp | Axial linear vertical movement | `main_clamp_lift` | prismatic, z | 0..95 LU (inferred) |
+| MainClamp | Linear Movement / Linear Moving Clamp | `main_clamp_blue_slide`, `main_clamp_yellow_slide` | prismatic, along the cane | 0..110 LU toward the centre (inferred) |
+| MainClamp | Rotational Freedom (blue, yellow) | `main_clamp_blue_roll`, `main_clamp_yellow_roll` | revolute, about the cane axis | ±40° (part name) |
+
+Changes from the earlier model:
+
+- The "Linear Moving Clamp" is a joint. In the CAD the active gripper slides along the cane, away from the static gripper. It does not close across the cane. Earlier it was gripper state.
+- The MainClamp has two slides (one per gripper), not one shared slide.
+- The roll range is ±40°, not ±180°.
+- Clamp open/close is not in the CAD. It stays gripper state.
+
+Possible reading of "9": 12 joints − 3 linear moving clamps. Lassie must confirm.
 
 ## Frames
 
-- World: z up. The beam runs along x. The beam bottom is at z = 0.
-- Each yaw axis is on the beam top, at the station x position.
-- Clamp frames: `handler_1_clamp`, `main_clamp_blue`, `main_clamp_yellow`, `handler_2_clamp`.
-- A clamp frame origin is on the cane centreline. Its +x is along the cane.
-- The cane diameter does not move the clamp frames. It only sizes the jaws.
-- At yaw = 0, the clamp +x is world +x (along the beam).
-- The roll joints turn the clamp about its own +x. A roll does not move the cane axis.
+- World: z up. The beam runs along x. The beam bottom is at z = 0. The beam centre is at x = y = 0.
+- CAD to Motus: (x, y, z) CAD → (x, −z, y) Motus.
+- Each yaw joint is on the beam top, on the station axis (x = −375, 0, +375 LU).
+- Each lift puts its carriage frame on the cane centreline (z = 242 LU at lift 0).
+- Clamp frames: `handler_N_clamp` (static), `handler_N_active`, `main_clamp_blue`, `main_clamp_yellow`. Each origin is on the cane centreline, at the gripper centre. Each +x is along the cane.
+- The handler grippers are off the yaw axis: the static gripper 50.4 LU toward the beam centre, the active gripper 50.4 LU toward the beam end.
+- The roll joints turn a gripper about its own +x. A roll does not move the cane axis.
 
 ## Kinematics
 
 FK uses the existing `TreeForwardKinematics`.
-IK is closed form, because each chain is yaw + lift (+ slide):
+IK is closed form, because each chain is yaw + lift (+ one slide along the cane):
 
-- yaw = heading of the cane axis. The solver tries both headings (the cane has no direction). It uses the heading nearest to the seed first.
+- yaw = heading of the cane axis. The solver tries both headings. It uses the heading nearest to the seed first.
 - lift = cane height − clamp height at lift 0.
-- slide (MainClamp only) = distance along the cane from the clamp at slide 0.
+- feed or slide = distance along the cane from the clamp at 0.
 - Rolls keep the seed value. The cane line does not set a roll.
 
 `TrySolveClamp` puts one clamp on a given point and axis.
-`TrySolveCane` puts all four clamp frames on one straight cane line. The grip position along the cane is free. The MainClamp slide keeps its seed value.
-`TrySolveRod` uses only Handler_1 and Handler_2. See "Two outer clamps hold a rod".
+`TrySolveCane` puts all six clamp frames on one straight cane line. Feeds and slides keep their seed values.
 A failure returns `false` and a reason. The seed is not changed.
 
 Limits of this model:
@@ -69,52 +92,49 @@ Limits of this model:
 
 ## Two outer clamps hold a rod
 
-Handler_1 and Handler_2 can hold a rod without the MainClamp. `TrySolveRod` solves this case. The MainClamp joints keep their seed values.
+Handler_1 and Handler_2 can hold a rod without the MainClamp. `TrySolveRod` solves this case. Feeds and MainClamp joints keep their seed values.
 
-- Plane: the vertical plane through the two yaw axes (the beam plane, y = 0 at the default layout).
+- Plane: the vertical plane through the two yaw axes (the beam plane, y = 0).
 - In-plane motion: the two lifts set the rod height and the rod tilt. The rod can also move along its own axis.
-- Yaw: each clamp +x points along the rod heading (the horizontal part of the rod axis). In this plane the heading is 0 or 180°.
-- Each clamp origin is on the rod axis, at the rod point above the yaw axis.
+- Yaw: each clamp +x points along the rod heading. In this plane the heading is 0 or 180°.
+- Each static clamp origin is on the rod axis.
 
 Closed-chain constraint:
 
-- The beam fixes the horizontal distance `d` between the two clamps (3.4 m at the placeholder layout).
+- The beam fixes the horizontal distance `d` between the two static clamps (649.2 LU).
 - The distance between the clamps along the rod is `d / cos(tilt)`. It changes when the tilt changes.
-- Thus the rod must slide in at least one clamp when the tilt changes. A rod held tight in both clamps can only move up and down without tilt.
-- A tilted rod also needs a passive pitch at each clamp. The URDF has no pitch joint. The clamp +x stays horizontal.
-- The tilt is limited only by the lift range.
+- Thus the rod must slide in at least one clamp when the tilt changes.
+- A tilted rod also needs a passive pitch at each clamp. The URDF has no pitch joint.
+- The active gripper shares the lift of its static gripper. With a tilt, it misses the rod by tan(tilt) × 100.8 LU.
+- The tilt is limited by the lift range: about ±8° at 90 LU of lift.
 
-## Placeholder dimensions
+## Dimensions
 
-All values are estimates from the slide proportions. They are approximate. Change them in `DIMS`, then run the generator.
+All values are from the CAD, in CAD length units (LU). `LU = 0.001` m (the STEP header says mm).
+The CAD part names say "LengthUnits". If 1 LU is not 1 mm, change `LU` only.
 
-| Name | Value | Meaning |
-|------|-------|---------|
-| `cane_d` | 0.150 m | Cane diameter parameter. The default is a placeholder: the clamps take round profiles up to about 150 mm, and the exact size is not known. The jaws close on this diameter. |
-| `beam` | 4.0 × 0.40 × 0.15 m | Long, low, flat base beam: length, width, height |
-| `station_x` | −1.70, 0, +1.70 m | Handler_1, MainClamp, Handler_2 positions along the beam |
-| `turntable` | r 0.25 m, h 0.06 m | Round turntable on the beam top (one per station) |
-| `column_h` | 0.28 m | Beam top to cane axis at lift 0. The cane sits low. |
-| `lift` | 0 .. 0.15 m | Short vertical movement |
-| `slide` | −0.20 .. +0.20 m | MainClamp movement along the cane |
-| `clamp_dx` | 0.25 m | Blue and yellow clamp offset from the sled centre |
-| `block` | 0.24 × 0.40 × 0.08 m | Cradle block under the cane |
-| `jaw` | 0.24 × 0.08 × 0.20 m | Stationary clamp and linear moving clamp blocks |
-| `sled` | 0.90 × 0.40 × 0.05 m + 0.70 × 0.30 × 0.05 m | MainClamp sled: two stacked boxes (a stepped trapezoid) |
-| `ring` | wall 0.05 m, length 0.10 m | Blue and yellow rotating clamps: cylinders around the cane |
+| Name | Value (LU) | Source |
+|------|------------|--------|
+| `cane_d` | 60 | Bamboo `60LU_Dia`; gripper cradle radius 30 |
+| `beam` | 1000 × 220 × 80 | Backbone |
+| `station_x` | ±375 | plate and shaft centres |
+| `cane_z` | 242 | cane centreline (beam top 80 + 162) |
+| `static_dx`, `active_dx` | 50.4 | gripper centres from the handler axis |
+| `feed` | 95 | ActiveGriper "95 LegthUnits Extention" |
+| `main_dx` | ±170 | MainClamp gripper centres |
+| `main_slide` | 110 | plate half-length 230 − gripper width 120 (inferred) |
+| `lift` | 90 (handlers), 95 (MainClamp) | shaft length below the beam (inferred) |
+| `roll_deg` | ±40° | Axial Rotation_+-40Deg |
 
 Geometry notes:
 
-- URDF has no half-round or trapezoid shape. The cradle is a box under the cane. The sled is two stacked boxes.
-- The Motus collision loader loads a cylinder as a capsule. Thus the turntable and ring collision shapes are larger than the visuals.
+- Visuals are the CAD meshes. Collisions are the part bounding boxes in the link frame.
+- A plate box includes its shaft, so it overlaps the beam at q = 0 (adjacent links).
 
 ## Open questions
 
-- Is the MainClamp "Linear Movement" along the cane or across the beam?
-- Do the blue and yellow clamps turn independently? What are their limits?
-- Can a clamp tilt (pitch)? If not, the cane must stay horizontal and the two-clamp rod cannot tilt. What is the pitch range?
-- Does the rod slide in the outer clamps during a tilt, or does one clamp open?
-- Is the outer clamp centre offset from its yaw axis? With an offset, the two outer clamps could also move the rod in the horizontal plane. The current model has no offset.
-- Is a clamp centre on its yaw axis, or offset from it?
-- What are the real dimensions and stroke lengths?
-- What is the real cane diameter range (minimum and maximum)?
+- Is the robot 9 DOF or 12 DOF? Which 3 labels does the title leave out?
+- Is 1 LU = 1 mm? The cane is 60 LU. Lassie said the clamps take up to about 150 mm (that is 1 LU = 2.5 mm).
+- What are the real lift, feed and MainClamp slide ranges and directions?
+- How does a gripper close on the cane? The CAD shows open cradles only.
+- Can a clamp tilt (pitch)? If not, the two-clamp rod cannot tilt.

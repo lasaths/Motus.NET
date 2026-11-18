@@ -6,9 +6,21 @@ namespace Motus.Core.Tests;
 
 public class Handler9KinematicsTests
 {
-    private static Handler9Kinematics Load() =>
-        new(UrdfRobotLoader.LoadTree(Path.GetFullPath(Path.Combine(
-            AppContext.BaseDirectory, "..", "..", "..", "..", "fixtures", "handler9", "handler9.urdf"))));
+    private static readonly string Urdf = Path.GetFullPath(Path.Combine(
+        AppContext.BaseDirectory, "..", "..", "..", "..", "fixtures", "handler9", "handler9.urdf"));
+
+    private static Handler9Kinematics Load() => new(UrdfRobotLoader.LoadTree(Urdf));
+
+    [Fact]
+    public void Fixture_CadMeshesExist_AndCollisionBoxesLoad()
+    {
+        var doc = System.Xml.Linq.XDocument.Load(Urdf);
+        var meshes = doc.Descendants("mesh").Select(m => m.Attribute("filename")!.Value).ToList();
+        Assert.Equal(12, meshes.Count);
+        Assert.All(meshes, f => Assert.True(File.Exists(Path.Combine(Path.GetDirectoryName(Urdf)!, f)), f));
+        var collision = UrdfCollisionLoader.LoadTree(doc.Root!, Load().Tree, Path.GetDirectoryName(Urdf)!);
+        Assert.NotNull(collision);
+    }
 
     private static double[] RandomQ(Handler9Kinematics k, Random rng) =>
         k.Tree.DriverJointIndices.Select(i => k.Tree.Joints[i])
@@ -30,10 +42,13 @@ public class Handler9KinematicsTests
     private static double Norm(double x, double y, double z) => Math.Sqrt(x * x + y * y + z * z);
 
     [Fact]
-    public void Fixture_HasNineActuatedJointsWithSlideLimits()
+    public void Fixture_HasTheTwelveCadJointsWithLimits()
     {
         var k = Load();
-        Assert.Equal(9, k.Tree.DriverCount);
+        Assert.Equal(12, k.Tree.DriverCount);
+        var roll = k.Tree.Joints.Single(j => j.Name == "main_clamp_blue_roll");
+        Assert.Equal(-40 * Math.PI / 180, roll.Lower, 6);
+        Assert.Equal(40 * Math.PI / 180, roll.Upper, 6);
         foreach (var s in new[] { "handler_1", "main_clamp", "handler_2" })
         {
             var yaw = k.Tree.Joints.Single(j => j.Name == $"{s}_yaw");
@@ -73,7 +88,7 @@ public class Handler9KinematicsTests
     public void Limits_LiftAndSlideOutOfRange_FailWithReason()
     {
         var k = Load();
-        var zero = new double[9];
+        var zero = new double[12];
         var f = k.ClampFrame(zero, "main_clamp_blue");
 
         var high = P(k.ClampFrame(zero, "handler_1_clamp")); high[2] += 1.0;
@@ -89,7 +104,7 @@ public class Handler9KinematicsTests
     public void Unreachable_FailsCleanly()
     {
         var k = Load();
-        var zero = new double[9];
+        var zero = new double[12];
         var f = k.ClampFrame(zero, "handler_1_clamp");
 
         var side = P(f); side[1] += 0.1;
@@ -107,28 +122,29 @@ public class Handler9KinematicsTests
     [Theory]
     [InlineData(1.0, 0.0)]
     [InlineData(1.0, 0.07)]
-    [InlineData(-1.0, 0.14)]
+    [InlineData(-1.0, 0.085)]
     public void Cane_AllStationsHoldOneStraightCane(double dirX, double raise)
     {
         var k = Load();
         var rng = new Random(3);
         var seed = RandomQ(k, rng);
         seed[k.Slot("main_clamp_lift")] = 0;
-        var z0 = k.ClampFrame(new double[9], "handler_1_clamp")[11];
+        var z0 = k.ClampFrame(new double[12], "handler_1_clamp")[11];
         var p = new[] { 0.3, 0, z0 + raise };
         var a = new[] { dirX, 0, 0 };
 
         Assert.True(k.TrySolveCane(p, a, seed, out var q, out var why), why);
         foreach (var clamp in Handler9Kinematics.ClampLinks)
             AssertOnLine(k.ClampFrame(q, clamp), p, a);
-        Assert.Equal(seed[k.Slot("main_clamp_slide")], q[k.Slot("main_clamp_slide")]);
+        foreach (var j in new[] { "handler_1_feed", "main_clamp_blue_slide", "main_clamp_yellow_slide", "handler_2_feed" })
+            Assert.Equal(seed[k.Slot(j)], q[k.Slot(j)]);
     }
 
     [Fact]
     public void Cane_OffBeamTiltedOrTooHigh_Fails()
     {
         var k = Load();
-        var zero = new double[9];
+        var zero = new double[12];
         var z0 = k.ClampFrame(zero, "handler_1_clamp")[11];
 
         Assert.False(k.TrySolveCane(new[] { 0, 0.05, z0 }, new[] { 1.0, 0, 0 }, zero, out _, out _));
@@ -146,7 +162,7 @@ public class Handler9KinematicsTests
     {
         var k = Load();
         var seed = RandomQ(k, new Random(5));
-        var z0 = k.ClampFrame(new double[9], "handler_1_clamp")[11];
+        var z0 = k.ClampFrame(new double[12], "handler_1_clamp")[11];
         var p = new[] { 0.4, 0, z0 + raise };
         var a = new[] { Math.Cos(tilt), 0, Math.Sin(tilt) };
 
@@ -162,16 +178,19 @@ public class Handler9KinematicsTests
         // Closed chain: fixed horizontal spacing, so the clamp distance along the rod is spacing / cos(tilt).
         var span = Norm(f2[3] - f1[3], f2[7] - f1[7], f2[11] - f1[11]);
         Assert.Equal(Math.Abs(f2[3] - f1[3]) / Math.Cos(tilt), span, 9);
-        for (var i = 0; i < 9; i++)
-            if (!k.Tree.Joints[k.Tree.DriverJointIndices[i]].Name.StartsWith("handler_", StringComparison.Ordinal))
+        for (var i = 0; i < 12; i++)
+        {
+            var name = k.Tree.Joints[k.Tree.DriverJointIndices[i]].Name;
+            if (!name.EndsWith("_yaw", StringComparison.Ordinal) && !name.EndsWith("_lift", StringComparison.Ordinal) || name.StartsWith("main", StringComparison.Ordinal))
                 Assert.Equal(seed[i], q[i]);
+        }
     }
 
     [Fact]
     public void Rod_OutOfPlaneSteepOrVertical_Fails()
     {
         var k = Load();
-        var zero = new double[9];
+        var zero = new double[12];
         var z0 = k.ClampFrame(zero, "handler_1_clamp")[11];
 
         Assert.False(k.TrySolveRod(new[] { 0, 0.05, z0 }, new[] { 1.0, 0, 0 }, zero, out _, out _));

@@ -38,7 +38,7 @@ Motus.NET tests + docs; **no** Motus.Grasshopper GA Aerial / H2 / Go2 components
 | Unitree Go2 | Meshless FK stance smoke (≠ insectoid legged) | Spot-class loco product |
 | Catalog Panda / UR10e+Robotiq minimal | CI smoke fixtures | Claiming every upstream URDF is GA |
 | Bamboo viewer / truss search | Optional Blazor preview, task data, sampled collision and bounded planner-confirmed build sequence | Physical assembly, load/stiffness certification, or a general complete assembly planner |
-| 9-DOF bamboo handler (`handler9`) | Placeholder URDF, closed-form clamp FK/IK, coupled cane solve ([handler9.md](handler9.md)) | Real dimensions, collision-checked plans, Grasshopper component, Rhino proof |
+| Bamboo handler (`handler9`, from Lassie's CAD) | URDF with CAD meshes, closed-form clamp FK/IK, coupled cane and two-clamp rod solves ([handler9.md](handler9.md)) | Confirmed DOF count and units, collision-checked plans, Grasshopper component, Rhino proof |
 
 See [aerial.md](aerial.md), ADR `docs/adr/0001-holonomic-se3-aerial.md`, and roadmap experimental mobility.
 
