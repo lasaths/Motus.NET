@@ -4,7 +4,8 @@ namespace Motus.Construction;
 
 /// <summary>
 /// EXPERIMENTAL closed-form FK/IK for the bamboo handler from Lassie's CAD (docs/handler9.md, tests/fixtures/handler9/handler9.urdf).
-/// 12 joints: each handler yaw, lift, feed; MainClamp yaw, lift, and per gripper slide + roll.
+/// 11 planned joints: each handler yaw, lift, feed; MainClamp yaw, lift, per gripper slide, and the blue (active) roll.
+/// The yellow roll is passive: a URDF mimic of the blue roll (multiplier 1), because both grippers hold one rigid cane.
 /// Each clamp frame has its origin on the cane axis and +x along the cane. Clamp open/close is gripper state, not a joint.
 /// Joint positions are tree driver order (<see cref="KinematicTree.DriverJointIndices"/>).
 /// </summary>
@@ -38,8 +39,10 @@ public sealed class Handler9Kinematics
                 Expect(slide, KinematicJointType.Prismatic, 1, 0, 0);
         Expect("main_clamp_blue_roll", KinematicJointType.Revolute, 1, 0, 0);
         Expect("main_clamp_yellow_roll", KinematicJointType.Revolute, 1, 0, 0);
-        if (tree.DriverCount != 12)
-            throw new ArgumentException($"handler9: expected 12 actuated joints, got {tree.DriverCount}.");
+        if (Joint("main_clamp_yellow_roll").Mimic is not { Multiplier: 1, Offset: 0 } m || tree.Joints[m.JointIndex].Name != "main_clamp_blue_roll")
+            throw new ArgumentException("handler9: main_clamp_yellow_roll must mimic main_clamp_blue_roll (multiplier 1, offset 0).");
+        if (tree.DriverCount != 11)
+            throw new ArgumentException($"handler9: expected 11 planned joints, got {tree.DriverCount}.");
         foreach (var c in ClampLinks)
             tree.IndexOfLink(c); // throws on a missing clamp link
 

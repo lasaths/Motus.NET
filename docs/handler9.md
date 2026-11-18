@@ -40,7 +40,16 @@ Handler_1 is the non-mirror handler at −x. Blue is the MainClamp gripper at �
 ## DOF interpretation (changed by the CAD)
 
 The CAD and the slide labels show 12 joints: 3 + 6 + 3. The slide title says 9.
-The model follows the CAD: 12 joints.
+The URDF has the 12 CAD joints. 11 joints are planned DOF. One joint is passive.
+
+Single roll drive (Lassie, from photos of the MainClamp):
+
+- One roll gripper is driven (active). The other roll gripper is passive. It follows the cane.
+- Both grippers hold one rigid cane on one axis. Thus the passive roll angle equals the active roll angle.
+- `main_clamp_yellow_roll` is a URDF `<mimic>` of `main_clamp_blue_roll` (multiplier 1, offset 0). It is not a planned DOF.
+- ASSUMPTION: blue is the active roll. The CAD does not show which roll has the drive: the two grippers are exact mirror parts (same volume, no motor or drive feature).
+
+Planned DOF: 11 (handlers 3 + 3, MainClamp 5: yaw, lift, blue slide, yellow slide, blue roll).
 
 | Station | Slide label | Joint | Type, axis | Range |
 |---------|-------------|-------|------------|-------|
@@ -50,16 +59,18 @@ The model follows the CAD: 12 joints.
 | MainClamp | Rotation about the vertical axis | `main_clamp_yaw` | revolute, z | −180°..+180° (slide) |
 | MainClamp | Axial linear vertical movement | `main_clamp_lift` | prismatic, z | 0..95 LU (inferred) |
 | MainClamp | Linear Movement / Linear Moving Clamp | `main_clamp_blue_slide`, `main_clamp_yellow_slide` | prismatic, along the cane | 0..110 LU toward the centre (inferred) |
-| MainClamp | Rotational Freedom (blue, yellow) | `main_clamp_blue_roll`, `main_clamp_yellow_roll` | revolute, about the cane axis | ±40° (part name) |
+| MainClamp | Rotational Freedom (blue, active) | `main_clamp_blue_roll` | revolute, about the cane axis | ±40° (part name) |
+| MainClamp | Rotational Freedom (yellow, passive) | `main_clamp_yellow_roll` | mimic of `main_clamp_blue_roll`, not planned | ±40° |
 
 Changes from the earlier model:
 
 - The "Linear Moving Clamp" is a joint. In the CAD the active gripper slides along the cane, away from the static gripper. It does not close across the cane. Earlier it was gripper state.
 - The MainClamp has two slides (one per gripper), not one shared slide.
 - The roll range is ±40°, not ±180°.
+- The yellow roll is passive. It follows the blue roll.
 - Clamp open/close is not in the CAD. It stays gripper state.
 
-Possible reading of "9": 12 joints − 3 linear moving clamps. Lassie must confirm.
+Possible reading of "9": 12 joints − 3 linear moving clamps. Lassie must confirm. With the passive roll, the model plans 11.
 
 ## Frames
 
@@ -79,7 +90,7 @@ IK is closed form, because each chain is yaw + lift (+ one slide along the cane)
 - yaw = heading of the cane axis. The solver tries both headings. It uses the heading nearest to the seed first.
 - lift = cane height − clamp height at lift 0.
 - feed or slide = distance along the cane from the clamp at 0.
-- Rolls keep the seed value. The cane line does not set a roll.
+- The blue roll keeps the seed value. The cane line does not set a roll. The yellow roll follows the blue roll in FK.
 
 `TrySolveClamp` puts one clamp on a given point and axis.
 `TrySolveCane` puts all six clamp frames on one straight cane line. Feeds and slides keep their seed values.
@@ -133,7 +144,9 @@ Geometry notes:
 
 ## Open questions
 
-- Is the robot 9 DOF or 12 DOF? Which 3 labels does the title leave out?
+- Is the robot 9 DOF? The model plans 11 DOF. Which 2 more joints does the title leave out?
+- Which roll gripper has the drive: blue or yellow? The model assumes blue.
+- Are the two MainClamp slides (`main_clamp_blue_slide`, `main_clamp_yellow_slide`) two drives, one coupled drive, or passive? The model keeps two planned slides.
 - The cane diameter comes from the CAD rod: 60 mm (Lassie, 2026-11-18). The 150 mm figure is dropped.
 - What are the real lift, feed and MainClamp slide ranges and directions?
 - How does a gripper close on the cane? The CAD shows open cradles only.

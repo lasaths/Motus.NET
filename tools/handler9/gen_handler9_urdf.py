@@ -5,7 +5,8 @@ Source: Lassie's CAD 'Bambino Kinematic Schematics.step' (Autodesk export, mm, Y
 All numbers below are CAD length units (LU). The STEP header says mm; the part names say 'LengthUnits'.
 LU sets the scale of the whole robot in one place. Meshes come from tools/handler9/export_meshes.py.
 Joints follow the CAD movers: per handler yaw + lift + linear moving clamp (feed); MainClamp yaw + lift +
-per gripper linear translation + axial rotation. Clamp open/close is not in the CAD and is gripper state.
+per gripper linear translation + axial rotation
+(the yellow roll is a passive mimic of the blue roll: 11 planned DOF). Clamp open/close is not in the CAD and is gripper state.
 """
 import math, pathlib
 
@@ -44,13 +45,15 @@ def mesh(name, box_c, box_s):
 def link(name, parts=""):
     return f'  <link name="{name}">\n{parts}  </link>\n'
 
-def joint(name, kind, parent, child, xyz, axis=None, lim=None):
+def joint(name, kind, parent, child, xyz, axis=None, lim=None, mimic=None):
     s = f'  <joint name="{name}" type="{kind}">\n    <parent link="{parent}"/>\n    <child link="{child}"/>\n'
     s += f'    <origin xyz="{f(m(xyz))}" rpy="0 0 0"/>\n'
     if axis:
         s += f'    <axis xyz="{axis}"/>\n'
     if lim:
         s += f'    <limit lower="{lim[0]:.6f}" upper="{lim[1]:.6f}" effort="100" velocity="0.5"/>\n'
+    if mimic:
+        s += f'    <mimic joint="{mimic}" multiplier="1" offset="0"/>\n'
     return s + "  </joint>\n"
 
 # Link frames at q = 0 in world LU, used by export_meshes.py to put each CAD part into its link frame.
@@ -108,7 +111,10 @@ def build(boxes):
         lim = (0, D["main_slide"] * LU) if sign < 0 else (-D["main_slide"] * LU, 0)
         out += [joint(f"{s}_{c}_slide", "prismatic", f"{s}_carriage", f"{s}_{c}_sled", (x, 0, 0), "1 0 0", lim),
                 L(f"{s}_{c}_sled"),
-                joint(f"{s}_{c}_roll", "revolute", f"{s}_{c}_sled", f"{s}_{c}", (0, 0, 0), "1 0 0", (-r, r)),
+                # Single drive (Lassie, from photos): one roll is active, the other is passive and follows the cane.
+                # ASSUMPTION: blue is active; the CAD grippers are exact mirrors with no drive feature.
+                joint(f"{s}_{c}_roll", "revolute", f"{s}_{c}_sled", f"{s}_{c}", (0, 0, 0), "1 0 0", (-r, r),
+                      mimic=f"{s}_blue_roll" if c == "yellow" else None),
                 L(f"{s}_{c}")]
         FRAMES[f"{s}_{c}_sled"] = FRAMES[f"{s}_{c}"] = (x, 0, D["cane_z"])
     out.append("</robot>\n")
