@@ -134,7 +134,7 @@ Geometry notes:
 ## Open questions
 
 - Is the robot 9 DOF or 12 DOF? Which 3 labels does the title leave out?
-- Is 1 LU = 1 mm? The cane is 60 LU. Lassie said the clamps take up to about 150 mm (that is 1 LU = 2.5 mm).
+- The cane diameter comes from the CAD rod: 60 mm (Lassie, 2026-11-18). The 150 mm figure is dropped.
 - What are the real lift, feed and MainClamp slide ranges and directions?
 - How does a gripper close on the cane? The CAD shows open cradles only.
 - Can a clamp tilt (pitch)? If not, the two-clamp rod cannot tilt.
