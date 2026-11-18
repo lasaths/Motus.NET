@@ -14,7 +14,8 @@ Files:
 - Generator: `tools/handler9/gen_handler9_urdf.py`. All dimensions are in `DIMS`. `LU` sets the scale.
 - Mesh export: `tools/handler9/export_meshes.py model.step` (needs `cadquery-ocp` and `trimesh`).
 - Kinematics: `src/Motus.Construction/Bamboo/Handler9Kinematics.cs`.
-- Tests: `tests/Motus.Core.Tests/Handler9KinematicsTests.cs`.
+- Self-collision: `src/Motus.Construction/Bamboo/Handler9Collision.cs` (opt-in).
+- Tests: `tests/Motus.Core.Tests/Handler9KinematicsTests.cs`, `tests/Motus.Core.Tests/Handler9CollisionTests.cs`.
 
 This robot is not `bamboo_icd`. `bamboo_icd` is a 5R arm that hangs under a pole and walks with two grips. This robot is a fixed beam with three stations.
 
@@ -124,6 +125,33 @@ Closed-chain constraint:
 - A tilted rod also needs a passive pitch at each clamp. The URDF has no pitch joint.
 - The active gripper shares the lift of its static gripper. With a tilt, it misses the rod by tan(tilt) × 100.8 LU.
 - The tilt is limited by the lift range: about ±8° at 90 LU of lift.
+
+
+## Self-collision
+
+Self-collision is opt-in. It does not run in the default planner. The URDF collision boxes do not change.
+
+`Handler9Collision` tests the CAD STL meshes (the visual meshes in the fixture, in metres). The test is exact: Motus mesh contact, after the other body is grown by the clearance. The clearance is `MotionConstraints.ClearanceMarginM` (default 2 mm). The check uses `TreeFkCollisionChecker` with self-collision and the clearance turned on. Those two options stay off for every other caller.
+
+Allowed contacts come from the URDF tree:
+
+- Adjacent collision links. A joint that connects two links with meshes is an allowed pair. A turntable link has no mesh. In that case the checker walks through it, so the beam (`base_link`) may touch each station carriage. That is required, because each lift shaft passes through the beam.
+- A fixed mesh child may contact its siblings on the same mesh parent. At each outer station the fixed jaw and the feed jaw sit on the same carriage and their meshes meet. The two MainClamp sleds are both moving, so they are not an allowed pair.
+- The cane (or rod) in the clamps. The cane is not a robot part. When a cane body is given, each of the six clamp frames may touch it. Other robot parts must keep the clearance from the cane.
+
+Allowed adjacent pairs:
+
+| Link A | Link B | Why |
+|--------|--------|-----|
+| `base_link` | `handler_1_carriage`, `handler_2_carriage`, `main_clamp_carriage` | Yaw then lift; empty turntable in between |
+| `handler_N_carriage` | `handler_N_clamp` | Fixed joint |
+| `handler_N_carriage` | `handler_N_active` | Feed joint |
+| `handler_N_clamp` | `handler_N_active` | Fixed jaw and feed jaw on the same carriage; the meshes meet |
+| `main_clamp_carriage` | `main_clamp_blue_sled`, `main_clamp_yellow_sled` | Slide joint |
+| `main_clamp_blue_sled` | `main_clamp_blue` | Roll joint |
+| `main_clamp_yellow_sled` | `main_clamp_yellow` | Roll joint |
+
+The two MainClamp grippers are not an allowed pair. When the one slide drive is at 110 LU, the grippers meet and the checker reports a collision.
 
 ## Dimensions
 

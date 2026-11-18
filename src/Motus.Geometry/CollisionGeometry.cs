@@ -739,6 +739,71 @@ internal static class CollisionGeometry
         return new Frame(x, y, z);
     }
 
+    /// <summary>
+    /// Grow a body by <paramref name="d"/>: primitives exactly (box corners conservatively); meshes by moving
+    /// each vertex along its normal so every adjacent face plane moves out by at least d. Used as the "other"
+    /// body when a clearance margin is applied. Identity when d is 0.
+    /// </summary>
+    public static CollisionObject Grow(CollisionObject o, double d)
+    {
+        if (d == 0)
+            return o;
+        if (!double.IsFinite(d) || d < 0)
+            throw new ArgumentException("Clearance growth must be a finite value >= 0.", nameof(d));
+        switch (o.Shape)
+        {
+            case CollisionShape.Sphere: return CollisionObject.Sphere(o.Name, o.Pose, o.ExtentX + d);
+            case CollisionShape.Box: return CollisionObject.Box(o.Name, o.Pose, o.ExtentX + d, o.ExtentY + d, o.ExtentZ + d);
+            case CollisionShape.Capsule: return CollisionObject.Capsule(o.Name, o.Pose, o.ExtentX + d, o.ExtentY);
+            case CollisionShape.Plane:
+            {
+                var m = Transforms.FromFrame(o.Pose); // free side = local +X
+                return CollisionObject.Plane(o.Name, new Frame(
+                    o.Pose.X + m[0] * d, o.Pose.Y + m[4] * d, o.Pose.Z + m[8] * d,
+                    o.Pose.Qw, o.Pose.Qx, o.Pose.Qy, o.Pose.Qz));
+            }
+            default:
+            {
+                var v = o.MeshVertices!;
+                var idx = o.MeshIndices!;
+                var faces = new List<int>[v.Count];
+                var fn = new List<double[]>();
+                for (var i = 0; i + 2 < idx.Count; i += 3)
+                {
+                    var a = v[idx[i]]; var b = v[idx[i + 1]]; var cc = v[idx[i + 2]];
+                    double ux = b[0] - a[0], uy = b[1] - a[1], uz = b[2] - a[2];
+                    double wx = cc[0] - a[0], wy = cc[1] - a[1], wz = cc[2] - a[2];
+                    double nx = uy * wz - uz * wy, ny = uz * wx - ux * wz, nz = ux * wy - uy * wx;
+                    var l = Math.Sqrt(nx * nx + ny * ny + nz * nz);
+                    if (l < 1e-15) continue;
+                    fn.Add(new[] { nx / l, ny / l, nz / l });
+                    var fi = fn.Count - 1;
+                    foreach (var j in new[] { idx[i], idx[i + 1], idx[i + 2] })
+                        (faces[j] ??= new()).Add(fi);
+                }
+                var nv = new List<double[]>(v.Count);
+                for (var i = 0; i < v.Count; i++)
+                {
+                    if (faces[i] is null) { nv.Add(v[i].ToArray()); continue; }
+                    double sx = 0, sy = 0, sz = 0;
+                    foreach (var f in faces[i]) { sx += fn[f][0]; sy += fn[f][1]; sz += fn[f][2]; }
+                    var l = Math.Sqrt(sx * sx + sy * sy + sz * sz);
+                    if (l < 1e-12) { nv.Add(v[i].ToArray()); continue; }
+                    sx /= l; sy /= l; sz /= l;
+                    var minDot = double.PositiveInfinity;
+                    foreach (var f in faces[i])
+                    {
+                        var dot = sx * fn[f][0] + sy * fn[f][1] + sz * fn[f][2];
+                        if (dot < minDot) minDot = dot;
+                    }
+                    var s = d / Math.Max(minDot, 1.0 / 3);
+                    nv.Add(new[] { v[i][0] + sx * s, v[i][1] + sy * s, v[i][2] + sz * s });
+                }
+                return CollisionObject.Mesh(o.Name, o.Pose, nv, idx);
+            }
+        }
+    }
+
     private static bool TryGetMeshBvh(Dictionary<int, BvhNode> cache, CollisionObject mesh, out BvhNode bvh)
     {
         bvh = null!;
