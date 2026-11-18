@@ -4,8 +4,9 @@ namespace Motus.Construction;
 
 /// <summary>
 /// EXPERIMENTAL closed-form FK/IK for the bamboo handler from Lassie's CAD (docs/handler9.md, tests/fixtures/handler9/handler9.urdf).
-/// 11 planned joints: each handler yaw, lift, feed; MainClamp yaw, lift, per gripper slide, and the blue (active) roll.
-/// The yellow roll is passive: a URDF mimic of the blue roll (multiplier 1), because both grippers hold one rigid cane.
+/// 10 planned joints: each handler yaw, lift, feed; MainClamp yaw, lift, the blue (active) slide, and the blue (active) roll.
+/// The yellow slide is a URDF mimic of the blue slide (multiplier -1): one motor drives both toward the centre.
+/// The yellow roll is a URDF mimic of the blue roll (multiplier 1), because both grippers hold one rigid cane.
 /// Each clamp frame has its origin on the cane axis and +x along the cane. Clamp open/close is gripper state, not a joint.
 /// Joint positions are tree driver order (<see cref="KinematicTree.DriverJointIndices"/>).
 /// </summary>
@@ -41,8 +42,10 @@ public sealed class Handler9Kinematics
         Expect("main_clamp_yellow_roll", KinematicJointType.Revolute, 1, 0, 0);
         if (Joint("main_clamp_yellow_roll").Mimic is not { Multiplier: 1, Offset: 0 } m || tree.Joints[m.JointIndex].Name != "main_clamp_blue_roll")
             throw new ArgumentException("handler9: main_clamp_yellow_roll must mimic main_clamp_blue_roll (multiplier 1, offset 0).");
-        if (tree.DriverCount != 11)
-            throw new ArgumentException($"handler9: expected 11 planned joints, got {tree.DriverCount}.");
+        if (Joint("main_clamp_yellow_slide").Mimic is not { Multiplier: -1, Offset: 0 } ms || tree.Joints[ms.JointIndex].Name != "main_clamp_blue_slide")
+            throw new ArgumentException("handler9: main_clamp_yellow_slide must mimic main_clamp_blue_slide (multiplier -1, offset 0).");
+        if (tree.DriverCount != 10)
+            throw new ArgumentException($"handler9: expected 10 planned joints, got {tree.DriverCount}.");
         foreach (var c in ClampLinks)
             tree.IndexOfLink(c); // throws on a missing clamp link
 
@@ -76,7 +79,8 @@ public sealed class Handler9Kinematics
 
     /// <summary>
     /// Coupled solve: all three stations hold one straight cane. Every clamp origin lands on the cane line and every
-    /// clamp +x is parallel to it. Where a clamp grips along the cane is free; the feeds and MainClamp slides keep the seed.
+    /// clamp +x is parallel to it. Where a clamp grips along the cane is free; the feeds and the blue MainClamp slide keep the seed.
+    /// The yellow slide follows as the negative of the blue slide.
     /// </summary>
     public bool TrySolveCane(double[] point, double[] axis, IReadOnlyList<double> seed, out double[] q, out string? reason)
     {
@@ -147,17 +151,18 @@ public sealed class Handler9Kinematics
         var slide = SlideOf(clampLink) is { } slideName ? Joint(slideName) : null;
 
         // Reference: station yaw/lift/slide at 0. Clamp = C + Rz(yaw)(o + slide x) + lift z.
+        SlideDrive(slide, out var slideSlot, out var slideMul, out var slideOff);
         var refQ = q.ToArray();
         refQ[yaw.DriverIndex] = 0;
         refQ[lift.DriverIndex] = 0;
         if (slide != null)
-            refQ[slide.DriverIndex] = 0;
+            refQ[slideSlot] = (0 - slideOff) / slideMul;
         _fk.ComputeLinkTransformsInto(refQ, _mats);
         var c = _mats[yaw.ChildLinkIndex];
         var p0 = _mats[_tree.IndexOfLink(clampLink)];
         double ox = p0[3] - c[3], oy = p0[7] - c[7];
         var liftQ = p[2] - p0[11];
-        var slideSeed = slide == null ? 0 : q[slide.DriverIndex];
+        var slideSeed = slide == null ? 0 : slideMul * q[slideSlot] + slideOff;
 
         // The cane line has no direction: try both headings, nearest the seed yaw first.
         var a = Math.Atan2(axis[1], axis[0]);
@@ -182,7 +187,7 @@ public sealed class Handler9Kinematics
                 q[yaw.DriverIndex] = t;
                 q[lift.DriverIndex] = liftQ;
                 if (slide != null)
-                    q[slide.DriverIndex] = s;
+                    q[slideSlot] = (s - slideOff) / slideMul;
                 reason = null;
                 return true;
             }
@@ -197,6 +202,23 @@ public sealed class Handler9Kinematics
             : Math.Sqrt(axis[0] * axis[0] + axis[1] * axis[1] + axis[2] * axis[2]) < 1e-12 ? "Cane axis must be non-zero."
             : null;
         return reason == null;
+    }
+
+    // Driver slot and q_slide = mul * q[slot] + off. A mimic slide writes the parent driver (yellow = -blue).
+    private void SlideDrive(KinematicJoint? slide, out int slot, out double mul, out double off)
+    {
+        if (slide?.Mimic is { } m)
+        {
+            slot = _tree.Joints[m.JointIndex].DriverIndex;
+            mul = m.Multiplier;
+            off = m.Offset;
+        }
+        else
+        {
+            slot = slide?.DriverIndex ?? -1;
+            mul = 1;
+            off = 0;
+        }
     }
 
     // Prismatic joint along the cane that moves this clamp (null for a static clamp).
