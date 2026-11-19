@@ -134,8 +134,14 @@ public sealed class Handler9Collision
     /// <summary>
     /// True when no two non-allowed bodies are closer than the clearance. <paramref name="cane"/> is optional;
     /// when given, every clamp may touch it and every other robot part is checked against it.
+    /// Pass <paramref name="caneContactLinks"/> to allow only those robot links to touch the cane
+    /// (default: every clamp frame). Adjacent robot pairs do not change.
     /// </summary>
-    public bool IsSelfCollisionFree(IReadOnlyList<double> q, out string? hit, CollisionObject? cane = null)
+    public bool IsSelfCollisionFree(
+        IReadOnlyList<double> q,
+        out string? hit,
+        CollisionObject? cane = null,
+        IReadOnlyList<string>? caneContactLinks = null)
     {
         hit = null;
         if (q.Count != _tree.DriverCount || !q.All(double.IsFinite))
@@ -143,7 +149,10 @@ public sealed class Handler9Collision
             hit = "Expected a finite full driver vector.";
             return false;
         }
-        var scene = cane is null ? _selfScene : new CollisionScene(new[] { cane }, _scenePairs);
+        var pairs = _scenePairs;
+        if (cane is not null && caneContactLinks is not null)
+            pairs = ScenePairs(_tree, AllowedAdjacentPairs, caneContactLinks.Select(c => (c, cane.Name)).ToArray());
+        var scene = cane is null ? _selfScene : new CollisionScene(new[] { cane }, pairs);
         var ok = _checker.IsCollisionFree(new JointState(q), scene);
         hit = ok ? null : _checker.LastHit;
         return ok;

@@ -137,7 +137,7 @@ Allowed contacts come from the URDF tree:
 
 - Adjacent collision links. A joint that connects two links with meshes is an allowed pair. A turntable link has no mesh. In that case the checker walks through it, so the beam (`base_link`) may touch each station carriage. That is required, because each lift shaft passes through the beam.
 - A fixed mesh child may contact its siblings on the same mesh parent. At each outer station the fixed jaw and the feed jaw sit on the same carriage and their meshes meet. The two MainClamp sleds are both moving, so they are not an allowed pair.
-- The cane (or rod) in the clamps. The cane is not a robot part. When a cane body is given, each of the six clamp frames may touch it. Other robot parts must keep the clearance from the cane.
+- The cane (or rod) in the clamps. The cane is not a robot part. When a cane body is given, each of the six clamp frames may touch it. Other robot parts must keep the clearance from the cane. Pass `caneContactLinks` to allow only those links to touch the cane. When the argument is omitted, every clamp frame may touch the cane, as before.
 
 Allowed adjacent pairs:
 

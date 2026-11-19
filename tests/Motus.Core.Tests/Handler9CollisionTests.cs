@@ -93,4 +93,18 @@ public class Handler9CollisionTests
         var clear = c.IsSelfCollisionFree(q, out var hit, cane);
         Assert.True(clear, $"TrySolveRod(tilt={tilt}, raise={raise}) self-collides: {hit}");
     }
+
+    [Fact]
+    public void CaneAtHome_OnlyOuterContacts_HitsTheMiddle()
+    {
+        var (k, c) = Load();
+        var z0 = k.ClampFrame(new double[k.Tree.DriverCount], "handler_1_clamp")[11];
+        var cane = Handler9Collision.Cane(new[] { 0.0, 0, z0 }, new[] { 1.0, 0, 0 }, 1.0);
+        var q = new double[k.Tree.DriverCount];
+        Assert.True(c.IsSelfCollisionFree(q, out var hitAll, cane), hitAll);
+        Assert.False(
+            c.IsSelfCollisionFree(q, out var hit, cane, new[] { "handler_1_clamp", "handler_1_active" }),
+            "the middle clamp sits on the home cane and must be reported when it is not an allowed contact");
+        Assert.Contains("cane", hit);
+    }
 }
