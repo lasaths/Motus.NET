@@ -6,6 +6,7 @@ namespace Motus.Geometry;
 /// Scene collision via TreeFK — poses every named collision link (tip path + side branches).
 /// Plan joint state may be tip-only or tip+branches (see constructor planJointNames).
 /// Unmatched tree drivers use treeDriverHome (open gripper, etc.).
+/// Opt-in self-collision and a clearance margin are off by default so existing callers are unchanged.
 /// </summary>
 public sealed class TreeFkCollisionChecker : ICollisionChecker
 {
@@ -29,6 +30,11 @@ public sealed class TreeFkCollisionChecker : ICollisionChecker
     private readonly int[] _treeLinkOfEntry;
     private readonly double[] _worldScratch = new double[16];
     private readonly double[] _linkScratch = new double[16];
+    private readonly bool _checkSelfCollision;
+    private readonly double _clearanceMarginM;
+    private readonly CollisionObject[]? _grown;
+    private readonly double[]? _grownRadius;
+    private readonly double[][]? _linkWorld;
     private double[]? _segmentQ;
     private JointState? _segmentState;
 
@@ -39,16 +45,23 @@ public sealed class TreeFkCollisionChecker : ICollisionChecker
         public double EnvelopeRadius { get; init; }
     }
 
+    /// <summary>Last colliding pair name, or a driver-fill error, after <see cref="IsCollisionFree"/> returns false.</summary>
+    public string? LastHit { get; private set; }
+
     public TreeFkCollisionChecker(
         RobotModel robot,
         KinematicTree tree,
         SerialJointChain? tipChain = null,
         IReadOnlyList<string>? planJointNames = null,
         IReadOnlyList<double>? treeDriverHome = null,
-        IReadOnlyList<AttachedBody>? attached = null)
+        IReadOnlyList<AttachedBody>? attached = null,
+        bool checkSelfCollision = false,
+        double clearanceMarginM = 0)
     {
         if (robot.CollisionModel is null || robot.CollisionModel.Links.Count == 0)
             throw new ArgumentException("TreeFkCollisionChecker requires a CollisionModel with links.", nameof(robot));
+        if (!double.IsFinite(clearanceMarginM) || clearanceMarginM < 0)
+            throw new ArgumentException("Clearance must be a finite value >= 0.", nameof(clearanceMarginM));
 
         _tree = tree;
         _treeFk = new TreeForwardKinematics(tree);
@@ -63,6 +76,8 @@ public sealed class TreeFkCollisionChecker : ICollisionChecker
         _treeMats = new double[tree.Links.Count][];
         for (var i = 0; i < _treeMats.Length; i++)
             _treeMats[i] = new double[16];
+        _checkSelfCollision = checkSelfCollision;
+        _clearanceMarginM = clearanceMarginM;
 
         _tipCount = tipChain?.Joints.Length ?? 0;
         _tipFk = tipChain is not null
@@ -84,6 +99,29 @@ public sealed class TreeFkCollisionChecker : ICollisionChecker
 
         if (_collision.ToolGeometry is { } tool)
             _toolEntry = BuildEntry(tool, tool.Name);
+
+        if (_checkSelfCollision)
+        {
+            _linkWorld = new double[_links.Count][];
+            for (var i = 0; i < _links.Count; i++)
+                _linkWorld[i] = new double[16];
+        }
+
+        if (_clearanceMarginM > 0)
+        {
+            _grown = new CollisionObject[_links.Count];
+            _grownRadius = new double[_links.Count];
+            for (var i = 0; i < _links.Count; i++)
+            {
+                var g = CollisionGeometry.Grow(_links[i].Geometry, _clearanceMarginM);
+                _grown[i] = g;
+                _grownRadius[i] = g.Shape == CollisionShape.Mesh
+                    ? CollisionGeometry.MeshEnvelopeRadius(g)
+                    : _links[i].EnvelopeRadius + _clearanceMarginM;
+                if (g.Shape == CollisionShape.Mesh && g.MeshVertices is not null && g.MeshIndices is { Count: >= 3 })
+                    CollisionMeshCache.GetOrBuild(g);
+            }
+        }
     }
 
     private static LinkEntry BuildEntry(CollisionObject geom, string linkName)
@@ -112,25 +150,37 @@ public sealed class TreeFkCollisionChecker : ICollisionChecker
 
     public bool IsCollisionFree(JointState state, CollisionScene scene)
     {
-        if (FillDriverQ(state.Positions) is not null)
+        LastHit = null;
+        if (FillDriverQ(state.Positions) is { } err)
+        {
+            LastHit = err;
             return false;
+        }
 
         _treeFk.ComputeLinkTransformsInto(_driverQ, _treeMats);
 
+        if (_checkSelfCollision && !SelfCollisionFree(scene))
+            return false;
+
         foreach (var obj in scene.Objects)
         {
+            var obstacle = _clearanceMarginM > 0 ? CollisionGeometry.Grow(obj, _clearanceMarginM) : obj;
             for (var i = 0; i < _links.Count; i++)
             {
                 var entry = _links[i];
                 var li = _treeLinkOfEntry[i];
                 if (li < 0 || li >= _treeMats.Length) continue;
-                if (scene.IsPairAllowed(CollisionBodies.RobotLink(li), obj.Name))
+                if (scene.IsPairAllowed(CollisionBodies.RobotLink(li), obj.Name) ||
+                    scene.IsPairAllowed(entry.LinkName, obj.Name))
                     continue;
                 ComposeWorldInto(_worldScratch, _baseM, _treeMats[li], entry.Geometry.Pose);
-                if (!CollisionGeometry.EnvelopeMayHit(entry.Geometry, _worldScratch, entry.EnvelopeRadius, obj, _meshBvhCache, _scratch))
+                if (!CollisionGeometry.EnvelopeMayHit(entry.Geometry, _worldScratch, entry.EnvelopeRadius + _clearanceMarginM, obstacle, _meshBvhCache, _scratch))
                     continue;
-                if (CollisionGeometry.IntersectsAtPose(entry.Geometry, _worldScratch, obj, _meshBvhCache, _scratch))
+                if (CollisionGeometry.IntersectsAtPose(entry.Geometry, _worldScratch, obstacle, _meshBvhCache, _scratch))
+                {
+                    LastHit = $"{entry.LinkName} vs {obj.Name}";
                     return false;
+                }
             }
         }
 
@@ -148,8 +198,12 @@ public sealed class TreeFkCollisionChecker : ICollisionChecker
                 foreach (var obj in scene.Objects)
                 {
                     if (scene.IsPairAllowed(body.Geometry.Name, obj.Name)) continue;
-                    if (CollisionGeometry.IntersectsAtPose(body.Geometry, attWorldM, obj, _meshBvhCache, _scratch))
+                    var obstacle = _clearanceMarginM > 0 ? CollisionGeometry.Grow(obj, _clearanceMarginM) : obj;
+                    if (CollisionGeometry.IntersectsAtPose(body.Geometry, attWorldM, obstacle, _meshBvhCache, _scratch))
+                    {
+                        LastHit = $"{body.Geometry.Name} vs {obj.Name}";
                         return false;
+                    }
                 }
             }
         }
@@ -185,6 +239,81 @@ public sealed class TreeFkCollisionChecker : ICollisionChecker
         return true;
     }
 
+    private bool SelfCollisionFree(CollisionScene scene)
+    {
+        var worlds = _linkWorld!;
+        var n = _links.Count;
+        for (var i = 0; i < n; i++)
+        {
+            var li = _treeLinkOfEntry[i];
+            if (li < 0 || li >= _treeMats.Length) continue;
+            ComposeWorldInto(worlds[i], _baseM, _treeMats[li], _links[i].Geometry.Pose);
+        }
+
+        for (var i = 0; i < n; i++)
+        {
+            var li = _treeLinkOfEntry[i];
+            if (li < 0 || li >= _treeMats.Length) continue;
+            var a = _links[i];
+            for (var j = i + 1; j < n; j++)
+            {
+                var lj = _treeLinkOfEntry[j];
+                if (lj < 0 || lj >= _treeMats.Length) continue;
+                var b = _links[j];
+                if (scene.IsPairAllowed(a.LinkName, b.LinkName) ||
+                    scene.IsPairAllowed(CollisionBodies.RobotLink(li), CollisionBodies.RobotLink(lj)))
+                    continue;
+
+                var rB = _grownRadius is null ? b.EnvelopeRadius : _grownRadius[j];
+                if (!CentersMayHit(a.Geometry, worlds[i], a.EnvelopeRadius, b.Geometry, worlds[j], rB))
+                    continue;
+
+                var other = _grown is null ? b.Geometry : _grown[j];
+                var hit = a.Geometry.Shape == CollisionShape.Mesh && other.Shape == CollisionShape.Mesh
+                    ? CollisionGeometry.IntersectsMeshesAtPoses(
+                        a.Geometry, worlds[i], other, worlds[j],
+                        CollisionMeshCache.GetOrBuild(other), _scratch)
+                    : CollisionGeometry.IntersectsAtPose(
+                        a.Geometry, worlds[i], AsWorldObstacle(other, worlds[j]), _meshBvhCache, _scratch);
+                if (hit)
+                {
+                    LastHit = $"{a.LinkName} vs {b.LinkName}";
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
+
+    private static bool CentersMayHit(
+        CollisionObject a, double[] worldA, double rA,
+        CollisionObject b, double[] worldB, double rB)
+    {
+        if (a.Shape != CollisionShape.Mesh || b.Shape != CollisionShape.Mesh)
+            return true;
+        CollisionGeometry.MeshEnvelopeCenterLocal(a, out var lax, out var lay, out var laz);
+        CollisionGeometry.MeshEnvelopeCenterLocal(b, out var lbx, out var lby, out var lbz);
+        Transforms.TransformPointInto(worldA, lax, lay, laz, out var ax, out var ay, out var az);
+        Transforms.TransformPointInto(worldB, lbx, lby, lbz, out var bx, out var by, out var bz);
+        var dx = ax - bx; var dy = ay - by; var dz = az - bz;
+        var rr = rA + rB;
+        return dx * dx + dy * dy + dz * dz <= rr * rr;
+    }
+
+    private static CollisionObject AsWorldObstacle(CollisionObject local, double[] worldM)
+    {
+        var f = Transforms.ToFrame(worldM);
+        return local.Shape switch
+        {
+            CollisionShape.Sphere => CollisionObject.Sphere(local.Name, f, local.ExtentX),
+            CollisionShape.Box => CollisionObject.Box(local.Name, f, local.ExtentX, local.ExtentY, local.ExtentZ),
+            CollisionShape.Capsule => CollisionObject.Capsule(local.Name, f, local.ExtentX, local.ExtentY),
+            CollisionShape.Mesh when local.MeshVertices is not null && local.MeshIndices is not null =>
+                CollisionObject.Mesh(local.Name, f, local.MeshVertices, local.MeshIndices),
+            _ => local
+        };
+    }
+
     private bool ToolSceneCollisionFree(JointState state, CollisionScene scene)
     {
         if (_toolEntry is null || scene.Objects.Count == 0 || _tipFk is null || _tipCount <= 0)
@@ -199,10 +328,14 @@ public sealed class TreeFkCollisionChecker : ICollisionChecker
         foreach (var obj in scene.Objects)
         {
             if (scene.IsPairAllowed(_toolEntry.Geometry.Name, obj.Name)) continue;
-            if (!CollisionGeometry.EnvelopeMayHit(_toolEntry.Geometry, worldM, _toolEntry.EnvelopeRadius, obj, _meshBvhCache, _scratch))
+            var obstacle = _clearanceMarginM > 0 ? CollisionGeometry.Grow(obj, _clearanceMarginM) : obj;
+            if (!CollisionGeometry.EnvelopeMayHit(_toolEntry.Geometry, worldM, _toolEntry.EnvelopeRadius + _clearanceMarginM, obstacle, _meshBvhCache, _scratch))
                 continue;
-            if (CollisionGeometry.IntersectsAtPose(_toolEntry.Geometry, worldM, obj, _meshBvhCache, _scratch))
+            if (CollisionGeometry.IntersectsAtPose(_toolEntry.Geometry, worldM, obstacle, _meshBvhCache, _scratch))
+            {
+                LastHit = $"{_toolEntry.Geometry.Name} vs {obj.Name}";
                 return false;
+            }
         }
         return true;
     }
