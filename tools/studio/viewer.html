@@ -27,6 +27,7 @@
   <svg id="overlay" viewBox="0 0 1920 1080" xmlns="http://www.w3.org/2000/svg"></svg>
 </div>
 <script src="/three.min.js"></script>
+<script src="/timeline.js"></script>
 <script>
 // Helper: Three.js r128 does NOT auto-convert hex colors to linear when sRGBEncoding is active!
 function linCol(hex) {
@@ -190,7 +191,8 @@ const THEMES = {
 };
 
 let SCENE_DATA = null;
-let CFG = { theme: "dark", mode: "clean", layout: "single" };
+let CFG = { theme: "dark", mode: "clean", layout: "single", timeline: "off" };
+let TL_MODEL = null, TL_I = 0;  // task timeline model and the current video frame
 let renderer, scene, shadowPlane, refSquareGroup;
 let camHero, camEnd, camPlan;
 let linkMeshes = {};
@@ -730,11 +732,13 @@ function renderOverlay(fr) {
     }
     const idx = fr.phaseIdx || "";
     const lbl = fr.phaseLabel || fr.phase || "";
-    const lblX = idx ? 34 : 0;
+    const tlm = StudioTimeline.MODES[CFG.timeline] || StudioTimeline.MODES.off;
+    const cs = tlm.captionSize;
+    const lblX = idx ? Math.round(cs * 2) : 0;
     parts.push(`
-      <g transform="translate(42, 1038)">
-        ${idx ? `<text x="0" y="0" fill="${T.textMuted}" font-size="17" font-weight="600" letter-spacing="0.8">${idx}</text>` : ""}
-        <text x="${lblX}" y="0" fill="${T.textPrimary}" font-size="17" font-weight="500">${lbl}</text>
+      <g transform="translate(42, ${tlm.captionY})">
+        ${idx ? `<text x="0" y="0" fill="${T.textMuted}" font-size="${cs}" font-weight="600" letter-spacing="0.8">${idx}</text>` : ""}
+        <text x="${lblX}" y="0" fill="${T.textPrimary}" font-size="${cs}" font-weight="500">${lbl}</text>
       </g>
     `);
   }
@@ -765,7 +769,7 @@ function renderOverlay(fr) {
     const pillW = gx + teleW;
     const px = (isMulti ? 1306 : 1920) - pillW - 32;
     parts.push(`
-      <g transform="translate(${px}, 1030)">
+      <g transform="translate(${px}, ${(StudioTimeline.MODES[CFG.timeline] || StudioTimeline.MODES.off).chipY})">
         <rect x="-14" y="-16" width="${pillW}" height="32" rx="2" fill="${T.pillBg}" stroke="${T.pillBorder}" stroke-width="1"/>
         <g transform="translate(4, 0)">${pillItems.join("")}</g>
         ${tele ? `<text x="${gx + 4}" y="4" fill="${T.textSecondary}" font-size="12" font-weight="500">${tele}</text>` : ""}
@@ -773,6 +777,9 @@ function renderOverlay(fr) {
     `);
   }
 
+  if (TL_MODEL && CFG.mode !== "bare" && StudioTimeline.MODES[CFG.timeline]) {
+    parts.push(StudioTimeline.MODES[CFG.timeline].draw(TL_MODEL, TL_I, CFG));
+  }
   svg.innerHTML = parts.join("\n");
 }
 
@@ -867,9 +874,11 @@ window.STUDIO = {
     const resp = await fetch(sceneUrl);
     const data = await resp.json();
     initScene(data, cfg);
+    TL_MODEL = StudioTimeline.build(data);
     const phases = {};
     (data.uniqueFrames || []).forEach((fr, i) => { if (fr.phase) phases[fr.phase] = i; });
     return {
+      timelineModel: TL_MODEL,
       uniqueCount: data.uniqueFrames.length,
       timeline: data.timeline,
       keyIndices: data.keyIndices,
@@ -877,8 +886,12 @@ window.STUDIO = {
       fps: data.fps,
     };
   },
-  renderFrame: (idx) => {
-    applyFrame(idx);
+  // ti = video frame index for the task timeline. Same idx again: redraw only the overlay.
+  renderFrame: (idx, ti) => {
+    TL_I = ti == null ? Math.max(0, SCENE_DATA.timeline.indexOf(idx)) : ti;
+    if (idx === window._lastIdx) renderOverlay(SCENE_DATA.uniqueFrames[idx]);
+    else applyFrame(idx);
+    window._lastIdx = idx;
     return true;
   },
 };
