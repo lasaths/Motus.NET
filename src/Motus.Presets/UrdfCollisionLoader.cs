@@ -5,6 +5,15 @@ using Motus.Geometry;
 
 namespace Motus.Presets;
 
+/// <summary>Which URDF link element <see cref="UrdfCollisionLoader.LoadTree"/> reads the geometry from.</summary>
+public enum UrdfMeshSource
+{
+    /// <summary><c>&lt;collision&gt;</c> (the default).</summary>
+    Collision,
+    /// <summary><c>&lt;visual&gt;</c>, for URDFs with CAD visuals but coarse (or no) collision shapes.</summary>
+    Visual
+}
+
 public static class UrdfCollisionLoader
 {
     public static RobotCollisionModel? Load(
@@ -15,32 +24,36 @@ public static class UrdfCollisionLoader
         var indexed = new List<(int Index, string Name)>(chainLinkNames.Count);
         for (var i = 0; i < chainLinkNames.Count; i++)
             indexed.Add((i, chainLinkNames[i]));
-        return LoadIndexed(robotRoot, indexed, urdfDirectory);
+        return LoadIndexed(robotRoot, indexed, urdfDirectory, "collision");
     }
 
     /// <summary>
     /// Collision for every tree link that declares geometry. LinkIndex = tree link index (TreeFK posing).
+    /// <paramref name="source"/> picks <c>&lt;collision&gt;</c> or <c>&lt;visual&gt;</c> elements (also for the tool).
     /// </summary>
     public static RobotCollisionModel? LoadTree(
         XElement robotRoot,
         KinematicTree tree,
         string urdfDirectory,
-        string? tipLinkForTool = null)
+        string? tipLinkForTool = null,
+        UrdfMeshSource source = UrdfMeshSource.Collision)
     {
+        var element = source == UrdfMeshSource.Visual ? "visual" : "collision";
         var indexed = new List<(int Index, string Name)>(tree.Links.Count);
         for (var i = 0; i < tree.Links.Count; i++)
             indexed.Add((i, tree.Links[i].Name));
-        var model = LoadIndexed(robotRoot, indexed, urdfDirectory);
+        var model = LoadIndexed(robotRoot, indexed, urdfDirectory, element);
         if (string.IsNullOrWhiteSpace(tipLinkForTool))
             return model;
-        var tool = LoadTipLinkGeometry(robotRoot, tipLinkForTool, urdfDirectory);
+        var tool = LoadTipLinkGeometry(robotRoot, tipLinkForTool, urdfDirectory, element);
         return WithToolGeometry(model, tool);
     }
 
     private static RobotCollisionModel? LoadIndexed(
         XElement robotRoot,
         IReadOnlyList<(int Index, string Name)> links,
-        string urdfDirectory)
+        string urdfDirectory,
+        string element)
     {
         var linksByName = robotRoot.Elements("link")
             .ToDictionary(l => l.Attribute("name")?.Value ?? "", l => l, StringComparer.OrdinalIgnoreCase);
@@ -50,13 +63,13 @@ public static class UrdfCollisionLoader
         {
             if (!linksByName.TryGetValue(linkName, out var linkEl)) continue;
             var collisionIdx = 0;
-            foreach (var collision in linkEl.Elements("collision"))
+            foreach (var collision in linkEl.Elements(element))
             {
                 var origin = collision.Element("origin");
                 var xyz = ParseTriple(origin?.Attribute("xyz")?.Value, $"link '{linkName}' collision origin xyz");
                 var rpy = ParseTriple(origin?.Attribute("rpy")?.Value, $"link '{linkName}' collision origin rpy");
                 var pose = FrameFromRpy(xyz.x, xyz.y, xyz.z, rpy.x, rpy.y, rpy.z);
-                var geom = collision.Element("geometry") ?? throw new InvalidOperationException($"collision on {linkName} missing geometry");
+                var geom = collision.Element("geometry") ?? throw new InvalidOperationException($"{element} on {linkName} missing geometry");
                 // URDF <collision name="..."> when present (stable, human-readable hit reports); else {link}_col{i}.
                 var declared = collision.Attribute("name")?.Value;
                 var objName = string.IsNullOrWhiteSpace(declared) ? $"{linkName}_col{collisionIdx}" : declared;
@@ -74,18 +87,25 @@ public static class UrdfCollisionLoader
     public static CollisionObject? LoadTipLinkGeometry(
         XElement robotRoot,
         string tipLinkName,
-        string urdfDirectory)
+        string urdfDirectory) =>
+        LoadTipLinkGeometry(robotRoot, tipLinkName, urdfDirectory, "collision");
+
+    private static CollisionObject? LoadTipLinkGeometry(
+        XElement robotRoot,
+        string tipLinkName,
+        string urdfDirectory,
+        string element)
     {
         var linkEl = robotRoot.Elements("link")
             .FirstOrDefault(l => string.Equals(l.Attribute("name")?.Value, tipLinkName, StringComparison.OrdinalIgnoreCase));
         if (linkEl is null) return null;
-        var collision = linkEl.Elements("collision").FirstOrDefault();
+        var collision = linkEl.Elements(element).FirstOrDefault();
         if (collision is null) return null;
         var origin = collision.Element("origin");
         var xyz = ParseTriple(origin?.Attribute("xyz")?.Value, $"link '{tipLinkName}' collision origin xyz");
         var rpy = ParseTriple(origin?.Attribute("rpy")?.Value, $"link '{tipLinkName}' collision origin rpy");
         var pose = FrameFromRpy(xyz.x, xyz.y, xyz.z, rpy.x, rpy.y, rpy.z);
-        var geom = collision.Element("geometry") ?? throw new InvalidOperationException($"collision on {tipLinkName} missing geometry");
+        var geom = collision.Element("geometry") ?? throw new InvalidOperationException($"{element} on {tipLinkName} missing geometry");
         return ParseGeometry($"{tipLinkName}_tool_col", pose, geom, urdfDirectory);
     }
 
@@ -123,7 +143,13 @@ public static class UrdfCollisionLoader
             var filename = mesh.Attribute("filename")?.Value;
             if (string.IsNullOrWhiteSpace(filename)) return null;
             var path = ResolveMeshPath(filename, urdfDirectory);
-            var (vertices, indices) = StlReader.Read(path);
+            var s = UrdfNumbers.Triple(mesh.Attribute("scale")?.Value, 1, 1, 1, $"collision '{name}' mesh scale");
+            if (s.x <= 0 || s.y <= 0 || s.z <= 0)
+                throw new InvalidDataException($"URDF collision '{name}' mesh scale must be > 0 (mirrored meshes are not supported).");
+            var uniform = s.y == s.x && s.z == s.x;
+            var (vertices, indices) = StlReader.Read(path, uniform ? s.x : 1);
+            if (!uniform)
+                foreach (var v in vertices) { v[0] *= s.x; v[1] *= s.y; v[2] *= s.z; }
             return CollisionObject.Mesh(name, pose, vertices, indices);
         }
         return null;

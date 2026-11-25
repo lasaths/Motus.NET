@@ -1,3 +1,5 @@
+using System.Collections.Concurrent;
+using System.Runtime.CompilerServices;
 using Motus.Core;
 
 namespace Motus.Geometry;
@@ -13,7 +15,7 @@ internal sealed class CollisionQueryScratch
     public readonly double[] Obb = new double[19];
 }
 
-internal static class CollisionGeometry
+public static class CollisionGeometry
 {
     private const double ObbPad = 1e-6;
 
@@ -23,7 +25,7 @@ internal static class CollisionGeometry
     /// 1 µm). Every exact test only reports contact inside these boxes, so true means the exact test says clear.
     /// False means "maybe": the exact test decides.
     /// </summary>
-    public static bool ObbApart(CollisionObject local, double[] worldM, CollisionObject obstacle, CollisionQueryScratch scratch)
+    internal static bool ObbApart(CollisionObject local, double[] worldM, CollisionObject obstacle, CollisionQueryScratch scratch)
     {
         var b = obstacle.WorldObbSlot;
         if (b is null)
@@ -55,7 +57,7 @@ internal static class CollisionGeometry
         return r;
     }
 
-    public static CollisionObject Transform(CollisionObject local, double[] linkWorldMatrix)
+    internal static CollisionObject Transform(CollisionObject local, double[] linkWorldMatrix)
     {
         var worldM = ComposeWorldMatrix(linkWorldMatrix, local.Pose);
         var worldFrame = Transforms.ToFrame(worldM);
@@ -71,13 +73,13 @@ internal static class CollisionGeometry
         };
     }
 
-    public static double[] ComposeWorldMatrix(double[] linkWorldMatrix, Frame localPose) =>
+    internal static double[] ComposeWorldMatrix(double[] linkWorldMatrix, Frame localPose) =>
         Transforms.Multiply(linkWorldMatrix, Transforms.FromFrame(localPose));
 
-    public static bool Intersects(CollisionObject robot, CollisionObject obstacle, Dictionary<int, BvhNode> bvhCache) =>
+    internal static bool Intersects(CollisionObject robot, CollisionObject obstacle, Dictionary<int, BvhNode> bvhCache) =>
         Intersects(robot, obstacle, bvhCache, null);
 
-    public static bool Intersects(
+    internal static bool Intersects(
         CollisionObject robot,
         CollisionObject obstacle,
         Dictionary<int, BvhNode> bvhCache,
@@ -95,7 +97,7 @@ internal static class CollisionGeometry
     }
 
     /// <summary>Test local geometry posed by <paramref name="worldM"/> against an obstacle without copying mesh verts.</summary>
-    public static bool IntersectsAtPose(
+    internal static bool IntersectsAtPose(
         CollisionObject local,
         double[] worldM,
         CollisionObject obstacle,
@@ -117,7 +119,7 @@ internal static class CollisionGeometry
     }
 
     /// <summary>Mesh–mesh with both geometries in local space + world matrices.</summary>
-    public static bool IntersectsMeshesAtPoses(
+    internal static bool IntersectsMeshesAtPoses(
         CollisionObject meshA,
         double[] worldMA,
         CollisionObject meshB,
@@ -181,7 +183,7 @@ internal static class CollisionGeometry
         return false;
     }
 
-    public static double MeshEnvelopeRadius(CollisionObject mesh)
+    internal static double MeshEnvelopeRadius(CollisionObject mesh)
     {
         if (mesh.MeshAabbMin is null || mesh.MeshAabbMax is null) return 0.01;
         var dx = mesh.MeshAabbMax[0] - mesh.MeshAabbMin[0];
@@ -190,7 +192,7 @@ internal static class CollisionGeometry
         return 0.5 * Math.Sqrt(dx * dx + dy * dy + dz * dz);
     }
 
-    public static void MeshEnvelopeCenterLocal(CollisionObject mesh, out double x, out double y, out double z)
+    internal static void MeshEnvelopeCenterLocal(CollisionObject mesh, out double x, out double y, out double z)
     {
         if (mesh.MeshAabbMin is null || mesh.MeshAabbMax is null)
         {
@@ -202,7 +204,7 @@ internal static class CollisionGeometry
         z = 0.5 * (mesh.MeshAabbMin[2] + mesh.MeshAabbMax[2]);
     }
 
-    public static bool EnvelopeMayHit(
+    internal static bool EnvelopeMayHit(
         CollisionObject local,
         double[] worldM,
         double envelopeRadius,
@@ -222,7 +224,7 @@ internal static class CollisionGeometry
         return SphereIntersectsObject(frame, envelopeRadius, obstacle, bvhCache, scratch);
     }
 
-    public static IEnumerable<(Frame center, double radius)> SampleCapsule(CollisionObject capsule, int samples = 5)
+    internal static IEnumerable<(Frame center, double radius)> SampleCapsule(CollisionObject capsule, int samples = 5)
     {
         var r = capsule.ExtentX;
         var halfLen = capsule.ExtentY;
@@ -458,13 +460,13 @@ internal static class CollisionGeometry
             case CollisionShape.Sphere:
             {
                 var rr = r + obj.ExtentX;
-                return ExactNarrowPhase.PointSegmentDistanceSq(obj.Pose.X, obj.Pose.Y, obj.Pose.Z, px, py, pz, qx, qy, qz) < rr * rr;
+                return SegmentDistance.PointSegmentSq(obj.Pose.X, obj.Pose.Y, obj.Pose.Z, px, py, pz, qx, qy, qz) < rr * rr;
             }
             case CollisionShape.Capsule:
             {
                 CapsuleSegment(obj, out var ax, out var ay, out var az, out var bx, out var by, out var bz);
                 var rr = r + obj.ExtentX;
-                return ExactNarrowPhase.SegmentSegmentDistanceSq(px, py, pz, qx, qy, qz, ax, ay, az, bx, by, bz) < rr * rr;
+                return SegmentDistance.SegmentSegmentSq(px, py, pz, qx, qy, qz, ax, ay, az, bx, by, bz) < rr * rr;
             }
             case CollisionShape.Box:
                 return SegmentBoxDistanceSq(px, py, pz, qx, qy, qz, obj) < r * r;
@@ -622,7 +624,7 @@ internal static class CollisionGeometry
         return false;
     }
 
-    public static void TransformLocalAabbToWorld(CollisionObject mesh, double[] worldM, double[] minOut, double[] maxOut)
+    internal static void TransformLocalAabbToWorld(CollisionObject mesh, double[] worldM, double[] minOut, double[] maxOut)
     {
         if (mesh.MeshAabbMin is null || mesh.MeshAabbMax is null)
         {
@@ -651,7 +653,7 @@ internal static class CollisionGeometry
         }
     }
 
-    public static bool AabbAabbOverlap(double[] minA, double[] maxA, double[] minB, double[] maxB) =>
+    internal static bool AabbAabbOverlap(double[] minA, double[] maxA, double[] minB, double[] maxB) =>
         minA[0] <= maxB[0] && maxA[0] >= minB[0] &&
         minA[1] <= maxB[1] && maxA[1] >= minB[1] &&
         minA[2] <= maxB[2] && maxA[2] >= minB[2];
@@ -753,5 +755,68 @@ internal static class CollisionGeometry
         bvh = CollisionMeshCache.GetOrBuild(mesh);
         cache[key] = bvh;
         return true;
+    }
+
+    private static readonly ConditionalWeakTable<CollisionObject, ConcurrentDictionary<double, CollisionObject>> GrownCache = new();
+
+    /// <summary>
+    /// <paramref name="o"/> grown by <paramref name="d"/> metres, for a clearance margin: primitives exactly (box corners
+    /// conservatively); meshes by moving each vertex along its normal far enough that every adjacent face plane moves
+    /// out by at least d. <paramref name="o"/> itself when d is 0. Cached per object and d (thread-safe), so the same
+    /// object comes back for the same input.
+    /// </summary>
+    /// <exception cref="ArgumentOutOfRangeException">d is not finite or is negative.</exception>
+    public static CollisionObject Grow(CollisionObject o, double d)
+    {
+        if (d == 0)
+            return o;
+        if (!double.IsFinite(d) || d < 0)
+            throw new ArgumentOutOfRangeException(nameof(d), d, "Growth must be a finite value >= 0.");
+        return GrownCache.GetValue(o, _ => new()).GetOrAdd(d, dd => GrowCore(o, dd));
+    }
+
+    private static CollisionObject GrowCore(CollisionObject o, double d)
+    {
+        switch (o.Shape)
+        {
+            case CollisionShape.Sphere: return CollisionObject.Sphere(o.Name, o.Pose, o.ExtentX + d);
+            case CollisionShape.Box: return CollisionObject.Box(o.Name, o.Pose, o.ExtentX + d, o.ExtentY + d, o.ExtentZ + d);
+            case CollisionShape.Capsule: return CollisionObject.Capsule(o.Name, o.Pose, o.ExtentX + d, o.ExtentY);
+            case CollisionShape.Plane:
+            {
+                var m = Transforms.FromFrame(o.Pose); // free side = local +X
+                return CollisionObject.Plane(o.Name, new Frame(o.Pose.X + m[0] * d, o.Pose.Y + m[4] * d, o.Pose.Z + m[8] * d, o.Pose.Qw, o.Pose.Qx, o.Pose.Qy, o.Pose.Qz));
+            }
+            default:
+            {
+                var v = o.MeshVertices!; var idx = o.MeshIndices!;
+                var faces = new List<int>[v.Count];
+                var fn = new List<double[]>();
+                for (var i = 0; i + 2 < idx.Count; i += 3)
+                {
+                    var a = v[idx[i]]; var b = v[idx[i + 1]]; var cc = v[idx[i + 2]];
+                    double ux = b[0] - a[0], uy = b[1] - a[1], uz = b[2] - a[2], wx = cc[0] - a[0], wy = cc[1] - a[1], wz = cc[2] - a[2];
+                    double nx = uy * wz - uz * wy, ny = uz * wx - ux * wz, nz = ux * wy - uy * wx;
+                    var l = Math.Sqrt(nx * nx + ny * ny + nz * nz);
+                    if (l < 1e-15) continue;
+                    fn.Add(new[] { nx / l, ny / l, nz / l });
+                    foreach (var j in new[] { idx[i], idx[i + 1], idx[i + 2] }) (faces[j] ??= new()).Add(fn.Count - 1);
+                }
+                var nv = new List<double[]>(v.Count);
+                for (var i = 0; i < v.Count; i++)
+                {
+                    if (faces[i] is null) { nv.Add(v[i].ToArray()); continue; }
+                    double sx = 0, sy = 0, sz = 0;
+                    foreach (var f in faces[i]) { sx += fn[f][0]; sy += fn[f][1]; sz += fn[f][2]; }
+                    var l = Math.Sqrt(sx * sx + sy * sy + sz * sz);
+                    if (l < 1e-12) { nv.Add(v[i].ToArray()); continue; }
+                    sx /= l; sy /= l; sz /= l;
+                    var minDot = faces[i].Min(f => sx * fn[f][0] + sy * fn[f][1] + sz * fn[f][2]);
+                    var s = d / Math.Max(minDot, 1.0 / 3);
+                    nv.Add(new[] { v[i][0] + sx * s, v[i][1] + sy * s, v[i][2] + sz * s });
+                }
+                return CollisionObject.Mesh(o.Name, o.Pose, nv, idx);
+            }
+        }
     }
 }

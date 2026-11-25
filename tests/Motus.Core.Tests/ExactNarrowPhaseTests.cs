@@ -43,7 +43,7 @@ public class ExactNarrowPhaseTests
         Assert.Equal(1, ExactNarrowPhase.SegmentAabbDistanceSq(new Frame(-2, 2, 0), new Frame(2, 2, 0), 1, 1, 1), 12);
         Assert.Equal(0, ExactNarrowPhase.SegmentAabbDistanceSq(new Frame(-2, -2, 0), new Frame(2, 2, 0), 1, 1, 1), 12);
         Assert.Equal(2, ExactNarrowPhase.SegmentAabbDistanceSq(new Frame(2, 2, 0), new Frame(3, 3, 0), 1, 1, 1), 12);
-        Assert.Equal(1, ExactNarrowPhase.SegmentSegmentDistanceSq(new Frame(-2, 0, 0), new Frame(2, 0, 0), new Frame(0, -2, 1), new Frame(0, 2, 1)), 12);
+        Assert.Equal(1, SegmentDistance.SegmentSegmentSq(new Frame(-2, 0, 0), new Frame(2, 0, 0), new Frame(0, -2, 1), new Frame(0, 2, 1)), 12);
         Assert.Equal(0, ExactNarrowPhase.SegmentTriangleDistanceSq(new Frame(0, 0, -1), new Frame(0, 0, 1),
             new Frame(-1, -1, 0), new Frame(1, -1, 0), new Frame(0, 1, 0)), 12);
         Assert.Equal(1, ExactNarrowPhase.PointTriangleDistanceSq(0, 1, 0, -1, 0, 0, -1, 0, 0, 1, 0, 0), 12);
