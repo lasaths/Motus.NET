@@ -5,7 +5,7 @@
 (function () {
   const VERM = "#E64A19";
   const BG = "#111214";
-  const MIN_FRAMES = 6;  // a task shorter than this (0.2 s at 30 fps) joins the task before it
+  const MIN_W = 6, GAP = 2;  // detailed bar: every task at least 6 px wide, 2 px between tasks
 
   // Task type of one frame, from the plan's own phase / stage labels.
   // null = keep the previous task; "" = idle (start park, finished structure): an unlabelled segment that is never active.
@@ -56,14 +56,8 @@
       const m = releaseOf(fr);
       if (m && (fr.phase === "release" || placePhases.has(`${m}_place`)) && (!(m in rel) || rel[m] === i - 1)) rel[m] = i;
     }
-    const merged = [];
-    for (const s of segs) {
-      const last = merged[merged.length - 1];
-      if (last && last.b === s.a && (s.b - s.a < MIN_FRAMES || last.task === s.task)) last.b = s.b;
-      else merged.push({ ...s });
-    }
     const members = Object.entries(rel).map(([name, i]) => ({ name, i })).sort((x, y) => x.i - y.i);
-    return { n, fps: data.fps || 30, segs: merged, members };
+    return { n, fps: data.fps || 30, segs, members };
   }
 
   const mix = (a, b, k) => "#" + [1, 3, 5].map((o) => {
@@ -73,9 +67,37 @@
   const activeSeg = (m, i) => m.segs.find((s) => s.task && s.a <= i && i < s.b) || null;
   // One caption separator everywhere: " · ".
   const sep = (label) => String(label).replace(/\s+[-\u2013\u2014\u00b7]\s+/g, " \u00b7 ");
-  // Backing behind the strip so the floor grid does not run through it.
-  const backing = (x0, x1, y0) => `<rect x="${x0 - 12}" y="${y0}" width="${x1 - x0 + 24}" height="${1080 - y0}" fill="${BG}" fill-opacity="0.85"/>`;
+  // Bottom scrim over the hero: 0 % to 85 % BG over 96 px above the strip, then 85 % to the bottom.
+  const scrim = (cfg, top) => {
+    const w = cfg.layout === "single" ? 1920 : 1306, y0 = top - 96, k = (96 / (1080 - y0)).toFixed(3);
+    return `<defs><linearGradient id="tl-scrim" x1="0" y1="0" x2="0" y2="1">` +
+      `<stop offset="0" stop-color="${BG}" stop-opacity="0"/><stop offset="${k}" stop-color="${BG}" stop-opacity="0.85"/>` +
+      `<stop offset="1" stop-color="${BG}" stop-opacity="0.85"/></linearGradient></defs>` +
+      `<rect x="0" y="${y0}" width="${w}" height="${1080 - y0}" fill="url(#tl-scrim)"/>`;
+  };
   const span = (cfg) => (cfg.layout === "single" ? [48, 1872] : [48, 1258]);   // hero pane only in multiview
+
+  // Detailed bar layout: segment widths follow duration, but no task is narrower than MIN_W.
+  function layoutBar(m, x0, x1) {
+    const n = m.segs.length, room = x1 - x0 - GAP * (n - 1);
+    let fixed = new Set(), w = [];
+    for (let pass = 0; pass < n; pass++) {
+      const free = m.segs.filter((_, k) => !fixed.has(k)).reduce((t, s) => t + s.b - s.a, 0);
+      const scale = (room - MIN_W * fixed.size) / Math.max(1, free);
+      w = m.segs.map((s, k) => (fixed.has(k) ? MIN_W : (s.b - s.a) * scale));
+      const more = w.map((v, k) => (v < MIN_W && !fixed.has(k) ? k : -1)).filter((k) => k >= 0);
+      if (!more.length) break;
+      more.forEach((k) => fixed.add(k));
+    }
+    let x = x0;
+    return m.segs.map((s, k) => { const r = { s, x, w: w[k] }; x += w[k] + GAP; return r; });
+  }
+  // Playhead x on the bar: linear in time inside each segment.
+  function barX(bar, p) {
+    for (const r of bar) if (p <= r.s.b) return r.x + r.w * Math.max(0, p - r.s.a) / (r.s.b - r.s.a);
+    const last = bar[bar.length - 1];
+    return last ? last.x + last.w : 0;
+  }
 
   // Each mode: where the caption and the jaw chip sit, and an SVG draw function.
   // chipRight: the jaw chip ends at this x, on the caption baseline (null = old position).
@@ -86,12 +108,12 @@
     // Option A: 2 px hairline, elapsed grey, active task vermilion (min 24 px), member ticks,
     // 2x10 px vermilion playhead tick. No text.
     simple: {
-      captionY: 1038, captionSize: 17, chipY: 1034, chipRight: (cfg) => span(cfg)[1], reserve: 0,
+      captionY: 1038, captionSize: 22, chipY: 1034, chipRight: (cfg) => span(cfg)[1], reserve: 0,
       draw(m, i, cfg) {
         const [x0, x1] = span(cfg), y = 1062, p = Math.min(i + 1, m.n);
         const X = (v) => (x0 + (x1 - x0) * v / m.n).toFixed(1);
         const out = [
-          backing(x0, x1, y - 18),
+          scrim(cfg, y - 18),
           `<line x1="${x0}" x2="${x1}" y1="${y}" y2="${y}" stroke="#2A2C30" stroke-width="2"/>`,
           `<line x1="${x0}" x2="${X(p)}" y1="${y}" y2="${y}" stroke="#8A8D93" stroke-width="2"/>`,
         ];
@@ -114,19 +136,20 @@
       captionY: 1012, captionSize: 22, chipY: 1008, chipRight: (cfg) => span(cfg)[1], reserve: 0,
       draw(m, i, cfg) {
         const [x0, x1] = span(cfg), y = 1032, p = Math.min(i + 1, m.n);
-        const X = (v) => x0 + (x1 - x0) * v / m.n;
-        const out = [backing(x0, x1, y - 12), `<rect x="${x0}" y="${y}" width="${x1 - x0}" height="24" fill="${BG}"/>`];
-        for (const s of m.segs) {
+        const bar = layoutBar(m, x0, x1), xp = barX(bar, p);
+        const out = [scrim(cfg, y - 12)];
+        for (const { s, x, w } of bar) {
           const on = s.task && s.a <= i && i < s.b, past = s.b <= i;
-          const fill = on ? VERM : past ? "#5C6068" : "#2A2C30";             // 2 px BG gaps between tasks
-          out.push(`<rect x="${(X(s.a) + 1).toFixed(1)}" y="${y}" width="${Math.max(1, X(s.b) - X(s.a) - 2).toFixed(1)}" height="24" rx="2" fill="${fill}"/>`);
+          const fill = on ? VERM : past ? "#5C6068" : "#2A2C30";
+          out.push(`<rect x="${x.toFixed(1)}" y="${y}" width="${w.toFixed(1)}" height="24" rx="2" fill="${fill}"/>`);
         }
-        out.push(`<line x1="${X(p).toFixed(1)}" x2="${X(p).toFixed(1)}" y1="${y - 8}" y2="${y + 32}" stroke="#E8E8E6" stroke-width="2"/>`);
+        out.push(`<line x1="${xp.toFixed(1)}" x2="${xp.toFixed(1)}" y1="${y - 8}" y2="${y + 32}" stroke="#E8E8E6" stroke-width="2"/>`);
         const s = activeSeg(m, i);
         if (s) {
           const k = Math.min(1, (i - s.a) / Math.max(1, 0.12 * m.fps));       // 120 ms label fade
-          const tx = Math.min(Math.max(X(s.a) + 1, x0), x1 - 64);             // label rides under its segment
-          out.push(`<text x="${tx.toFixed(1)}" y="${y + 41}" font-size="13" font-weight="600" letter-spacing="1.04" fill="${mix("#6E7178", "#E8E8E6", k)}">${s.task.toUpperCase()}</text>`);
+          const txt = s.task.toUpperCase(), half = (txt.length * 9.4) / 2;    // Barlow Medium 13 px + 0.08em
+          const tx = Math.min(Math.max(xp, x0 + half), x1 - half);           // centred under the playhead, inside the bar
+          out.push(`<text x="${tx.toFixed(1)}" y="${y + 41}" text-anchor="middle" font-size="13" font-weight="500" letter-spacing="1.04" fill="${mix("#6E7178", "#E8E8E6", k)}">${txt}</text>`);
         }
         return out.join("");
       },
