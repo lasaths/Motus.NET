@@ -6,7 +6,7 @@ public static class TreeAdjacency
     /// <summary>
     /// Each geometry link with its nearest geometry ancestor (links with no geometry, for example a turntable frame,
     /// are walked through). With <paramref name="fixedSiblingsTouch"/>, two geometry children of the same geometry
-    /// ancestor are also allowed when at least one of them is on a fixed joint (a clamp fixed beside a moving jaw);
+    /// ancestor are also allowed when at least one of them is on a fixed joint (for example a sensor fixed beside a moving part);
     /// two moving siblings are never allowed. Each pair is listed once.
     /// </summary>
     public static IReadOnlyList<(string A, string B)> AllowedPairs(

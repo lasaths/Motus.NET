@@ -42,7 +42,7 @@ public class TreeSelfCollisionBenchmarks
         _exactOnly = new TreeFkCollisionChecker(robot, tree, planJointNames: names, selfCollision: self) { ExactOnly = true };
         _broadPhase = new TreeFkCollisionChecker(robot, tree, planJointNames: names, selfCollision: self);
         _scene = new CollisionScene([
-            CollisionObject.Capsule("cane", new Frame(0.15, 0.25, 0, Math.Sqrt(0.5), 0, Math.Sqrt(0.5), 0), 0.035, 0.6),
+            CollisionObject.Capsule("bar", new Frame(0.15, 0.25, 0, Math.Sqrt(0.5), 0, Math.Sqrt(0.5), 0), 0.035, 0.6),
             CollisionObject.Box("post", new Frame(-0.2, -0.2, 0), 0.02, 0.02, 0.2),
         ]);
         var rng = new Random(11);

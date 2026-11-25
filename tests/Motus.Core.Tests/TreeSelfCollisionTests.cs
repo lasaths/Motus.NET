@@ -175,7 +175,7 @@ public class TreeSelfCollisionTests
         var exact = Checker(clearanceM, exactOnly: true);
         // A capsule across the work area exercises the axis clip; a box keeps one plain scene object.
         var scene = new CollisionScene([
-            CollisionObject.Capsule("cane", new Frame(0.15, 0.25, 0, Math.Sqrt(0.5), 0, Math.Sqrt(0.5), 0), 0.035, 0.6),
+            CollisionObject.Capsule("bar", new Frame(0.15, 0.25, 0, Math.Sqrt(0.5), 0, Math.Sqrt(0.5), 0), 0.035, 0.6),
             CollisionObject.Box("post", new Frame(-0.2, -0.2, 0), 0.02, 0.02, 0.2),
         ]);
         int hit = 0, free = 0;
