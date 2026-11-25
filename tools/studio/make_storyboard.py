@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import bisect
 import json
 import os
 import subprocess
@@ -98,12 +99,39 @@ def cells_from_scene(scene: dict):
     return cells
 
 
+def still_fraction(scene: dict, still) -> float:
+    """Where a storyboard still sits on the video timeline, 0..1 (first frame that shows it)."""
+    unique = scene.get("uniqueFrames") or []
+    tl = scene.get("timeline") or []
+    if not tl:
+        return 0.0
+    if not isinstance(still, int):
+        keys = scene.get("keyIndices") or {}
+        if isinstance(keys.get(still), int):
+            still = keys[still]
+        else:
+            hits = [i for i, fr in enumerate(unique) if fr.get("phase") == still]
+            still = hits[-1] if hits else 0
+    j = tl.index(still) if still in tl else min(bisect.bisect_left(tl, still), len(tl) - 1)
+    return (j + 1) / len(tl)
+
+
+def draw_mini_timeline(draw, x0, x1, y, frac):
+    """Mini option A: 4 px track, elapsed grey, vermilion tick at the panel's time."""
+    xt = x0 + (x1 - x0) * frac
+    draw.rectangle([x0, y, x1, y + 3], fill=(42, 44, 48))
+    draw.rectangle([x0, y, xt, y + 3], fill=(138, 141, 147))
+    draw.rectangle([xt - 1, y - 4, xt + 1, y + 7], fill=(230, 74, 25))
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--scene", required=True)
     ap.add_argument("--theme", default="dark", choices=["light", "dark", "black"])
     ap.add_argument("--layout", default="single", choices=["single", "multiview"])
     ap.add_argument("--out", required=True)
+    ap.add_argument("--timeline", default="simple", choices=["simple", "off"],
+                    help="simple: a 4 px mini timeline under each panel (default); off: none")
     args = ap.parse_args()
 
     scene = json.loads(Path(args.scene).read_text())
@@ -164,6 +192,8 @@ def main():
             sheet.paste(hero, (x0 + (cw - nw) // 2, y0 + (ch - 56 - nh) // 2 + 8))
             draw.text((x0 + 24, y0 + ch - 44), num, fill=T["muted"], font=f_idx)
             draw.text((x0 + 56, y0 + ch - 44), label, fill=T["ink"], font=f_lbl)
+            if args.timeline == "simple":
+                draw_mini_timeline(draw, x0 + 24, x0 + cw - 24, y0 + ch - 14, still_fraction(scene, phase))
 
         if use_ortho and seat_img is not None:
             end_crop = seat_img.crop((1307, 0, 1920, 540))

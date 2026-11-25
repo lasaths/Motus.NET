@@ -19,6 +19,9 @@ const LAYOUT = getArg("--layout", "single");   // single | multiview
 const STILL_PHASE = getArg("--still", null);   // phase name or frame index
 const STILL_OUT = getArg("--out", path.join(STUDIO_DIR, `preview_${THEME}.png`));
 const VIDEO_OUT = getArg("--video", null);
+// Task timeline: off | simple | detailed. Default: simple on clean, detailed on annotated, off on bare.
+const TIMELINE = getArg("--timeline", MODE === "clean" ? "simple" : MODE === "annotated" ? "detailed" : "off");
+if (!["off", "simple", "detailed"].includes(TIMELINE)) throw new Error(`unknown --timeline ${TIMELINE}`);
 
 function findThree() {
   const candidates = [
@@ -58,6 +61,9 @@ function startServer(threePath) {
       } else if (url === "/three.min.js") {
         res.writeHead(200, { "Content-Type": "application/javascript" });
         fs.createReadStream(threePath).pipe(res);
+      } else if (url === "/timeline.js") {
+        res.writeHead(200, { "Content-Type": "application/javascript" });
+        fs.createReadStream(path.join(STUDIO_DIR, "timeline.js")).pipe(res);
       } else if (url === "/scene.json") {
         res.writeHead(200, { "Content-Type": "application/json" });
         fs.createReadStream(SCENE_PATH).pipe(res);
@@ -156,8 +162,11 @@ async function main() {
       await new Promise((r) => setTimeout(r, 100));
     }
     const meta = await chrome.evalJs(
-      `window.STUDIO.init('/scene.json', ${JSON.stringify({ theme: THEME, mode: MODE, layout: LAYOUT })})`
+      `window.STUDIO.init('/scene.json', ${JSON.stringify({ theme: THEME, mode: MODE, layout: LAYOUT, timeline: TIMELINE })})`
     );
+
+    const tm = meta.timelineModel;
+    if (TIMELINE !== "off") console.log(`timeline ${TIMELINE}: ${tm.segs.length} tasks, members ${tm.members.map((m) => m.name).join(" ")}`);
 
     if (STILL_PHASE !== null) {
       const idx = resolveStillIndex(STILL_PHASE, meta);
@@ -183,12 +192,13 @@ async function main() {
       const tStart = Date.now();
       for (let i = 0; i < tl.length; i++) {
         const uid = tl[i];
-        let buf = cache.get(uid);
+        // The timeline changes every frame, so the frame cache is used only with --timeline off.
+        let buf = TIMELINE === "off" ? cache.get(uid) : null;
         if (!buf) {
-          await chrome.evalJs(`window.STUDIO.renderFrame(${uid})`);
+          await chrome.evalJs(`window.STUDIO.renderFrame(${uid}, ${i})`);
           const { data } = await chrome.send("Page.captureScreenshot", { format: "png" });
           buf = Buffer.from(data, "base64");
-          cache.set(uid, buf);
+          if (TIMELINE === "off") cache.set(uid, buf);
         }
         if (!ff.stdin.write(buf)) {
           await new Promise((r) => ff.stdin.once("drain", r));
