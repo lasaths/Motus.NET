@@ -27,3 +27,4 @@ tmp-*.csx
 
 # Generated Dark studio scenes and videos
 tools/studio/out/
+__pycache__/
