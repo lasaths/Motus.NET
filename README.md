@@ -1,6 +1,6 @@
 # Motus.NET
 
-.NET 8 **host-agnostic** motion-planning core: models, FK/IK, collision, sampling/Cartesian planners, retiming, export, and robotic assembly planning. **Version 2.2.0.**
+.NET 8 **host-agnostic** motion-planning core: models, FK/IK, collision, sampling/Cartesian planners, retiming, export, and robotic assembly planning. **Version 2.3.0.**
 
 <a href="docs/media/warren_truss_dark_annotated_detailed.mp4" aria-label="Bamboo arm placing the 7 members of a Warren truss over a pit, from the shipped AssemblyPlanner plan"><img src="docs/media/warren_truss_dark_annotated_detailed.gif" alt="Bamboo arm placing the 7 members of a Warren truss over a pit, from the shipped AssemblyPlanner plan" width="100%"></a>
 
@@ -8,7 +8,7 @@
 
 | Motus.NET | [Motus.Grasshopper](https://github.com/lasaths/Motus.Grasshopper) |
 |-----------|-------------------------------------------------------------------|
-| Versioned libraries on [nuget.org](https://www.nuget.org/profiles/lasaths) (package identity **2.2.0**) | Rhino/GH UI that calls these APIs |
+| Versioned libraries on [nuget.org](https://www.nuget.org/profiles/lasaths) (package identity **2.3.0**) | Rhino/GH UI that calls these APIs |
 | Owns math, units, Status contracts, method DOIs | Thin components + examples |
 
 The libraries have no UI or vendor runtime dependencies and no live robot I/O. The optional [Motus.Viewer](src/Motus.Viewer/README.md) Blazor app exercises the same libraries in the browser with bamboo-arm and truss previews. Algorithm catalog: [docs/METHODS.md](docs/METHODS.md) · citations: [docs/REFERENCES.bib](docs/REFERENCES.bib).
@@ -296,7 +296,7 @@ Without `MOTUS_DOME_BUILD=1` the test does nothing. The default test suite does 
 
 Tag `vX.Y.Z` → [release workflow](.github/workflows/release.yml) builds, tests, packs, publishes to [nuget.org](https://www.nuget.org/profiles/lasaths), and creates a GitHub Release.
 
-Changelog: [CHANGELOG.md](CHANGELOG.md). Current release: **2.2.0** on nuget.org (`Directory.Build.props`). Merging a branch does not publish packages; only a version tag does.
+Changelog: [CHANGELOG.md](CHANGELOG.md). Current release: **2.3.0** on nuget.org (`Directory.Build.props`). Merging a branch does not publish packages; only a version tag does.
 
 ## Safety
 
