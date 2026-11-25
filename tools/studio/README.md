@@ -79,4 +79,4 @@ The timeline uses the video frame as its clock. The playhead moves at a constant
 
 The storyboard shows one panel for each of 6 different tasks, from the first task to the last task. The panels are in time order. Two adjacent panels do not show the same task type, if possible. If the scene has no tasks, the panels are at equal time intervals. Each panel has its video time (mm:ss) and a 4 px mini timeline. A vermilion tick shows the time of the panel. Use `make_storyboard.py --timeline off` to remove it.
 
-`timeline.js` is the same file in Motus.Bambino and Motus.NET (`tools/studio/`). If you change it, change it in the two repos.
+`timeline.js` is a shared file. If you change it, change all copies of it.

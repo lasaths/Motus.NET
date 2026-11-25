@@ -1,5 +1,5 @@
 // Task timeline overlay for the Dark studio.
-// Shared file: keep it identical in Motus.Bambino and Motus.NET tools/studio.
+// Shared file: keep it identical in every repo that copies tools/studio.
 // Clock = video frame index on the scene timeline (an even subsample of the plan plus short holds),
 // so the playhead and the fill move linearly and never stop.
 (function () {
@@ -15,12 +15,12 @@
     if (["start", "park", "frame"].includes(p) || s === "done") return "";
     if (p.startsWith("walk")) return "walk";                                   // Warren: walk_*
     if (p.includes(">")) return /_(via|grasp|close|lift)$/.test(p) ? "pick" : "relay"; // Warren relay leg
-    if (s.includes("->")) return "bridge";                                     // Bambino: carry/return Pa->Pb
+    if (s.includes("->")) return "bridge";                                     // carry/return stage "Pa->Pb"
     if (p === "flip") return "flip";
     if (p.startsWith("bridge")) return "bridge";
     if (/_(via|grasp|close|lift|pull)$/.test(p)) return "pick";                // Warren member pick
     if (/_(carry|place|open|park)$/.test(p) && !/^(h1|h2|mc|approach|place|flip|rehome)_/.test(p)) return "place";
-    const verb = s.split(/\s+/)[1] || "";                                      // Bambino stage "2 pick CB"
+    const verb = s.split(/\s+/)[1] || "";                                      // stage label such as "2 pick CB"
     if (verb === "pick") return "pick";
     if (verb === "place") return "place";
     if (verb === "down" || verb === "up" || verb === "carry") return "climb";
@@ -30,7 +30,7 @@
   // Member name when this frame releases a placed member, else null.
   function releaseOf(fr) {
     const p = String(fr.phase || "");
-    if (p === "release") {                                                     // Bambino: stage "3 place R2 from P2"
+    if (p === "release") {                                                     // stage label such as "3 place R2 from P2"
       const m = /\bplace\s+(\S+)/i.exec(String(fr.stage || ""));
       return m ? m[1] : null;
     }
