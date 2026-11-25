@@ -302,9 +302,21 @@ Changelog: [CHANGELOG.md](CHANGELOG.md). Current release: **2.2.0** on nuget.org
 
 Motus does **not** command physical robots. Presets and URDF imports are planning defaults — verify limits and calibration before hardware use. See [docs/safety.md](docs/safety.md).
 
-This library and bundled presets were developed with AI assistance; values are approximate and must be checked against manufacturer data.
+See [AI Assistance and Transparency](#ai-assistance-and-transparency) for the voluntary disclosure of AI-assisted development.
 
 ## Attribution
 
 - Managed RRT-Connect implements Kuffner & LaValle (ICRA 2000). Native path uses [OMPL](https://ompl.kavrakilab.org/) (BSD-3-Clause) when built.
 - Robot presets are approximate public-datasheet values for planning/visualization only.
+
+### AI Assistance and Transparency
+
+Motus.NET has been developed with the assistance of generative artificial intelligence (AI), including large language models (LLMs), for software architecture, source code generation, algorithm implementation, refactoring, debugging, testing, and technical documentation.
+
+The project maintainers retain responsibility for the final implementation, technical decisions, and maintenance of the software. AI-generated contributions are subject to the same review, testing, and validation requirements as human-authored contributions.
+
+The use of AI does not constitute independent verification, certification, or a guarantee of correctness, reliability, or safety. Users must independently validate the software and its outputs before deployment, particularly in physical robotic systems and safety-critical applications.
+
+This disclosure is provided voluntarily in the interest of transparency, accountability, and responsible AI-assisted software development, with reference to the transparency principles of [Regulation (EU) 2024/1689 (European Union Artificial Intelligence Act)](https://eur-lex.europa.eu/eli/reg/2024/1689).
+
+The use of generative AI does not modify the project's MIT licence or the applicable licences and attribution requirements of third-party components.
