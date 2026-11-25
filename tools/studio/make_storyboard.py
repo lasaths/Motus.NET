@@ -48,6 +48,43 @@ FONT_CAND = {
 }
 
 
+def task_segments(scene_path) -> list:
+    """Task segments from timeline.js, the same source as the video timeline. [] if node fails."""
+    js = ("global.window={};require(process.argv[1]);"
+          "const d=JSON.parse(require('fs').readFileSync(process.argv[2]));"
+          "process.stdout.write(JSON.stringify(window.StudioTimeline.build(d).segs))")
+    try:
+        out = subprocess.check_output(["node", "-e", js, str(STUDIO_DIR / "timeline.js"), str(scene_path)], text=True)
+        return json.loads(out)
+    except (OSError, subprocess.CalledProcessError, json.JSONDecodeError):
+        return []
+
+
+def cells_by_task(scene: dict, segs: list, count: int = 6):
+    """One panel per task, spread from the first to the last task: the middle of the task nearest each even time.
+    A panel avoids the task type of the panel before it. Fallback: evenly spaced times."""
+    tl = scene.get("timeline") or []
+    unique = scene.get("uniqueFrames") or []
+    n = len(tl)
+    if not n:
+        return []
+    tasks = [sg for sg in segs if sg.get("task")]
+    picks = []
+    for k in range(count if tasks else 0):
+        target = k * (n - 1) / max(1, count - 1)                               # first task .. last task
+        pool = [sg for sg in tasks if sg not in picks]
+        if not pool:
+            break
+        prev = picks[-1]["task"] if picks else None
+        picks.append(min(pool, key=lambda sg: abs((sg["a"] + sg["b"]) / 2 - target) + (n / count if sg["task"] == prev else 0)))
+    frames = sorted({(sg["a"] + sg["b"]) // 2 for sg in picks}) or [round((k + 0.5) * (n - 1) / count) for k in range(count)]
+    cells = []
+    for j in frames:
+        fr = unique[tl[j]]
+        cells.append((tl[j], "", fr.get("phaseLabel") or fr.get("phase", "")))
+    return cells
+
+
 def cells_from_scene(scene: dict):
     keys = scene.get("keyIndices") or {}
     names = keys.get("storyboard") if isinstance(keys.get("storyboard"), list) else None
@@ -152,7 +189,7 @@ def main():
     args = ap.parse_args()
 
     scene = json.loads(Path(args.scene).read_text())
-    cells = cells_from_scene(scene)
+    cells = cells_by_task(scene, task_segments(args.scene)) or cells_from_scene(scene)
     T = THEMES[args.theme]
     # 2x3 for up to 6 hero tiles; 2x4 when multiview adds ortho panes
     use_ortho = args.layout == "multiview" and bool(scene.get("node")) and len(cells) >= 4
