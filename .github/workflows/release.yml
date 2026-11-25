@@ -109,9 +109,13 @@ jobs:
         id: notes
         run: |
           VERSION="${{ steps.version.outputs.version }}"
-          perl -0ne "print \$1 if /## \[$VERSION\][^\n]*\n(.*?)(?=\n## \[|\z)/s" CHANGELOG.md > release-notes.md
+          # A pre-release tag (2.3.0-preview.1) uses its own section if present, else the section of its base version (2.3.0).
+          for V in "$VERSION" "${VERSION%%-*}"; do
+            perl -0ne "print \$1 if /^## \[\Q$V\E\][^\n]*\n(.*?)(?=\n## \[|\z)/ms" CHANGELOG.md > release-notes.md
+            [ -s release-notes.md ] && break
+          done
           if [ ! -s release-notes.md ]; then
-            echo "No CHANGELOG section for $VERSION" >&2
+            echo "No CHANGELOG section for $VERSION or ${VERSION%%-*}" >&2
             exit 1
           fi
 
@@ -122,7 +126,8 @@ jobs:
           if gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
             gh release upload "${GITHUB_REF_NAME}" artifacts/*.nupkg artifacts/*.snupkg --clobber
           else
-            gh release create "${GITHUB_REF_NAME}" \
+            PRE=""; case "${{ steps.version.outputs.version }}" in *-*) PRE="--prerelease" ;; esac
+            gh release create "${GITHUB_REF_NAME}" $PRE \
               --title "Motus.NET ${{ steps.version.outputs.version }}" \
               --notes-file release-notes.md \
               artifacts/*.nupkg artifacts/*.snupkg

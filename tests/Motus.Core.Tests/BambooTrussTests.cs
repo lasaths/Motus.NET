@@ -1015,6 +1015,23 @@ public partial class BambooTrussTests
         _out.WriteLine($"scene check cold {cold:F1} s, warm {warm:F2} s");
     }
 
+    /// <summary>A kinematic reach query does not read the target line's Touch, so lines that differ only in Touch share one cache entry.</summary>
+    [Fact]
+    public void ReachCache_KinematicQuery_IgnoresTouch()
+    {
+        BambooTrussMotion.UseCell(Cell);
+        BambooReachMap.ClearCache();
+        var map = new BambooReachMap();
+        var site = BambooReachMap.AnchorSites("anchor-A")[0];
+        var line = BambooReachMap.Stock();
+        var a = map.Query(site, line);
+        var b = map.Query(site, line with { Touch = "other" });
+        var (hits, misses, _) = BambooReachMap.CacheStats;
+        Assert.Equal((1L, 1L), (hits, misses));
+        Assert.Equal(a, b);
+        Assert.Equal(a, new BambooReachMap { UseCache = false }.Query(site, line with { Touch = "other" }));
+    }
+
     /// <summary>The shipped-plan fingerprint covers every planner input: scene description and motion constraints too.</summary>
     [Fact]
     public void Fingerprint_CoversSceneDescription_AndMotionConstraints()
