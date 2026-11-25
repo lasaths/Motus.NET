@@ -32,6 +32,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `BambooReachMap.SiteGrid`: one clamp-site grid for the scene check and the build search, with the same sites in the same order.
 - Build-search outcome log: each row has the stand, the node, the position and layout-free features (`FeatureVersion` 1). Opt-in `Sorted` rows list each sorted candidate before the search tries it. Logging only: the search order does not change.
 - Example: a 3×3 grid-shell dome as Site JSON (`tests/fixtures/gridshell_dome3x3`), with a load test and an opt-in build test (`MOTUS_DOME_BUILD=1`, 24/24). See README.
+- Tree link-to-link collision (G1): `TreeFkCollisionChecker(..., selfCollision: new TreeSelfCollision(clearanceM, allowedPairs))` tests every pair of geometry on two different tree links in both directions, each against the other grown by the clearance. `TreeAdjacency.AllowedPairs(tree, geometryLinks, fixedSiblingsTouch)` gives the adjacent pairs. Scene (SRDF) allowed pairs also apply. `TreeFkCollisionChecker.LastHit` names the first failing pair. With self-collision on, mesh pairs and scene capsules use a conservative broad phase; the exact tests decide (agreement test at 2 mm and 3 mm). The constructor parameter is off when null; `CollisionCheckerFactory` turns it on (see Changed).
+- `CollisionGeometry.Grow(o, d)` (public): the cached clearance grow that was `BambooTrussCollision.Inflate`. Returns `o` for d = 0 and rejects a non-finite or negative d.
+- `SegmentDistance.PointSegmentSq` and `SegmentDistance.SegmentSegmentSq` (public): the exact segment distances of the narrow phase.
+- `UrdfCollisionLoader.LoadTree(..., source: UrdfMeshSource.Visual)` loads `<visual>` geometry (CAD meshes) instead of `<collision>`.
 
 ### Changed
 
@@ -43,10 +47,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Collision speed: each collision object keeps its world bounding box, and the scene and BVH stay the same between the margin passes. The broad phase is still exact.
 - Build search structure. The behaviour does not change. Search and replay use one move interpreter (`BambooMoveRunner`). The cell state is one value (`CellState`). Candidate generation is in `BambooFrontier`. The backtrack-search kernel and the replay contract are in the internal namespace `Motus.Construction.Search`. The public API, the options and the log text do not change.
 - Release workflow: a tag with `-` makes a GitHub pre-release. If the CHANGELOG has no section for that tag, its notes come from the section of the base version (the part before `-`). A stable tag does not change.
+- **Behaviour change:** `CollisionCheckerFactory` (and so `GetOrCreate`, the planners and the session cache) now checks tree robots link against link (G1). A missed link contact was a safety bug. Default (`CollisionCheckerFactory.DefaultTreeSelfCollision`): no clearance, as the serial self-check, and these pairs are allowed: adjacent geometry links, fixed siblings, links joined only by fixed joints (for example two bases fixed to `world`), and links of one mimic group (gripper fingers). SRDF pairs in the scene are also skipped. Plans for tree robots whose links can touch each other can now fail where they passed before. No shipped fixture or test changed its result. Opt-out: build `new TreeFkCollisionChecker(..., selfCollision: null)` and pass it as `PlanningOptions.CollisionChecker`.
 
 ### Deprecated
 
 - `PoEJacobian.EstimateConditionJjT` is back, with its 2.2.0 behaviour, as an `[Obsolete]` method. A change after 2.2.0 removed it. That breaks SemVer for a minor release. Do not use it: its Gershgorin bound is infinite for most real Jacobians. It will be removed in 3.0.0.
+- `BambooTrussCollision.Inflate`: use `CollisionGeometry.Grow`. Removed in 3.0.
 
 ### Fixed
 
@@ -57,6 +63,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `UrdfFixedChain.TryTipAttachOffset` and `UrdfWriter.TryParse` read numbers the same fail-closed way. `UrdfFixedChain` throws the `InvalidDataException`. `UrdfWriter.TryParse` returns false with the message in its errors. Before this fix, a bad fixed-joint origin became 0, and a bad link mass was ignored.
 - `XacroPreprocessor`: a macro that calls a macro (or itself) now stops with a `NotSupportedException` that names the two macros. Before this fix, the nested call was silently removed from the output.
 - `CollisionCheckerSessionCache`: the cache key now includes the tool geometry, the link geometry, the base frame, the tool frame and the tree driver home. A cache hit must also pass a full equality check. Before this fix, a changed tool, base or tool frame could get the old checker, and a pose that collides could show as clear. Results for unchanged inputs do not change.
+- URDF mesh `scale` is applied (uniform or per axis). Before, it was ignored, so a scaled mesh (for example a CAD STL in millimetres with `scale="0.001 0.001 0.001"`) was loaded at the wrong size. A scale ≤ 0 stops the load with an `InvalidDataException`. No shipped fixture uses `scale`.
 
 ## [2.2.0] - 2026-10-29
 

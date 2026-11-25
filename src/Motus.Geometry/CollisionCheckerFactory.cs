@@ -10,7 +10,11 @@ public static class CollisionCheckerFactory
         IReadOnlyList<AttachedBody>? attached = null) =>
         CreateCore(robot, chain, attached, tree: null, planJointNames: null, treeDriverHome: null);
 
-    /// <summary>TreeFK collision when Plan DOF includes side-branch drivers (e.g. DKP beside arm).</summary>
+    /// <summary>
+    /// TreeFK collision when Plan DOF includes side-branch drivers (e.g. DKP beside arm). Tree link-to-link collision is
+    /// on (<see cref="DefaultTreeSelfCollision"/>); scene allowed pairs (SRDF) also skip link pairs. Opt-out: build
+    /// <c>new TreeFkCollisionChecker(..., selfCollision: null)</c> and pass it as <c>PlanningOptions.CollisionChecker</c>.
+    /// </summary>
     public static ICollisionChecker Create(
         RobotModel robot,
         KinematicTree tree,
@@ -51,7 +55,8 @@ public static class CollisionCheckerFactory
             && (robot.Preset.AxisCount > tipN || tipN == 0);
 
         if (useTree)
-            return new TreeFkCollisionChecker(robot, tree!, chain, planJointNames, treeDriverHome, attached);
+            return new TreeFkCollisionChecker(robot, tree!, chain, planJointNames, treeDriverHome, attached,
+                DefaultTreeSelfCollision(tree!, robot.CollisionModel!));
 
         if (FclCollisionChecker.SupportsFcl(robot, attached))
             return new FclCollisionChecker(robot, chain, attached);
@@ -69,4 +74,12 @@ public static class CollisionCheckerFactory
             return new AttachAwareCollisionChecker(inner, fk, robot.Preset.BaseFrame, robot.Preset.ToolFrame, attached);
         return inner;
     }
+
+    /// <summary>
+    /// Self-collision used by the factory for trees: no clearance (as the serial self-check; planners grow obstacles
+    /// themselves), and the links that touch by design are allowed: adjacent links, fixed siblings, links joined only by
+    /// fixed joints, and links of one mimic group (gripper fingers). SRDF pairs come in through the scene.
+    /// </summary>
+    public static TreeSelfCollision DefaultTreeSelfCollision(KinematicTree tree, RobotCollisionModel collision) =>
+        new(0, TreeAdjacency.DefaultPairs(tree, collision.Links.Select(l => l.LinkName).ToHashSet(StringComparer.Ordinal)));
 }

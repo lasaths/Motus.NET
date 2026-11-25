@@ -1,0 +1,26 @@
+<?xml version="1.0"?>
+<!-- Synthetic 3-link planar arm for tree self-collision tests. Visuals: one CAD-style rod STL in millimetres,
+     scaled per link (non-uniform) and referenced by a package path that only resolves by its bare file name.
+     Collisions: coarse boxes (base only). arm2 folds back over base. -->
+<robot name="tree3">
+  <link name="world"/>
+  <link name="base">
+    <visual><geometry><mesh filename="package://tree3_description/meshes/rod.stl" scale="0.00025 0.001 0.001"/></geometry></visual>
+    <collision><origin xyz="0.125 0 0"/><geometry><box size="0.25 0.04 0.04"/></geometry></collision>
+  </link>
+  <link name="arm1">
+    <visual><geometry><mesh filename="package://tree3_description/meshes/rod.stl" scale="0.0003 0.001 0.001"/></geometry></visual>
+  </link>
+  <link name="arm2">
+    <visual><geometry><mesh filename="package://tree3_description/meshes/rod.stl" scale="0.00025 0.001 0.001"/></geometry></visual>
+  </link>
+  <joint name="world_base" type="fixed"><parent link="world"/><child link="base"/></joint>
+  <joint name="j1" type="revolute">
+    <parent link="base"/><child link="arm1"/><origin xyz="0 0 0.05"/><axis xyz="0 0 1"/>
+    <limit lower="-3.15" upper="3.15" velocity="1"/>
+  </joint>
+  <joint name="j2" type="revolute">
+    <parent link="arm1"/><child link="arm2"/><origin xyz="0.3 0 -0.05"/><axis xyz="0 0 1"/>
+    <limit lower="-3.15" upper="3.15" velocity="1"/>
+  </joint>
+</robot>

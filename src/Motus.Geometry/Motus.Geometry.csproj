@@ -13,6 +13,7 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="Motus.Core.Tests" />
+    <InternalsVisibleTo Include="Motus.Benchmarks" />
   </ItemGroup>
 
   <Import Project="..\Motus.Native\buildTransitive\Motus.Native.targets" />
