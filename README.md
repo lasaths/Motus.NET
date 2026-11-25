@@ -2,9 +2,9 @@
 
 .NET 8 **host-agnostic** motion-planning core: models, FK/IK, collision, sampling/Cartesian planners, retiming, export, and robotic assembly planning. **Version 2.2.0.**
 
-![Bamboo arm placing the 7 members of a Warren truss over a pit, replayed from the shipped AssemblyPlanner plan](docs/media/bamboo-truss-assembly.gif)
+<video src="docs/media/warren_truss_dark_annotated_detailed.mp4" autoplay muted loop playsinline controls width="100%" aria-label="Bamboo arm placing the 7 members of a Warren truss over a pit, from the shipped AssemblyPlanner plan"></video>
 
-*The shipped `AssemblyPlanner` plan for the 7-member bamboo Warren truss (21 tasks, collision-free), replayed in [Motus.Viewer](src/Motus.Viewer/README.md) at `/bamboo-truss`.*
+*The shipped `AssemblyPlanner` plan for the 7-member bamboo Warren truss (21 tasks, collision-free). This Dark studio video shows that plan. The interactive replay is in [Motus.Viewer](src/Motus.Viewer/README.md) at `/bamboo-truss`.*
 
 | Motus.NET | [Motus.Grasshopper](https://github.com/lasaths/Motus.Grasshopper) |
 |-----------|-------------------------------------------------------------------|
