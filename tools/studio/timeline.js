@@ -143,7 +143,7 @@
           const fill = on ? VERM : past ? "#5C6068" : "#2A2C30";
           out.push(`<rect x="${x.toFixed(1)}" y="${y}" width="${w.toFixed(1)}" height="24" rx="2" fill="${fill}"/>`);
         }
-        out.push(`<line x1="${xp.toFixed(1)}" x2="${xp.toFixed(1)}" y1="${y - 8}" y2="${y + 32}" stroke="#E8E8E6" stroke-width="2"/>`);
+        out.push(`<line x1="${xp.toFixed(1)}" x2="${xp.toFixed(1)}" y1="${y - 8}" y2="${y + 28}" stroke="#E8E8E6" stroke-width="2"/>`);
         const s = activeSeg(m, i);
         if (s) {
           const k = Math.min(1, (i - s.a) / Math.max(1, 0.12 * m.fps));       // 120 ms label fade
