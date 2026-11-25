@@ -4,13 +4,11 @@
 // so the playhead and the fill move linearly and never stop.
 (function () {
   const VERM = "#E64A19";
+  const BG = "#111214";
   const MIN_FRAMES = 6;  // a task shorter than this (0.2 s at 30 fps) joins the task before it
-  // Past-segment grey per task type (detailed mode); task types get no hues.
-  const GREY = { pick: "#4A4D53", climb: "#5C6068", walk: "#5C6068", flip: "#6E7178",
-                 bridge: "#80838A", relay: "#80838A", place: "#92959B" };
 
   // Task type of one frame, from the plan's own phase / stage labels.
-  // null = keep the previous task; "" = idle (start park, finished structure): no segment.
+  // null = keep the previous task; "" = idle (start park, finished structure): an unlabelled segment that is never active.
   function taskOf(fr) {
     const p = String(fr.phase || "").toLowerCase();
     const s = String(fr.stage || "").toLowerCase();
@@ -53,8 +51,8 @@
       const own = taskOf(fr), t = own === null ? prev : own;
       prev = t;
       const last = segs[segs.length - 1];
-      if (t && last && last.task === t && last.b === i) last.b = i + 1;
-      else if (t) segs.push({ task: t, a: i, b: i + 1 });
+      if (t !== null && last && last.task === t && last.b === i) last.b = i + 1;
+      else if (t !== null) segs.push({ task: t, a: i, b: i + 1 });      // task "" = idle: drawn, never active
       const m = releaseOf(fr);
       if (m && (fr.phase === "release" || placePhases.has(`${m}_place`)) && (!(m in rel) || rel[m] === i - 1)) rel[m] = i;
     }
@@ -72,43 +70,55 @@
     const v = Math.round(parseInt(a.substr(o, 2), 16) * (1 - k) + parseInt(b.substr(o, 2), 16) * k);
     return v.toString(16).padStart(2, "0");
   }).join("");
-  const activeSeg = (m, i) => m.segs.find((s) => s.a <= i && i < s.b) || null;
+  const activeSeg = (m, i) => m.segs.find((s) => s.task && s.a <= i && i < s.b) || null;
+  // One caption separator everywhere: " · ".
+  const sep = (label) => String(label).replace(/\s+[-\u2013\u2014\u00b7]\s+/g, " \u00b7 ");
+  // Backing behind the strip so the floor grid does not run through it.
+  const backing = (x0, x1, y0) => `<rect x="${x0 - 12}" y="${y0}" width="${x1 - x0 + 24}" height="${1080 - y0}" fill="${BG}" fill-opacity="0.85"/>`;
   const span = (cfg) => (cfg.layout === "single" ? [48, 1872] : [48, 1258]);   // hero pane only in multiview
 
   // Each mode: where the caption and the jaw chip sit, and an SVG draw function.
+  // chipRight: the jaw chip ends at this x, on the caption baseline (null = old position).
   // A new mode (for example "gantt") is one more entry here; `reserve` is the bottom strip it needs.
   const MODES = {
-    off: { captionY: 1038, captionSize: 17, chipY: 1030, reserve: 0, draw: () => "" },
+    off: { captionY: 1038, captionSize: 17, chipY: 1030, chipRight: () => null, reserve: 0, draw: () => "" },
 
-    // Option A: 2 px hairline, elapsed grey, active task vermilion, member ticks. No text.
+    // Option A: 2 px hairline, elapsed grey, active task vermilion (min 24 px), member ticks,
+    // 2x10 px vermilion playhead tick. No text.
     simple: {
-      captionY: 1038, captionSize: 17, chipY: 1030, reserve: 0,
+      captionY: 1038, captionSize: 17, chipY: 1034, chipRight: (cfg) => span(cfg)[1], reserve: 0,
       draw(m, i, cfg) {
         const [x0, x1] = span(cfg), y = 1062, p = Math.min(i + 1, m.n);
         const X = (v) => (x0 + (x1 - x0) * v / m.n).toFixed(1);
         const out = [
+          backing(x0, x1, y - 18),
           `<line x1="${x0}" x2="${x1}" y1="${y}" y2="${y}" stroke="#2A2C30" stroke-width="2"/>`,
           `<line x1="${x0}" x2="${X(p)}" y1="${y}" y2="${y}" stroke="#8A8D93" stroke-width="2"/>`,
         ];
         const s = activeSeg(m, i);
-        if (s) out.push(`<line x1="${X(s.a)}" x2="${X(p)}" y1="${y}" y2="${y}" stroke="${VERM}" stroke-width="2"/>`);
+        if (s) {
+          const xa = Math.max(x0, Math.min(+X(s.a), +X(p) - 24));
+          out.push(`<line x1="${xa.toFixed(1)}" x2="${X(p)}" y1="${y}" y2="${y}" stroke="${VERM}" stroke-width="2"/>`);
+        }
         for (const e of m.members) {
           out.push(`<line x1="${X(e.i + 1)}" x2="${X(e.i + 1)}" y1="${y - 6}" y2="${y + 6}" stroke="${e.i <= i ? "#E8E8E6" : "#4A4D53"}" stroke-width="2"/>`);
         }
+        out.push(`<line x1="${X(p)}" x2="${X(p)}" y1="${y - 5}" y2="${y + 5}" stroke="${VERM}" stroke-width="2"/>`);
         return out.join("");
       },
     },
 
-    // Option C: one 24 px segmented bar, one segment per task, white playhead, task tag.
+    // Option C: one 24 px segmented bar, one segment per task, white playhead,
+    // task name under the active segment only.
     detailed: {
-      captionY: 1012, captionSize: 22, chipY: 1004, reserve: 0,
+      captionY: 1012, captionSize: 22, chipY: 1008, chipRight: (cfg) => span(cfg)[1], reserve: 0,
       draw(m, i, cfg) {
         const [x0, x1] = span(cfg), y = 1032, p = Math.min(i + 1, m.n);
         const X = (v) => x0 + (x1 - x0) * v / m.n;
-        const out = [];
+        const out = [backing(x0, x1, y - 12), `<rect x="${x0}" y="${y}" width="${x1 - x0}" height="24" fill="${BG}"/>`];
         for (const s of m.segs) {
-          const on = s.a <= i && i < s.b, past = s.b <= i;
-          const fill = on ? VERM : past ? (GREY[s.task] || "#5C6068") : "#1F2124";
+          const on = s.task && s.a <= i && i < s.b, past = s.b <= i;
+          const fill = on ? VERM : past ? "#5C6068" : "#2A2C30";             // 2 px BG gaps between tasks
           out.push(`<rect x="${(X(s.a) + 1).toFixed(1)}" y="${y}" width="${Math.max(1, X(s.b) - X(s.a) - 2).toFixed(1)}" height="24" rx="2" fill="${fill}"/>`);
         }
         out.push(`<line x1="${X(p).toFixed(1)}" x2="${X(p).toFixed(1)}" y1="${y - 8}" y2="${y + 32}" stroke="#E8E8E6" stroke-width="2"/>`);
@@ -123,5 +133,5 @@
     },
   };
 
-  window.StudioTimeline = { build, MODES, taskOf, releaseOf };
+  window.StudioTimeline = { build, MODES, taskOf, releaseOf, sep };
 })();
