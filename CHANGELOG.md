@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 <!-- Not tagged yet. Put the date here when the tag is made. Other PRs for 2.3.0 add their lines at the end of each subsection. -->
 
+### Binary compatibility
+
+2.3.0 is a stable release. Motus.Grasshopper 2.3.0 and Motus.Bambino ship in lockstep with it. Source code that compiles against 2.2.0 compiles against 2.3.0 with no change. But some public signatures have a new optional parameter, and one default behaviour changes. Thus you must compile again each assembly that you compiled against 2.2.0. If you do not, the old assembly can stop with a `MissingMethodException`.
+
+- `BambooTrussLayout.MemberDef`: the constructor and `Deconstruct` have a new last parameter, `FeedIndex` (`int`, default 0).
+- `BambooTrussLayout.StructureMember`: the constructor and `Deconstruct` have a new last parameter, `Feed` (`FeedSpot?`, default null).
+- `BambooTrussPlanner.LandingCandidates(MemberDef member, bool includeStock = true)`: new optional parameter.
+- `UrdfCollisionLoader.LoadTree(XElement robotRoot, KinematicTree tree, string urdfDirectory, string? tipLinkForTool = null, UrdfMeshSource source = UrdfMeshSource.Collision)`: new optional parameter `source`.
+- `TreeFkCollisionChecker(RobotModel robot, KinematicTree tree, SerialJointChain? tipChain = null, IReadOnlyList<string>? planJointNames = null, IReadOnlyList<double>? treeDriverHome = null, IReadOnlyList<AttachedBody>? attached = null, TreeSelfCollision? selfCollision = null)`: new optional parameter `selfCollision`.
+- **Behaviour change:** tree self-collision is on by default. `CollisionCheckerFactory` (and thus the planners and the session cache) checks each tree link against the other tree links. Some plans for tree robots can change, or fail where they found a path before. To turn it off, give a `TreeFkCollisionChecker` with `selfCollision: null` as `PlanningOptions.CollisionChecker`.
+
 ### Added
 
 - Dark studio renderer for the shipped Warren truss plan (`tools/studio/`): an adapter from `BambooTrussDefaultPlan.json`, Clean and Annotated 3-pane videos, and a storyboard. Look: background `#111214`, locked jaws Signal Vermilion `#E64A19`, open jaws graphite, matte bamboo. See `tools/studio/README.md` and `docs/media/warren_truss_dark_storyboard.png`.
@@ -31,8 +42,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Build search: transit cache. The search planner keeps each RRT transit path. The key has every input of the path: scene, held cane, jaws, start, goal, RRT budget and random-stream position. The search uses a kept path only after an exact clearance check in the current scene. The replay planner does not use the cache.
 - Collision speed: each collision object keeps its world bounding box, and the scene and BVH stay the same between the margin passes. The broad phase is still exact.
 - Build search structure. The behaviour does not change. Search and replay use one move interpreter (`BambooMoveRunner`). The cell state is one value (`CellState`). Candidate generation is in `BambooFrontier`. The backtrack-search kernel and the replay contract are in the internal namespace `Motus.Construction.Search`. The public API, the options and the log text do not change.
-- Binary compatibility: these Motus.Construction members have a new optional parameter. Source code compiles with no change, but code compiled against 2.2.0 must be compiled again: the `BambooTrussLayout.MemberDef` and `BambooTrussLayout.StructureMember` constructors and `Deconstruct` methods, and `BambooTrussPlanner.LandingCandidates`.
-- Release workflow: a tag with `-` (for example `v2.3.0-preview.1`) makes a GitHub pre-release. Its notes come from the `## [2.3.0-preview.1]` section if there is one. If not, they come from the `## [2.3.0]` section.
+- Release workflow: a tag with `-` makes a GitHub pre-release. If the CHANGELOG has no section for that tag, its notes come from the section of the base version (the part before `-`). A stable tag does not change.
 
 ### Deprecated
 
