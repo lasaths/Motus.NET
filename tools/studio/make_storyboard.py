@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import argparse
+import bisect
 import json
 import os
+import re
 import subprocess
 import tempfile
 from pathlib import Path
@@ -44,6 +46,43 @@ FONT_CAND = {
     "med": [f"{BARLOW}/Barlow-Medium.ttf", "/usr/share/fonts/truetype/barlow/Barlow-Medium.ttf"],
     "semi": [f"{BARLOW}/Barlow-SemiBold.ttf", "/usr/share/fonts/truetype/barlow/Barlow-SemiBold.ttf"],
 }
+
+
+def task_segments(scene_path) -> list:
+    """Task segments from timeline.js, the same source as the video timeline. [] if node fails."""
+    js = ("global.window={};require(process.argv[1]);"
+          "const d=JSON.parse(require('fs').readFileSync(process.argv[2]));"
+          "process.stdout.write(JSON.stringify(window.StudioTimeline.build(d).segs))")
+    try:
+        out = subprocess.check_output(["node", "-e", js, str(STUDIO_DIR / "timeline.js"), str(scene_path)], text=True)
+        return json.loads(out)
+    except (OSError, subprocess.CalledProcessError, json.JSONDecodeError):
+        return []
+
+
+def cells_by_task(scene: dict, segs: list, count: int = 6):
+    """One panel per task, spread from the first to the last task: the middle of the task nearest each even time.
+    A panel avoids the task type of the panel before it. Fallback: evenly spaced times."""
+    tl = scene.get("timeline") or []
+    unique = scene.get("uniqueFrames") or []
+    n = len(tl)
+    if not n:
+        return []
+    tasks = [sg for sg in segs if sg.get("task")]
+    picks = []
+    for k in range(count if tasks else 0):
+        target = k * (n - 1) / max(1, count - 1)                               # first task .. last task
+        pool = [sg for sg in tasks if sg not in picks]
+        if not pool:
+            break
+        prev = picks[-1]["task"] if picks else None
+        picks.append(min(pool, key=lambda sg: abs((sg["a"] + sg["b"]) / 2 - target) + (n / count if sg["task"] == prev else 0)))
+    frames = sorted({(sg["a"] + sg["b"]) // 2 for sg in picks}) or [round((k + 0.5) * (n - 1) / count) for k in range(count)]
+    cells = []
+    for j in frames:
+        fr = unique[tl[j]]
+        cells.append((tl[j], "", fr.get("phaseLabel") or fr.get("phase", "")))
+    return cells
 
 
 def cells_from_scene(scene: dict):
@@ -98,16 +137,59 @@ def cells_from_scene(scene: dict):
     return cells
 
 
+def still_position(scene: dict, still) -> int:
+    """First video frame that shows a storyboard still."""
+    unique = scene.get("uniqueFrames") or []
+    tl = scene.get("timeline") or []
+    if not tl:
+        return 0
+    if not isinstance(still, int):
+        keys = scene.get("keyIndices") or {}
+        if isinstance(keys.get(still), int):
+            still = keys[still]
+        else:
+            hits = [i for i, fr in enumerate(unique) if fr.get("phase") == still]
+            still = hits[-1] if hits else 0
+    return tl.index(still) if still in tl else min(bisect.bisect_left(tl, still), len(tl) - 1)
+
+
+def still_fraction(scene: dict, still) -> float:
+    """Where a storyboard still sits on the video timeline, 0..1."""
+    n = len(scene.get("timeline") or [])
+    return (still_position(scene, still) + 1) / n if n else 0.0
+
+
+def timestamp(scene: dict, still) -> str:
+    """Video time of a still as mm:ss."""
+    sec = int(still_position(scene, still) / (scene.get("fps") or 30))
+    return f"{sec // 60:02d}:{sec % 60:02d}"
+
+
+def sep(label: str) -> str:
+    """One caption separator everywhere: " · "."""
+    return re.sub(r"\s+[-\u2013\u2014\u00b7]\s+", " \u00b7 ", str(label))
+
+
+def draw_mini_timeline(draw, x0, x1, y, frac):
+    """Mini option A: 4 px track, elapsed grey, vermilion tick at the panel's time."""
+    xt = x0 + (x1 - x0) * frac
+    draw.rectangle([x0, y, x1, y + 3], fill=(42, 44, 48))
+    draw.rectangle([x0, y, xt, y + 3], fill=(138, 141, 147))
+    draw.rectangle([xt - 1, y - 4, xt + 1, y + 7], fill=(230, 74, 25))
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--scene", required=True)
     ap.add_argument("--theme", default="dark", choices=["light", "dark", "black"])
     ap.add_argument("--layout", default="single", choices=["single", "multiview"])
     ap.add_argument("--out", required=True)
+    ap.add_argument("--timeline", default="simple", choices=["simple", "off"],
+                    help="simple: a 4 px mini timeline under each panel (default); off: none")
     args = ap.parse_args()
 
     scene = json.loads(Path(args.scene).read_text())
-    cells = cells_from_scene(scene)
+    cells = cells_by_task(scene, task_segments(args.scene)) or cells_from_scene(scene)
     T = THEMES[args.theme]
     # 2x3 for up to 6 hero tiles; 2x4 when multiview adds ortho panes
     use_ortho = args.layout == "multiview" and bool(scene.get("node")) and len(cells) >= 4
@@ -136,7 +218,10 @@ def main():
     with tempfile.TemporaryDirectory() as td:
         seat_img = None
         hero_cols = 3 if use_ortho else cols
-        for idx, (phase, num, label) in enumerate(cells[: hero_cols * rows]):
+        # Panels in time order; the number is the video time (mm:ss).
+        shown = sorted(cells[: hero_cols * rows], key=lambda c: still_position(scene, c[0]))
+        shown = [(ph, timestamp(scene, ph), sep(lab)) for ph, _, lab in shown]
+        for idx, (phase, num, label) in enumerate(shown):
             p = os.path.join(td, f"{idx}_{phase}.png")
             subprocess.check_call([
                 "node", render_js,
@@ -163,7 +248,9 @@ def main():
             x0, y0 = col * cw, row * ch
             sheet.paste(hero, (x0 + (cw - nw) // 2, y0 + (ch - 56 - nh) // 2 + 8))
             draw.text((x0 + 24, y0 + ch - 44), num, fill=T["muted"], font=f_idx)
-            draw.text((x0 + 56, y0 + ch - 44), label, fill=T["ink"], font=f_lbl)
+            draw.text((x0 + 24 + draw.textlength(num + "  ", font=f_idx), y0 + ch - 44), label, fill=T["ink"], font=f_lbl)
+            if args.timeline == "simple":
+                draw_mini_timeline(draw, x0 + 24, x0 + cw - 24, y0 + ch - 14, still_fraction(scene, phase))
 
         if use_ortho and seat_img is not None:
             end_crop = seat_img.crop((1307, 0, 1920, 540))
