@@ -606,7 +606,18 @@ function initScene(data, cfg) {
   }
 
   const caneRadius = defaultDia / 2;
-  for (const j of ["handler_1_clamp", "handler_1_active", "main_clamp_blue", "main_clamp_yellow", "handler_2_clamp", "handler_2_active"]) {
+  const jawKeys = [];
+  for (const g of (data.jawGroups || [])) {
+    for (const k of (g.keys || [])) {
+      if (k && !jawKeys.includes(k)) jawKeys.push(k);
+    }
+  }
+  if (jawKeys.length === 0) {
+    for (const m of (data.meshes || [])) {
+      if (m.jawKey && !jawKeys.includes(m.jawKey)) jawKeys.push(m.jawKey);
+    }
+  }
+  for (const j of jawKeys) {
     const collar = makeJawCollar(caneRadius);
     collar.matrixAutoUpdate = false;
     scene.add(collar);
@@ -745,11 +756,7 @@ function renderOverlay(fr) {
 
   if (CFG.mode === "annotated") {
     const closedSet = new Set(fr.closed);
-    const groups = SCENE_DATA.jawGroups || [
-      { label: "H1", keys: ["handler_1_active", "handler_1_clamp"] },
-      { label: "MC", keys: ["main_clamp_blue", "main_clamp_yellow"] },
-      { label: "H2", keys: ["handler_2_clamp", "handler_2_active"] },
-    ];
+    const groups = SCENE_DATA.jawGroups || [];
     let gx = 0;
     const pillItems = [];
     for (const grp of groups) {

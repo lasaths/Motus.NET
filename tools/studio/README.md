@@ -64,7 +64,7 @@ The renderer draws a task timeline at the bottom of each video. Use `--timeline`
 - `detailed`: one 24 px bar under the hero view. Each segment is one task, with a 2 px gap between tasks. Each segment is at least 6 px wide. Past segments are `#5C6068`, future segments are `#2A2C30`, and the active segment is vermilion. The name of the active task is under the playhead and stays inside the bar ends. The caption moves up above the bar.
 - `off`: no timeline. The output is the same as before.
 
-Each mode puts a scrim at the bottom of the hero view. The scrim is a `#111214` gradient: it starts at 0% opacity, goes to 85% in 96 px, and stays at 85% behind the timeline. Thus the floor grid does not show through the timeline, and the scrim has no hard top edge. The caption is 22 px in the two modes. The jaw chip (`annotated`) ends at the right end of the timeline, on the same baseline as the caption. Captions use ` · ` as the separator.
+Each mode puts a scrim at the bottom of the hero view. The scrim is a `#111214` gradient: it starts at 0% opacity, goes to 85% in 96 px, and stays at 85% behind the timeline. Thus the floor grid does not show through the timeline, and the scrim has no hard top edge. The caption is 22 px in the two modes. The jaw chip (`annotated`) ends at the right end of the timeline, on the same baseline as the caption. The chip reads each group label and its keys from `jawGroups` in the scene file. Captions use ` · ` as the separator.
 
 The default is `simple` for `clean` and `detailed` for `annotated`. The `bare` mode has no timeline. In the 3-pane layout, the timeline is under the hero view only.
 
