@@ -11,7 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Binary compatibility
 
-2.3.0 is a stable release. Motus.Grasshopper 2.3.0 and Motus.Bambino ship in lockstep with it. Source code that compiles against 2.2.0 compiles against 2.3.0 with no change. But some public signatures have a new optional parameter, and one default behaviour changes. Thus you must compile again each assembly that you compiled against 2.2.0. If you do not, the old assembly can stop with a `MissingMethodException`.
+2.3.0 is a stable release. Motus.NET 2.3.0 and Motus.Grasshopper 2.3.0 ship in lockstep. Source code that compiles against 2.2.0 compiles against 2.3.0 with no change. But some public signatures have a new optional parameter, and one default behaviour changes. Thus you must compile again each assembly that you compiled against 2.2.0. If you do not, the old assembly can stop with a `MissingMethodException`.
 
 - `BambooTrussLayout.MemberDef`: the constructor and `Deconstruct` have a new last parameter, `FeedIndex` (`int`, default 0).
 - `BambooTrussLayout.StructureMember`: the constructor and `Deconstruct` have a new last parameter, `Feed` (`FeedSpot?`, default null).
