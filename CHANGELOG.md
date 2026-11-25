@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Dark studio renderer for the shipped Warren truss plan (`tools/studio/`): an adapter from `BambooTrussDefaultPlan.json`, Clean and Annotated 3-pane videos, and a storyboard. Look: background `#111214`, locked jaws Signal Vermilion `#E64A19`, open jaws graphite, matte bamboo. See `tools/studio/README.md` and `docs/media/warren_truss_dark_storyboard.png`.
 - Opt-in box prefilter for pose collision checks (`RobotMeshCollisionChecker.BoxPrefilter`, default off; tower harness `BOXPRE=1`). Before the exact test of a robot part against a scene mesh (or a mesh part against a box), the checker compares the two oriented bounding boxes. If they are apart by more than 1 µm, the pair is clear and the exact test is not run. If not, the exact test decides. The prefilter never reports a collision, so every verdict and every plan stays the same. The clearance margin is already in the grown obstacles, so the prefilter works for each `ClearanceMarginM`.
 
 ### Changed
