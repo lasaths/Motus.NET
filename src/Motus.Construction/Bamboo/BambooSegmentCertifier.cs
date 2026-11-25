@@ -8,11 +8,11 @@ namespace Motus.Construction;
 /// joint-space PTP segment of the ICD cell contact-free between its samples.
 /// <para>
 /// The adapter gives the motion bound of the robot, its mount parts and the held cane (<see cref="SweepBound"/>) and the
-/// clear check: the exact Motus test against obstacles grown by <see cref="BambooTrussCollision.Inflate"/>.
+/// clear check: the exact Motus test against obstacles grown by <see cref="CollisionGeometry.Grow"/>.
 /// </para>
 /// Scope (flagged): robot ↔ environment pairs only (self and robot ↔ own-mount pairs stay sample-checked); the clearance
 /// margin stays enforced at the samples, between them only exact contact is proven; mesh growing is conservative only
-/// at vertices whose adjacent faces stay within ~70° of the vertex normal (inherited from Inflate).
+/// at vertices whose adjacent faces stay within ~70° of the vertex normal (inherited from CollisionGeometry.Grow).
 /// </summary>
 public static class BambooSegmentCertifier
 {
@@ -76,7 +76,7 @@ public static class BambooSegmentCertifier
             var n = qaDeg.Count;
             var q = _q ??= new double[n];
             for (var k = 0; k < n; k++) q[k] = qaDeg[k] + (qbDeg[k] - qaDeg[k]) * m;
-            var grown = env.Select(o => BambooTrussCollision.Inflate(o, grow)).ToList();
+            var grown = env.Select(o => CollisionGeometry.Grow(o, grow)).ToList();
             cell.SetMountViewer(BambooTrussPlanner.LWorld(baseGripper, baseWorld, q));
             return !cell.PoseContacts(q, gRa + (gRb - gRa) * m, gLa + (gLb - gLa) * m, held, grown, _allowed, 64, heldLength).Any(Counts);
         }

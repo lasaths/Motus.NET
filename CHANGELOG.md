@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Tree link-to-link collision (G1, opt-in): `TreeFkCollisionChecker(..., selfCollision: new TreeSelfCollision(clearanceM, allowedPairs))` tests every pair of geometry on two different tree links in both directions, each against the other grown by the clearance. `TreeAdjacency.AllowedPairs(tree, geometryLinks, fixedSiblingsTouch)` gives the adjacent pairs. Scene (SRDF) allowed pairs also apply. `TreeFkCollisionChecker.LastHit` names the first failing pair. With self-collision on, mesh pairs and scene capsules use a conservative broad phase; the exact tests decide (agreement test at 2 mm and 3 mm). Off by default, so existing results do not change.
+- `CollisionGeometry.Grow(o, d)` (public): the cached clearance grow that was `BambooTrussCollision.Inflate`. Returns `o` for d = 0 and rejects a non-finite or negative d.
+- `SegmentDistance.PointSegmentSq` and `SegmentDistance.SegmentSegmentSq` (public): the exact segment distances of the narrow phase.
+- `UrdfCollisionLoader.LoadTree(..., source: UrdfMeshSource.Visual)` loads `<visual>` geometry (CAD meshes) instead of `<collision>`.
 - Dark studio renderer for the shipped Warren truss plan (`tools/studio/`): an adapter from `BambooTrussDefaultPlan.json`, Clean and Annotated 3-pane videos, and a storyboard. Look: background `#111214`, locked jaws Signal Vermilion `#E64A19`, open jaws graphite, matte bamboo. See `tools/studio/README.md` and `docs/media/warren_truss_dark_storyboard.png`.
 - Opt-in box prefilter for pose collision checks (`RobotMeshCollisionChecker.BoxPrefilter`, default off; tower harness `BOXPRE=1`). Before the exact test of a robot part against a scene mesh (or a mesh part against a box), the checker compares the two oriented bounding boxes. If they are apart by more than 1 µm, the pair is clear and the exact test is not run. If not, the exact test decides. The prefilter never reports a collision, so every verdict and every plan stays the same. The clearance margin is already in the grown obstacles, so the prefilter works for each `ClearanceMarginM`.
 
@@ -18,8 +22,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Reach grid speed. The results do not change (bit for bit). Kinematic reach queries (no collision check) do not use the target line's touch object in the cache key, because the answer does not depend on it. Thus relay lines with the same parked pose share one answer. In `SolveGrip`, a Jacobian column runs the arm chain again only from its own joint, with the cosines and sines of the other joints kept from the current pose. The loop computes only the slot axis and origin of the free gripper, because it reads no other values.
 - Collision clearance (`MotionConstraints.ClearanceMarginM`, default 2 mm) is one setting. The planner and the final scan always use the same value. `Validate` rejects a non-finite value. The default does not change. The tower harness accepts `CLEARANCE_MM` (unset = 2). Path sampling must stay finer than the clearance.
 
+### Deprecated
+
+- `BambooTrussCollision.Inflate`: use `CollisionGeometry.Grow`. Removed in 3.0.
+
 ### Fixed
 
+- URDF mesh `scale` is applied (uniform or per axis). Before, it was ignored, so a scaled mesh (for example a CAD STL in millimetres with `scale="0.001 0.001 0.001"`) was loaded at the wrong size. A scale ≤ 0 stops the load with an `InvalidDataException`. No shipped fixture uses `scale`.
 - Numerical IK (`NumericalInverseKinematics`) now converges from a seed that is not the answer. Before, it failed for all non-UR robots (0/40). Now: 40/40 each for UR10e URDF, rail + UR10e, Panda, KR 210 URDF, KR 10 and iiwa 7. Causes: `PoEJacobian.JacobianBody` multiplied the transforms in the wrong order; the finite-difference step had the wrong sign; a singularity estimate that was almost always infinite stopped the solve at iteration 1. `PoEJacobian.EstimateConditionJjT` is removed.
 - `UrdfUniversalRobotsKinematics` also tries the base frame without the Rz(π) turn, so analytic UR IK works on `ur10e.urdf`. Each answer is still checked with the URDF FK.
 - Plans for non-UR robots can change, because IK now finds answers that it did not find before.
