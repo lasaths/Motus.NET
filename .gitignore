@@ -24,3 +24,6 @@ Thumbs.db
 tests/fixtures/ur10e/meshes/
 tests/fixtures/kr210_r3100_ultra/meshes/
 tmp-*.csx
+
+# Generated Dark studio scenes and videos
+tools/studio/out/

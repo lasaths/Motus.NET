@@ -1,0 +1,887 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Bambino Studio Renderer</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body {
+    width: 1920px; height: 1080px; overflow: hidden;
+    font-family: "Barlow", -apple-system, BlinkMacSystemFont, sans-serif;
+    font-variant-numeric: tabular-nums;
+    -webkit-font-smoothing: antialiased;
+  }
+  #stage { position: relative; width: 1920px; height: 1080px; }
+  canvas { display: block; width: 1920px; height: 1080px; }
+  #overlay {
+    position: absolute; inset: 0; width: 1920px; height: 1080px;
+    pointer-events: none;
+  }
+</style>
+</head>
+<body>
+<div id="stage">
+  <div id="bg-hero" style="position:absolute;left:0;top:0;width:1306px;height:1080px;"></div>
+  <div id="bg-panes" style="position:absolute;left:1306px;top:0;width:614px;height:1080px;"></div>
+  <canvas id="gl" width="1920" height="1080" style="position:relative;"></canvas>
+  <svg id="overlay" viewBox="0 0 1920 1080" xmlns="http://www.w3.org/2000/svg"></svg>
+</div>
+<script src="/three.min.js"></script>
+<script>
+// Helper: Three.js r128 does NOT auto-convert hex colors to linear when sRGBEncoding is active!
+function linCol(hex) {
+  return new THREE.Color(hex).convertSRGBToLinear();
+}
+
+const THEMES = {
+  light: {
+    bg: 0xF4F4F2,
+    bgCss: "#F4F4F2",
+    paneBgCss: "#EEEEEB",
+    divider: "#D4D4D0",
+    refPlane: 0xC6C6C1,
+    refPlaneFill: 0xDCDCD7,
+    refPlaneFillOpacity: 0.05,
+    refAxis: 0x9CA2AC,
+    chassisBackbone: 0xD8D9DC,
+    chassisPlate: 0xB8BCC2,
+    sled: 0x8F959F,
+    jawStatic: 0x3F444C,
+    jawActive: 0x565C66,
+    jawMain: 0x4A5059,
+    jawLockedBody: 0xE64A19,
+    jawLock: 0xE64A19,
+    jawLockRim: 0xFF6B3D,
+    hostCane: 0xC9BC9C,
+    hostRing: 0xA89A7A,
+    targetCane: 0x8F9891,
+    targetRing: 0x707872,
+    rodBCane: 0xC68B59,
+    rodBRing: 0x9E673A,
+    rodCCane: 0x8F9891,
+    rodCRing: 0x707872,
+    rodDCane: 0x6E93A6,
+    rodDRing: 0x52707F,
+    rodECane: 0x9A82A3,
+    rodERing: 0x76637D,
+    nodeSphere: 0x5A74F1,
+    nodeRing: 0x3A3CFF,
+    edgeChassis: 0x22252B,
+    edgeChassisOp: 0.24,
+    edgeJaw: 0x16181D,
+    edgeJawOp: 0.36,
+    shadowOpacity: 0.16,
+    keyInt: 1.32,
+    fillInt: 0.72,
+    rimInt: 0.42,
+    hemiSky: 0xFFFFFF,
+    hemiGnd: 0xC8CCD2,
+    hemiInt: 0.80,
+    textPrimary: "#202328",
+    textSecondary: "#5E646E",
+    textMuted: "#848A94",
+    dimStroke: "#3A3CFF",
+    dimText: "#2A32C8",
+    pillBg: "#F8F8F6",
+    pillBorder: "#D4D4D0",
+  },
+  dark: {
+    bg: 0x111214,
+    bgCss: "#111214",
+    paneBgCss: "#15171A",
+    divider: "#282B31",
+    refPlane: 0x383D47,
+    refPlaneFill: 0x252932,
+    refPlaneFillOpacity: 0.06,
+    refAxis: 0x5B6371,
+    chassisBackbone: 0xD2D5DB,
+    chassisPlate: 0xA6ABB4,
+    sled: 0x7E8490,
+    jawStatic: 0x4E5562,
+    jawActive: 0x626A78,
+    jawMain: 0x575F6D,
+    jawLockedBody: 0xE64A19,
+    jawLock: 0xEB5224,
+    jawLockRim: 0xFF7B52,
+    hostCane: 0xC2B493,
+    hostRing: 0x998B6B,
+    targetCane: 0x8E9790,
+    targetRing: 0x6F7771,
+    rodBCane: 0xC98B56,
+    rodBRing: 0x9E6538,
+    rodCCane: 0x8E9790,
+    rodCRing: 0x6F7771,
+    rodDCane: 0x6E93A6,
+    rodDRing: 0x52707F,
+    rodECane: 0x9A82A3,
+    rodERing: 0x76637D,
+    nodeSphere: 0x6E85FF,
+    nodeRing: 0x7A90FF,
+    edgeChassis: 0x0A0B0E,
+    edgeChassisOp: 0.34,
+    edgeJaw: 0xA8B1C2,
+    edgeJawOp: 0.44,
+    shadowOpacity: 0.42,
+    keyInt: 1.15,
+    fillInt: 0.58,
+    rimInt: 0.85,
+    hemiSky: 0xC8D0DE,
+    hemiGnd: 0x353B48,
+    hemiInt: 0.50,
+    textPrimary: "#EAECEF",
+    textSecondary: "#A4AAB5",
+    textMuted: "#7C8390",
+    dimStroke: "#758CFF",
+    dimText: "#96A9FF",
+    pillBg: "#181A1F",
+    pillBorder: "#2A2D32",
+  },
+  black: {
+    bg: 0x000000,
+    bgCss: "#000000",
+    paneBgCss: "#07080A",
+    divider: "#22252A",
+    refPlane: 0x2E323B,
+    refPlaneFill: 0x1C2028,
+    refPlaneFillOpacity: 0.05,
+    refAxis: 0x525A67,
+    chassisBackbone: 0xD2D5DB,
+    chassisPlate: 0xA6ABB4,
+    sled: 0x7E8490,
+    jawStatic: 0x4C5360,
+    jawActive: 0x606876,
+    jawMain: 0x555D6B,
+    jawLockedBody: 0x373D48,
+    jawLock: 0xEB5224,
+    jawLockRim: 0xFF7B52,
+    hostCane: 0xC2B493,
+    hostRing: 0x998B6B,
+    targetCane: 0x8E9790,
+    targetRing: 0x6F7771,
+    rodBCane: 0xC98B56,
+    rodBRing: 0x9E6538,
+    rodCCane: 0x8E9790,
+    rodCRing: 0x6F7771,
+    rodDCane: 0x6E93A6,
+    rodDRing: 0x52707F,
+    rodECane: 0x9A82A3,
+    rodERing: 0x76637D,
+    nodeSphere: 0x6E85FF,
+    nodeRing: 0x7A90FF,
+    edgeChassis: 0x050608,
+    edgeChassisOp: 0.36,
+    edgeJaw: 0xA8B1C2,
+    edgeJawOp: 0.46,
+    shadowOpacity: 0.0,
+    keyInt: 1.70,
+    fillInt: 0.70,
+    rimInt: 1.45,
+    hemiSky: 0xE2E8F5,
+    hemiGnd: 0x222731,
+    hemiInt: 0.62,
+    textPrimary: "#EAECEF",
+    textSecondary: "#A4AAB5",
+    textMuted: "#787F8C",
+    dimStroke: "#758CFF",
+    dimText: "#96A9FF",
+    pillBg: "#0D0E12",
+    pillBorder: "#22252A",
+  }
+};
+
+let SCENE_DATA = null;
+let CFG = { theme: "dark", mode: "clean", layout: "single" };
+let renderer, scene, shadowPlane, refSquareGroup;
+let camHero, camEnd, camPlan;
+let linkMeshes = {};
+let jawCollars = {};
+let rodBGroup = null;
+let rodGroups = {};
+let nodeGroup = null, nodeSphereMat = null, nodeRingMat = null;
+let T = THEMES.light;
+
+function makeCaneGroup(length, radius, caneHex, ringHex) {
+  const g = new THREE.Group();
+  const cylGeo = new THREE.CylinderGeometry(radius, radius, length, 48, 1, false);
+  cylGeo.rotateZ(-Math.PI / 2);
+  const caneMat = new THREE.MeshStandardMaterial({
+    color: linCol(caneHex),
+    roughness: 0.98,
+    metalness: 0.0,
+  });
+  const cyl = new THREE.Mesh(cylGeo, caneMat);
+  cyl.castShadow = true;
+  cyl.receiveShadow = true;
+  g.add(cyl);
+
+  const ringMat = new THREE.MeshStandardMaterial({
+    color: linCol(ringHex),
+    roughness: 0.95,
+    metalness: 0.0,
+  });
+  const ringGeo = new THREE.TorusGeometry(radius + 0.0008, 0.0016, 10, 40);
+  ringGeo.rotateY(Math.PI / 2);
+  for (let x = -length * 0.42; x <= length * 0.421; x += 0.32) {
+    const r = new THREE.Mesh(ringGeo, ringMat);
+    r.position.x = x;
+    g.add(r);
+  }
+
+  const capRingGeo = new THREE.TorusGeometry(radius, 0.0012, 8, 40);
+  capRingGeo.rotateY(Math.PI / 2);
+  const capMat = new THREE.MeshBasicMaterial({ color: linCol(ringHex), transparent: true, opacity: 0.7 });
+  for (const s of [-1, 1]) {
+    const cr = new THREE.Mesh(capRingGeo, capMat);
+    cr.position.x = s * (length / 2);
+    g.add(cr);
+  }
+  return g;
+}
+
+function orientRodGroup(group, pt, ax) {
+  group.position.set(pt[0], pt[1], pt[2]);
+  const dir = new THREE.Vector3(ax[0], ax[1], ax[2]).normalize();
+  const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(1, 0, 0), dir);
+  group.quaternion.copy(q);
+}
+
+function makeJawCollar(radius) {
+  const g = new THREE.Group();
+  const collarMat = new THREE.MeshStandardMaterial({
+    color: linCol(T.jawLock),
+    emissive: linCol(T.jawLock),
+    emissiveIntensity: 0.03,
+    roughness: 0.94,
+    metalness: 0.0,
+  });
+  const rimMat = new THREE.MeshStandardMaterial({
+    color: linCol(T.jawLockRim),
+    emissive: linCol(T.jawLock),
+    emissiveIntensity: 0.04,
+    roughness: 0.92,
+    metalness: 0.0,
+  });
+
+  // 1. Precision 3D clamping sleeve hugging the cane centerline (+X)
+  const sleeveGeo = new THREE.CylinderGeometry(radius + 0.0155, radius + 0.0155, 0.070, 36, 1, false);
+  sleeveGeo.rotateZ(-Math.PI / 2);
+  const sleeve = new THREE.Mesh(sleeveGeo, collarMat);
+  sleeve.castShadow = true;
+  g.add(sleeve);
+
+  // Flanged end rims on the clamping collar
+  const flangeGeo = new THREE.TorusGeometry(radius + 0.0185, 0.0036, 12, 36);
+  flangeGeo.rotateY(Math.PI / 2);
+  for (const dx of [-0.034, 0.034]) {
+    const f = new THREE.Mesh(flangeGeo, rimMat);
+    f.position.x = dx;
+    g.add(f);
+  }
+
+  // 2. Twin machined top lock-saddle strips flush on the jaw cheeks (z = +0.0161 -> centered at +0.020)
+  // Gives instant top-down (PLAN VIEW) and 3/4 lock read while keeping 75-80% of the jaw block sleek dark graphite
+  const stripGeo = new THREE.BoxGeometry(0.072, 0.044, 0.009);
+  for (const sy of [-0.070, 0.070]) {
+    const strip = new THREE.Mesh(stripGeo, collarMat);
+    strip.position.set(0, sy, 0.020);
+    strip.castShadow = true;
+    g.add(strip);
+  }
+
+  g.visible = false;
+  return g;
+}
+
+function initScene(data, cfg) {
+  SCENE_DATA = data;
+  CFG = Object.assign(CFG, cfg || {});
+  T = THEMES[CFG.theme] || THEMES.light;
+  document.body.style.background = T.bgCss;
+
+  const canvas = document.getElementById("gl");
+  renderer = new THREE.WebGLRenderer({
+    canvas,
+    antialias: true,
+    preserveDrawingBuffer: true,
+    alpha: true,
+    powerPreference: "high-performance",
+  });
+  renderer.setSize(1920, 1080, false);
+  renderer.setPixelRatio(1);
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  renderer.outputEncoding = THREE.sRGBEncoding;
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 0.98;
+
+  scene = new THREE.Scene();
+  renderer.setClearColor(0x000000, 0);
+  document.getElementById("bg-hero").style.background = T.bgCss;
+  document.getElementById("bg-panes").style.background = T.paneBgCss;
+  if (CFG.layout === "single") { document.getElementById("bg-hero").style.width = "1920px"; document.getElementById("bg-panes").style.display = "none"; }
+
+  // Neutral-cool ~5600K studio 3-point lighting (Z-up)
+  const hemi = new THREE.HemisphereLight(linCol(T.hemiSky), linCol(T.hemiGnd), T.hemiInt);
+  hemi.position.set(0, 0, 5);
+  scene.add(hemi);
+
+  const key = new THREE.DirectionalLight(linCol(0xFAFBFD), T.keyInt);
+  key.position.set(3.6, -3.2, 2.3);
+  key.castShadow = true;
+  key.shadow.mapSize.width = 2048;
+  key.shadow.mapSize.height = 2048;
+  key.shadow.camera.near = 0.5;
+  key.shadow.camera.far = 12.0;
+  const d = 2.8;
+  key.shadow.camera.left = -d;
+  key.shadow.camera.right = d;
+  key.shadow.camera.top = d;
+  key.shadow.camera.bottom = -d;
+  key.shadow.bias = -0.0004;
+  key.shadow.radius = 4;
+  scene.add(key);
+
+  const fill = new THREE.DirectionalLight(linCol(0xEEF3FF), T.fillInt);
+  fill.position.set(-3.6, 1.8, 0.7);
+  scene.add(fill);
+
+  const rim = new THREE.DirectionalLight(linCol(0xFFFFFF), T.rimInt);
+  rim.position.set(-1.4, 3.6, 0.9);
+  scene.add(rim);
+
+  // Camera config (backward-compatible with beam_30deg_90deg defaults)
+  const camCfg = Object.assign({}, data.camera || {}, ((data.camera || {}).byLayout || {})[CFG.layout] || {});
+  const targetArr = camCfg.target || [-0.32, -0.52, 0.36];
+  const shadowZ = camCfg.shadowZ !== undefined ? camCfg.shadowZ : -0.34;
+  const distVal = camCfg.dist !== undefined ? camCfg.dist : 4.40;
+  if (distVal > 4.8) {
+    const d2 = 3.8;
+    key.shadow.camera.left = -d2; key.shadow.camera.right = d2;
+    key.shadow.camera.top = d2; key.shadow.camera.bottom = -d2;
+    key.shadow.camera.far = 16.0;
+  }
+  key.target.position.set(targetArr[0], targetArr[1], targetArr[2]);
+  key.position.set(targetArr[0] + 3.6, targetArr[1] - 3.2, targetArr[2] + 2.3);
+  scene.add(key.target);
+
+  // Soft shadow-catching floor (hero 3/4 only)
+  const floorGeo = new THREE.PlaneGeometry(18, 18);
+  const floorMat = new THREE.ShadowMaterial({ opacity: T.shadowOpacity });
+  shadowPlane = new THREE.Mesh(floorGeo, floorMat);
+  shadowPlane.position.set(targetArr[0], targetArr[1], shadowZ);
+  shadowPlane.receiveShadow = true;
+  scene.add(shadowPlane);
+
+  // Reference plane (start-plane for beam_30deg_90deg, or custom subtle floor datum)
+  const node = data.node || null;
+  refSquareGroup = new THREE.Group();
+  let rpCenter = null, rpHalf = 1.35;
+  if (data.groundGrid) {
+    // Faint ground grid at z = 0 (opt-in per scene); replaces the reference square. Major line every 1 m.
+    const g = data.groundGrid, step = g.step || 0.25, h = g.half, z = (g.z || 0) + 0.0005;
+    const minor = [], major = [];
+    for (let k = -Math.round(h / step); k <= Math.round(h / step); k++) {
+      const o = k * step, dst = Math.abs(Math.round(o * 1000)) % 1000 === 0 ? major : minor;
+      dst.push(g.center[0] + o, g.center[1] - h, z, g.center[0] + o, g.center[1] + h, z);
+      dst.push(g.center[0] - h, g.center[1] + o, z, g.center[0] + h, g.center[1] + o, z);
+    }
+    [[minor, 0.30], [major, 0.55]].forEach(([arr, op]) => {
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute("position", new THREE.Float32BufferAttribute(arr, 3));
+      const mat = new THREE.LineBasicMaterial({ color: linCol(T.refPlane), transparent: true, opacity: op, depthWrite: false });
+      const lines = new THREE.LineSegments(geo, mat);
+      lines.renderOrder = -1;
+      scene.add(lines);
+    });
+  } else if (data.refPlane && data.refPlane.center) {
+    rpCenter = data.refPlane.center;
+    rpHalf = data.refPlane.halfSize || 1.35;
+  } else if (node) {
+    rpCenter = [node[0] - 0.35, node[1] - 0.35, node[2]];
+    rpHalf = 1.35;
+  }
+  if (rpCenter) {
+    const planeGeo = new THREE.PlaneGeometry(2 * rpHalf, 2 * rpHalf);
+    const planeMat = new THREE.MeshBasicMaterial({
+      color: linCol(T.refPlaneFill),
+      transparent: true,
+      opacity: T.refPlaneFillOpacity,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    });
+    const refPlane = new THREE.Mesh(planeGeo, planeMat);
+    refPlane.position.set(rpCenter[0], rpCenter[1], rpCenter[2]);
+    refSquareGroup.add(refPlane);
+
+    const x0 = rpCenter[0] - rpHalf, x1 = rpCenter[0] + rpHalf;
+    const y0 = rpCenter[1] - rpHalf, y1 = rpCenter[1] + rpHalf;
+    const z0 = rpCenter[2];
+    const borderPts = [
+      new THREE.Vector3(x0, y0, z0), new THREE.Vector3(x1, y0, z0),
+      new THREE.Vector3(x1, y1, z0), new THREE.Vector3(x0, y1, z0),
+      new THREE.Vector3(x0, y0, z0),
+    ];
+    const borderGeo = new THREE.BufferGeometry().setFromPoints(borderPts);
+    const borderMat = new THREE.LineBasicMaterial({ color: linCol(T.refPlane), transparent: true, opacity: 0.55 });
+    refSquareGroup.add(new THREE.Line(borderGeo, borderMat));
+  }
+  scene.add(refSquareGroup);
+
+  // Host-normal reference axis in start plane (shown in ortho plan/end view)
+  window._refAxisLine = null;
+  if (node && !data.groundGrid && (!data.refPlane || data.orientation === "vertical_host")) {
+    const axisGeo = new THREE.BufferGeometry().setFromPoints([
+      new THREE.Vector3(node[0], node[1] - 2.2, node[2]),
+      new THREE.Vector3(node[0], node[1] + 0.65, node[2]),
+    ]);
+    const axisMat = new THREE.LineDashedMaterial({
+      color: linCol(T.refAxis),
+      dashSize: 0.05,
+      gapSize: 0.04,
+      transparent: true,
+      opacity: 0.70,
+    });
+    const axisLine = new THREE.Line(axisGeo, axisMat);
+    axisLine.computeLineDistances();
+    scene.add(axisLine);
+    window._refAxisLine = axisLine;
+  }
+
+  // Optional node target: translucent ultramarine sphere + crisp equatorial ring
+  nodeGroup = null; nodeSphereMat = null; nodeRingMat = null;
+  if (node) {
+    nodeGroup = new THREE.Group();
+    nodeGroup.position.set(node[0], node[1], node[2]);
+    const rNode = data.nodeBall || 0.045;
+    nodeSphereMat = new THREE.MeshStandardMaterial({
+      color: linCol(T.nodeSphere),
+      emissive: linCol(T.nodeRing),
+      emissiveIntensity: 0.14,
+      roughness: 0.25,
+      metalness: 0.0,
+      transparent: true,
+      opacity: 0.22,
+      depthWrite: false,
+    });
+    nodeGroup.add(new THREE.Mesh(new THREE.SphereGeometry(rNode, 36, 24), nodeSphereMat));
+
+    nodeRingMat = new THREE.MeshBasicMaterial({
+      color: linCol(T.nodeRing),
+      transparent: true,
+      opacity: 0.90,
+    });
+    nodeGroup.add(new THREE.Mesh(new THREE.TorusGeometry(rNode * 1.04, 0.0024, 12, 48), nodeRingMat));
+    const merRing = new THREE.Mesh(new THREE.TorusGeometry(rNode * 1.04, 0.0018, 10, 48), nodeRingMat.clone());
+    merRing.material.opacity = 0.45;
+    merRing.rotation.y = Math.PI / 2;
+    nodeGroup.add(merRing);
+    scene.add(nodeGroup);
+  }
+
+  // Static rods (supports data.staticRods array or legacy data.host).
+  // When frames carry `rods`, these groups are re-oriented live per frame.
+  const staticList = data.staticRods || (data.host ? [Object.assign({ role: "host" }, data.host)] : []);
+  let defaultDia = 0.06;
+  rodGroups = {};
+  const roleTone = (role) => {
+    if (role === "rod_b" || role === "carried") return [T.rodBCane, T.rodBRing];
+    if (role === "rod_c" || role === "target") return [T.rodCCane || T.targetCane, T.rodCRing || T.targetRing];
+    if (role === "rod_d") return [T.rodDCane, T.rodDRing];
+    if (role === "rod_e") return [T.rodECane, T.rodERing];
+    return [T.hostCane, T.hostRing];
+  };
+  for (const sr of staticList) {
+    const [cHex, rHex] = roleTone(sr.role);
+    const g = makeCaneGroup(sr.length, sr.diameter / 2, cHex, rHex);
+    orientRodGroup(g, sr.point, sr.axis);
+    scene.add(g);
+    const key = sr.name || sr.role;
+    rodGroups[key] = g;
+    if (sr.role && !sr.name) rodGroups[sr.role] = g;
+    if (sr.role === "host" && sr.diameter) defaultDia = sr.diameter;
+  }
+
+  // Optional fixture boxes / cylinders (pit, pads, hubs, pegs, posts)
+  const fixtureTone = {
+    ground: { hex: 0x2A2E36, r: 0.98, m: 0.0 },
+    pit:    { hex: 0x2C323C, r: 0.98, m: 0.0 },
+    hub:    { hex: 0x4A5160, r: 0.92, m: 0.04 },
+    peg:    { hex: 0x6A7180, r: 0.94, m: 0.02 },
+    post:   { hex: 0x5A616C, r: 0.94, m: 0.02 },
+  };
+  for (const f of (data.fixtures || [])) {
+    const tone = fixtureTone[f.role] || fixtureTone.hub;
+    const mat = new THREE.MeshStandardMaterial({
+      color: linCol(tone.hex), roughness: tone.r, metalness: tone.m,
+    });
+    let mesh;
+    if (f.type === "cylinder") {
+      const geo = new THREE.CylinderGeometry(f.radius, f.radius, f.length, 36, 1, false);
+      geo.rotateX(Math.PI / 2); // Three Y-up cylinder -> Z-up axis
+      mesh = new THREE.Mesh(geo, mat);
+    } else {
+      const s = f.size;
+      const geo = new THREE.BoxGeometry(s[0], s[1], s[2]);
+      mesh = new THREE.Mesh(geo, mat);
+    }
+    mesh.position.set(f.center[0], f.center[1], f.center[2]);
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    scene.add(mesh);
+  }
+
+  // Optional dynamic carried rod B
+  rodBGroup = null;
+  if (data.rod) {
+    const rodSpec = data.rod;
+    rodBGroup = makeCaneGroup(rodSpec.length, rodSpec.diameter / 2, T.rodBCane, T.rodBRing);
+    scene.add(rodBGroup);
+  }
+
+  // URDF link meshes
+  const roleColor = {
+    chassis_backbone: { hex: T.chassisBackbone, r: 0.94, m: 0.01, edgeHex: T.edgeChassis, edgeOp: T.edgeChassisOp },
+    chassis_plate:    { hex: T.chassisPlate,    r: 0.94, m: 0.01, edgeHex: T.edgeChassis, edgeOp: T.edgeChassisOp },
+    sled:             { hex: T.sled,            r: 0.94, m: 0.02, edgeHex: T.edgeChassis, edgeOp: T.edgeChassisOp },
+    jaw_static:       { hex: T.jawStatic,       r: 0.95, m: 0.01, edgeHex: T.edgeJaw,     edgeOp: T.edgeJawOp },
+    jaw_active:       { hex: T.jawActive,       r: 0.95, m: 0.01, edgeHex: T.edgeJaw,     edgeOp: T.edgeJawOp },
+    jaw_main:         { hex: T.jawMain,         r: 0.95, m: 0.01, edgeHex: T.edgeJaw,     edgeOp: T.edgeJawOp },
+  };
+
+  for (const m of data.meshes) {
+    const rc = roleColor[m.role] || roleColor.chassis_plate;
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute("position", new THREE.Float32BufferAttribute(m.positions, 3));
+    geo.setAttribute("normal", new THREE.Float32BufferAttribute(m.normals, 3));
+
+    const baseMat = new THREE.MeshStandardMaterial({
+      color: linCol(rc.hex),
+      roughness: rc.r,
+      metalness: rc.m,
+      polygonOffset: true,
+      polygonOffsetFactor: 1,
+      polygonOffsetUnits: 1,
+    });
+    const lockMat = new THREE.MeshStandardMaterial({
+      color: linCol(T.jawLockedBody),
+      emissive: linCol(T.jawLockedBody),
+      emissiveIntensity: 0.03,
+      roughness: 0.94,
+      metalness: 0.0,
+      polygonOffset: true,
+      polygonOffsetFactor: 1,
+      polygonOffsetUnits: 1,
+    });
+
+    const grp = new THREE.Group();
+    grp.matrixAutoUpdate = false;
+    const mesh = new THREE.Mesh(geo, baseMat);
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    grp.add(mesh);
+
+    let edgeLines = null, baseEdgeMat = null, lockEdgeMat = null;
+    if (m.edges && m.edges.length > 0) {
+      const eGeo = new THREE.BufferGeometry();
+      eGeo.setAttribute("position", new THREE.Float32BufferAttribute(m.edges, 3));
+      baseEdgeMat = new THREE.LineBasicMaterial({
+        color: linCol(rc.edgeHex),
+        transparent: true,
+        opacity: rc.edgeOp,
+      });
+      lockEdgeMat = new THREE.LineBasicMaterial({
+        color: linCol(0x2E0E06),
+        transparent: true,
+        opacity: 0.34,
+      });
+      edgeLines = new THREE.LineSegments(eGeo, baseEdgeMat);
+      grp.add(edgeLines);
+    }
+
+    scene.add(grp);
+    if (!linkMeshes[m.link]) linkMeshes[m.link] = [];
+    linkMeshes[m.link].push({ group: grp, mesh, baseMat, lockMat, edgeLines, baseEdgeMat, lockEdgeMat, jawKey: m.jawKey });
+  }
+
+  const caneRadius = defaultDia / 2;
+  for (const j of ["handler_1_clamp", "handler_1_active", "main_clamp_blue", "main_clamp_yellow", "handler_2_clamp", "handler_2_active"]) {
+    const collar = makeJawCollar(caneRadius);
+    collar.matrixAutoUpdate = false;
+    scene.add(collar);
+    jawCollars[j] = { group: collar };
+  }
+
+  // Hero 3/4 camera
+  const heroW = CFG.layout === "single" ? 1920 : 1306;
+  const fov = camCfg.fov !== undefined ? camCfg.fov : 29;
+  camHero = new THREE.PerspectiveCamera(fov, heroW / 1080, 0.05, 50);
+  camHero.up.set(0, 0, 1);
+  const targetHero = new THREE.Vector3(targetArr[0], targetArr[1], targetArr[2]);
+  const el = THREE.MathUtils.degToRad(camCfg.elevDeg !== undefined ? camCfg.elevDeg : 36);
+  const az = THREE.MathUtils.degToRad(camCfg.azDeg !== undefined ? camCfg.azDeg : -32);
+  camHero.position.set(
+    targetHero.x + distVal * Math.cos(el) * Math.cos(az),
+    targetHero.y + distVal * Math.cos(el) * Math.sin(az),
+    targetHero.z + distVal * Math.sin(el)
+  );
+  camHero.lookAt(targetHero);
+
+  const subW = 614, subH = 540, subAsp = subW / subH;
+  function makeOrtho(cfg, fallback) {
+    const c = Object.assign({}, fallback, cfg || {});
+    const halfH = c.halfH;
+    const cam = new THREE.OrthographicCamera(-halfH * subAsp, halfH * subAsp, halfH, -halfH, 0.05, 40);
+    const up = c.up;
+    cam.up.set(up[0], up[1], up[2]);
+    const t = c.target;
+    const o = c.offset;
+    cam.position.set(t[0] + o[0], t[1] + o[1], t[2] + o[2]);
+    cam.lookAt(new THREE.Vector3(t[0], t[1], t[2]));
+    return cam;
+  }
+  const planFallback = data.orientation === "vertical_host"
+    ? { target: [targetArr[0], targetArr[1], targetArr[2]], up: [-1, 0, 0], offset: [0, 0, 6], halfH: 1.34 }
+    : { target: [0.25, -0.63, 0.56], up: [0, 0, 1], offset: [4.5, 0, 0], halfH: 1.24 };
+  const elevFallback = data.orientation === "vertical_host"
+    ? { target: [targetArr[0], targetArr[1], targetArr[2]], up: [0, 0, 1], offset: [6, 0, 0], halfH: 1.62 }
+    : { target: [-0.54, -0.78, 0.332], up: [0, 1, 0], offset: [0, 0, 5], halfH: 1.24 };
+  camEnd = makeOrtho(camCfg.plan, planFallback);
+  camPlan = makeOrtho(camCfg.elevation, elevFallback);
+}
+
+
+function projectToPane(vec3, cam, vx, vyTop, vw, vh) {
+  const v = vec3.clone().project(cam);
+  return {
+    x: vx + (v.x * 0.5 + 0.5) * vw,
+    y: vyTop + (-v.y * 0.5 + 0.5) * vh,
+  };
+}
+
+function renderOverlay(fr) {
+  const svg = document.getElementById("overlay");
+  const parts = [];
+  const isMulti = CFG.layout !== "single";
+  const marks = SCENE_DATA.angleMarks || {};
+  const panes = SCENE_DATA.paneLabels || {};
+  const isSeated = ["in_stroke", "release", "retract", "seated_b", "seated_a", "bridge_bb"].includes(fr.phase);
+
+  if (isMulti) {
+    parts.push(`<line x1="1306.5" y1="0" x2="1306.5" y2="1080" stroke="${T.divider}" stroke-width="1"/>`);
+    parts.push(`<line x1="1306" y1="540.5" x2="1920" y2="540.5" stroke="${T.divider}" stroke-width="1"/>`);
+
+    // Architectural angle arc in the top-right pane (only when the scene provides angleMarks.plan)
+    if (isSeated && marks.plan && fr.rodAx && SCENE_DATA.node) {
+      const node = new THREE.Vector3(...SCENE_DATA.node);
+      const pNode = projectToPane(node, camEnd, 1306, 0, 614, 540);
+      const pRef = projectToPane(new THREE.Vector3(node.x, node.y - 1.2, node.z), camEnd, 1306, 0, 614, 540);
+      const ax = new THREE.Vector3(...fr.rodAx);
+      const rodPt = new THREE.Vector3(...fr.rodPt);
+      if (ax.dot(rodPt.clone().sub(node)) < 0) ax.negate();
+      const pRod = projectToPane(node.clone().addScaledVector(ax, 1.2), camEnd, 1306, 0, 614, 540);
+
+      const a0 = Math.atan2(pRef.y - pNode.y, pRef.x - pNode.x);
+      const a1 = Math.atan2(pRod.y - pNode.y, pRod.x - pNode.x);
+      let da = a1 - a0;
+      if (da > Math.PI) da -= 2 * Math.PI;
+      if (da < -Math.PI) da += 2 * Math.PI;
+      const sweep = da >= 0 ? 1 : 0;
+      const R = 168;
+      const sx = pNode.x + R * Math.cos(a0), sy = pNode.y + R * Math.sin(a0);
+      const ex = pNode.x + R * Math.cos(a1), ey = pNode.y + R * Math.sin(a1);
+      const rx = pNode.x + (R + 40) * Math.cos(a0), ry = pNode.y + (R + 40) * Math.sin(a0);
+      parts.push(`<line x1="${pNode.x.toFixed(1)}" y1="${pNode.y.toFixed(1)}" x2="${rx.toFixed(1)}" y2="${ry.toFixed(1)}" stroke="${T.dimStroke}" stroke-width="1.1" stroke-dasharray="4 4" opacity="0.55"/>`);
+      parts.push(`<path d="M ${sx.toFixed(1)} ${sy.toFixed(1)} A ${R} ${R} 0 0 ${sweep} ${ex.toFixed(1)} ${ey.toFixed(1)}" fill="none" stroke="${T.dimStroke}" stroke-width="1.7"/>`);
+      const midAngle = a0 + da / 2;
+      const tx = pNode.x + (R + 28) * Math.cos(midAngle);
+      const ty = pNode.y + (R + 28) * Math.sin(midAngle) + 5;
+      parts.push(`<text x="${tx.toFixed(1)}" y="${ty.toFixed(1)}" fill="${T.dimText}" font-size="16" font-weight="600" text-anchor="middle">${marks.plan}</text>`);
+    }
+
+    // Architectural corner mark in the bottom-right pane (only when the scene provides angleMarks.elevation)
+    if (isSeated && marks.elevation && SCENE_DATA.node) {
+      const node = new THREE.Vector3(...SCENE_DATA.node);
+      const pNode = projectToPane(node, camPlan, 1306, 540, 614, 540);
+      if (SCENE_DATA.orientation === "vertical_host") {
+        // Host goes straight DOWN (+y), cantilevered beam goes straight RIGHT (+x)
+        const sz = 104;
+        const rx = pNode.x + sz, ry = pNode.y + 8;
+        const cx = pNode.x + sz, cy = pNode.y + sz;
+        const bx = pNode.x + 8,  by = pNode.y + sz;
+        parts.push(`<path d="M ${rx.toFixed(1)} ${ry.toFixed(1)} L ${cx.toFixed(1)} ${cy.toFixed(1)} L ${bx.toFixed(1)} ${by.toFixed(1)}" fill="none" stroke="${T.dimStroke}" stroke-width="1.7"/>`);
+        parts.push(`<text x="${(cx + 12).toFixed(1)}" y="${(cy + 18).toFixed(1)}" fill="${T.dimText}" font-size="16" font-weight="600" text-anchor="start">${marks.elevation}</text>`);
+      } else {
+        const sz = 112;
+        const lx = pNode.x - sz, ly = pNode.y + 8;
+        const cx = pNode.x - sz, cy = pNode.y + sz;
+        const bx = pNode.x - 8,  by = pNode.y + sz;
+        parts.push(`<path d="M ${lx.toFixed(1)} ${ly.toFixed(1)} L ${cx.toFixed(1)} ${cy.toFixed(1)} L ${bx.toFixed(1)} ${by.toFixed(1)}" fill="none" stroke="${T.dimStroke}" stroke-width="1.7"/>`);
+        parts.push(`<text x="${(cx - 12).toFixed(1)}" y="${(cy + 18).toFixed(1)}" fill="${T.dimText}" font-size="16" font-weight="600" text-anchor="end">${marks.elevation}</text>`);
+      }
+    }
+  }
+
+  if (CFG.mode !== "bare") {
+    if (isMulti) {
+      const topLbl = panes.top || (SCENE_DATA.orientation === "vertical_host" ? "PLAN VIEW" : "END VIEW");
+      const botLbl = panes.bottom || (SCENE_DATA.orientation === "vertical_host" ? "ELEVATION" : "PLAN VIEW");
+      parts.push(`<text x="1330" y="34" fill="${T.textMuted}" font-size="12" font-weight="600" letter-spacing="1.8">${topLbl}</text>`);
+      parts.push(`<text x="1330" y="574" fill="${T.textMuted}" font-size="12" font-weight="600" letter-spacing="1.8">${botLbl}</text>`);
+    }
+    const idx = fr.phaseIdx || "";
+    const lbl = fr.phaseLabel || fr.phase || "";
+    const lblX = idx ? 34 : 0;
+    parts.push(`
+      <g transform="translate(42, 1038)">
+        ${idx ? `<text x="0" y="0" fill="${T.textMuted}" font-size="17" font-weight="600" letter-spacing="0.8">${idx}</text>` : ""}
+        <text x="${lblX}" y="0" fill="${T.textPrimary}" font-size="17" font-weight="500">${lbl}</text>
+      </g>
+    `);
+  }
+
+  if (CFG.mode === "annotated") {
+    const closedSet = new Set(fr.closed);
+    const groups = SCENE_DATA.jawGroups || [
+      { label: "H1", keys: ["handler_1_active", "handler_1_clamp"] },
+      { label: "MC", keys: ["main_clamp_blue", "main_clamp_yellow"] },
+      { label: "H2", keys: ["handler_2_clamp", "handler_2_active"] },
+    ];
+    let gx = 0;
+    const pillItems = [];
+    for (const grp of groups) {
+      pillItems.push(`<text x="${gx}" y="4" fill="${T.textMuted}" font-size="11" font-weight="600" letter-spacing="0.8">${grp.label}</text>`);
+      gx += 24;
+      for (const k of grp.keys) {
+        const locked = closedSet.has(k);
+        const fill = locked ? "#E64A19" : "none";
+        const stroke = locked ? "#E64A19" : T.textMuted;
+        pillItems.push(`<circle cx="${gx}" cy="0" r="4.5" fill="${fill}" stroke="${stroke}" stroke-width="1.5"/>`);
+        gx += 15;
+      }
+      gx += 10;
+    }
+    const tele = fr.telemetry != null ? fr.telemetry : (fr.caneAxisMm != null ? `Δ ${fr.caneAxisMm.toFixed(0)} mm` : "");
+    const teleW = tele ? Math.max(76, Math.round(tele.length * 7.4 + 28)) : 20;
+    const pillW = gx + teleW;
+    const px = (isMulti ? 1306 : 1920) - pillW - 32;
+    parts.push(`
+      <g transform="translate(${px}, 1030)">
+        <rect x="-14" y="-16" width="${pillW}" height="32" rx="2" fill="${T.pillBg}" stroke="${T.pillBorder}" stroke-width="1"/>
+        <g transform="translate(4, 0)">${pillItems.join("")}</g>
+        ${tele ? `<text x="${gx + 4}" y="4" fill="${T.textSecondary}" font-size="12" font-weight="500">${tele}</text>` : ""}
+      </g>
+    `);
+  }
+
+  svg.innerHTML = parts.join("\n");
+}
+
+function applyFrame(frameIndex) {
+  const fr = SCENE_DATA.uniqueFrames[frameIndex];
+  const closedSet = new Set(fr.closed);
+  const M = new THREE.Matrix4();
+
+  for (const [ln, items] of Object.entries(linkMeshes)) {
+    const arr = fr.links[ln];
+    if (!arr) continue;
+    M.fromArray(arr);
+    for (const it of items) {
+      it.group.matrix.copy(M);
+      it.group.matrixWorldNeedsUpdate = true;
+      if (it.jawKey) {
+        const isLocked = closedSet.has(it.jawKey);
+        it.mesh.material = isLocked ? it.lockMat : it.baseMat;
+        if (it.edgeLines) it.edgeLines.material = isLocked ? it.lockEdgeMat : it.baseEdgeMat;
+      }
+    }
+  }
+
+  // Full vermilion jaw housing is active (per Lassie); keep extra collar sleeves hidden
+  for (const jc of Object.values(jawCollars)) {
+    jc.group.visible = false;
+  }
+
+  if (rodBGroup && fr.rodPt && fr.rodAx) {
+    orientRodGroup(rodBGroup, fr.rodPt, fr.rodAx);
+  }
+  if (fr.rods) {
+    const seen = new Set();
+    for (const [name, pose] of Object.entries(fr.rods)) {
+      const g = rodGroups[name];
+      if (!g) continue;
+      seen.add(name);
+      if (pose.visible === false) { g.visible = false; continue; }
+      g.visible = true;
+      if (pose.pt && pose.ax) orientRodGroup(g, pose.pt, pose.ax);
+    }
+    for (const [name, g] of Object.entries(rodGroups)) {
+      if (!seen.has(name)) g.visible = false;
+    }
+  }
+
+  if (nodeSphereMat && nodeRingMat) {
+    const seated = /^(in_stroke|release|retract|seat|seated_|bridge_)/.test(fr.phase);
+    nodeSphereMat.opacity = seated ? 0.28 : 0.17;
+    nodeRingMat.opacity = seated ? 0.96 : 0.72;
+  }
+
+  renderer.setScissorTest(true);
+  const isMulti = CFG.layout !== "single";
+  const heroW = isMulti ? 1306 : 1920;
+
+  // 1. Hero 3/4 perspective
+  shadowPlane.visible = T.shadowOpacity > 0;
+  refSquareGroup.visible = true;
+  if (window._refAxisLine) window._refAxisLine.visible = SCENE_DATA.orientation !== "vertical_host";
+  renderer.setClearColor(0x000000, 0);
+  document.getElementById("bg-hero").style.background = T.bgCss;
+  document.getElementById("bg-panes").style.background = T.paneBgCss;
+  if (CFG.layout === "single") { document.getElementById("bg-hero").style.width = "1920px"; document.getElementById("bg-panes").style.display = "none"; }
+  renderer.setViewport(0, 0, heroW, 1080);
+  renderer.setScissor(0, 0, heroW, 1080);
+  renderer.render(scene, camHero);
+
+  if (isMulti) {
+    shadowPlane.visible = false;
+    refSquareGroup.visible = false;
+
+    // 2. Top-right: PLAN VIEW (vertical_host) or END VIEW (legacy)
+    if (window._refAxisLine) window._refAxisLine.visible = true;
+    renderer.setViewport(1306, 540, 614, 540);
+    renderer.setScissor(1306, 540, 614, 540);
+    renderer.render(scene, camEnd);
+
+    // 3. Bottom-right: ELEVATION (vertical_host) or PLAN VIEW (legacy)
+    if (window._refAxisLine) window._refAxisLine.visible = SCENE_DATA.orientation !== "vertical_host";
+    renderer.setViewport(1306, 0, 614, 540);
+    renderer.setScissor(1306, 0, 614, 540);
+    renderer.render(scene, camPlan);
+  }
+
+  renderer.setScissorTest(false);
+  renderOverlay(fr);
+}
+
+window.STUDIO = {
+  init: async (sceneUrl, cfg) => {
+    const resp = await fetch(sceneUrl);
+    const data = await resp.json();
+    initScene(data, cfg);
+    const phases = {};
+    (data.uniqueFrames || []).forEach((fr, i) => { if (fr.phase) phases[fr.phase] = i; });
+    return {
+      uniqueCount: data.uniqueFrames.length,
+      timeline: data.timeline,
+      keyIndices: data.keyIndices,
+      phases,
+      fps: data.fps,
+    };
+  },
+  renderFrame: (idx) => {
+    applyFrame(idx);
+    return true;
+  },
+};
+</script>
+</body>
+</html>
