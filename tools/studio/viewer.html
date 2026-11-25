@@ -731,7 +731,7 @@ function renderOverlay(fr) {
       parts.push(`<text x="1330" y="574" fill="${T.textMuted}" font-size="12" font-weight="600" letter-spacing="1.8">${botLbl}</text>`);
     }
     const idx = fr.phaseIdx || "";
-    const lbl = fr.phaseLabel || fr.phase || "";
+    const lbl = StudioTimeline.sep(fr.phaseLabel || fr.phase || "");
     const tlm = StudioTimeline.MODES[CFG.timeline] || StudioTimeline.MODES.off;
     const cs = tlm.captionSize;
     const lblX = idx ? Math.round(cs * 2) : 0;
@@ -767,7 +767,8 @@ function renderOverlay(fr) {
     const tele = fr.telemetry != null ? fr.telemetry : (fr.caneAxisMm != null ? `Δ ${fr.caneAxisMm.toFixed(0)} mm` : "");
     const teleW = tele ? Math.max(76, Math.round(tele.length * 7.4 + 28)) : 20;
     const pillW = gx + teleW;
-    const px = (isMulti ? 1306 : 1920) - pillW - 32;
+    const tlRight = (StudioTimeline.MODES[CFG.timeline] || StudioTimeline.MODES.off).chipRight(CFG);
+    const px = tlRight == null ? (isMulti ? 1306 : 1920) - pillW - 32 : tlRight + 14 - pillW;
     parts.push(`
       <g transform="translate(${px}, ${(StudioTimeline.MODES[CFG.timeline] || StudioTimeline.MODES.off).chipY})">
         <rect x="-14" y="-16" width="${pillW}" height="32" rx="2" fill="${T.pillBg}" stroke="${T.pillBorder}" stroke-width="1"/>
@@ -778,7 +779,7 @@ function renderOverlay(fr) {
   }
 
   if (TL_MODEL && CFG.mode !== "bare" && StudioTimeline.MODES[CFG.timeline]) {
-    parts.push(StudioTimeline.MODES[CFG.timeline].draw(TL_MODEL, TL_I, CFG));
+    parts.unshift(StudioTimeline.MODES[CFG.timeline].draw(TL_MODEL, TL_I, CFG));  // under caption and chip
   }
   svg.innerHTML = parts.join("\n");
 }

@@ -6,6 +6,7 @@ import argparse
 import bisect
 import json
 import os
+import re
 import subprocess
 import tempfile
 from pathlib import Path
@@ -99,12 +100,12 @@ def cells_from_scene(scene: dict):
     return cells
 
 
-def still_fraction(scene: dict, still) -> float:
-    """Where a storyboard still sits on the video timeline, 0..1 (first frame that shows it)."""
+def still_position(scene: dict, still) -> int:
+    """First video frame that shows a storyboard still."""
     unique = scene.get("uniqueFrames") or []
     tl = scene.get("timeline") or []
     if not tl:
-        return 0.0
+        return 0
     if not isinstance(still, int):
         keys = scene.get("keyIndices") or {}
         if isinstance(keys.get(still), int):
@@ -112,8 +113,24 @@ def still_fraction(scene: dict, still) -> float:
         else:
             hits = [i for i, fr in enumerate(unique) if fr.get("phase") == still]
             still = hits[-1] if hits else 0
-    j = tl.index(still) if still in tl else min(bisect.bisect_left(tl, still), len(tl) - 1)
-    return (j + 1) / len(tl)
+    return tl.index(still) if still in tl else min(bisect.bisect_left(tl, still), len(tl) - 1)
+
+
+def still_fraction(scene: dict, still) -> float:
+    """Where a storyboard still sits on the video timeline, 0..1."""
+    n = len(scene.get("timeline") or [])
+    return (still_position(scene, still) + 1) / n if n else 0.0
+
+
+def timestamp(scene: dict, still) -> str:
+    """Video time of a still as mm:ss."""
+    sec = int(still_position(scene, still) / (scene.get("fps") or 30))
+    return f"{sec // 60:02d}:{sec % 60:02d}"
+
+
+def sep(label: str) -> str:
+    """One caption separator everywhere: " · "."""
+    return re.sub(r"\s+[-\u2013\u2014\u00b7]\s+", " \u00b7 ", str(label))
 
 
 def draw_mini_timeline(draw, x0, x1, y, frac):
@@ -164,7 +181,10 @@ def main():
     with tempfile.TemporaryDirectory() as td:
         seat_img = None
         hero_cols = 3 if use_ortho else cols
-        for idx, (phase, num, label) in enumerate(cells[: hero_cols * rows]):
+        # Panels in time order; the number is the video time (mm:ss).
+        shown = sorted(cells[: hero_cols * rows], key=lambda c: still_position(scene, c[0]))
+        shown = [(ph, timestamp(scene, ph), sep(lab)) for ph, _, lab in shown]
+        for idx, (phase, num, label) in enumerate(shown):
             p = os.path.join(td, f"{idx}_{phase}.png")
             subprocess.check_call([
                 "node", render_js,
@@ -191,7 +211,7 @@ def main():
             x0, y0 = col * cw, row * ch
             sheet.paste(hero, (x0 + (cw - nw) // 2, y0 + (ch - 56 - nh) // 2 + 8))
             draw.text((x0 + 24, y0 + ch - 44), num, fill=T["muted"], font=f_idx)
-            draw.text((x0 + 56, y0 + ch - 44), label, fill=T["ink"], font=f_lbl)
+            draw.text((x0 + 24 + draw.textlength(num + "  ", font=f_idx), y0 + ch - 44), label, fill=T["ink"], font=f_lbl)
             if args.timeline == "simple":
                 draw_mini_timeline(draw, x0 + 24, x0 + cw - 24, y0 + ch - 14, still_fraction(scene, phase))
 

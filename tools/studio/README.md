@@ -60,9 +60,11 @@ The adapter accepts `--plan` and `--out` for other paths. Do not commit files un
 
 The renderer draws a task timeline at the bottom of each video. Use `--timeline` to select the mode:
 
-- `simple`: a 2 px line under the caption. The elapsed part is grey. The active task is vermilion. A short tick shows each member that is complete. The line has no text.
-- `detailed`: one 24 px bar under the hero view. Each segment is one task. Past segments are grey, future segments are dark, and the active segment is vermilion. The task name is under the active segment. The caption moves up above the bar.
+- `simple`: a 2 px line under the caption. The elapsed part is grey. The active task is vermilion and is at least 24 px long. A 2x10 px vermilion tick shows the current time. A short white tick shows each member that is complete. The line has no text.
+- `detailed`: one 24 px bar under the hero view. Each segment is one task, with a 2 px gap between tasks. Past segments are `#5C6068`, future segments are `#2A2C30`, and the active segment is vermilion. The task name is under the active segment only. The caption moves up above the bar.
 - `off`: no timeline. The output is the same as before.
+
+Each mode puts a `#111214` backing (85% opacity) behind the timeline, so the floor grid does not show through it. The jaw chip (`annotated`) ends at the right end of the timeline, on the same baseline as the caption. Captions use ` · ` as the separator.
 
 The default is `simple` for `clean` and `detailed` for `annotated`. The `bare` mode has no timeline. In the 3-pane layout, the timeline is under the hero view only.
 
@@ -75,6 +77,6 @@ The timeline uses the video frame as its clock. The playhead moves at a constant
 - Start, park and finished frames are idle. Idle frames have no segment.
 - A member is complete at the end of its release (`release` in the stage `place <member>`, or `<member>_open`).
 
-The storyboard has a 4 px mini timeline under each panel. A vermilion tick shows the time of the panel. Use `make_storyboard.py --timeline off` to remove it.
+The storyboard shows the panels in time order. Each panel has its video time (mm:ss) and a 4 px mini timeline. A vermilion tick shows the time of the panel. Use `make_storyboard.py --timeline off` to remove it.
 
 `timeline.js` is the same file in Motus.Bambino and Motus.NET (`tools/studio/`). If you change it, change it in the two repos.
