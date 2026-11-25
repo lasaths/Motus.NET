@@ -55,4 +55,41 @@ public static class TreeAdjacency
                         pairs.Add((list[a].Name, list[b].Name));
         return pairs;
     }
+
+    /// <summary>
+    /// The factory default (<see cref="CollisionCheckerFactory.DefaultTreeSelfCollision"/>): <see cref="AllowedPairs"/>
+    /// with fixed siblings, plus pairs that touch by design: links joined only by fixed joints (they never move against
+    /// each other, for example two bases fixed to the world), and links moved by one mimic group (gripper fingers).
+    /// </summary>
+    internal static IReadOnlyList<(string A, string B)> DefaultPairs(KinematicTree tree, IReadOnlySet<string> geometryLinks)
+    {
+        var parentJoint = new int[tree.Links.Count];
+        Array.Fill(parentJoint, -1);
+        for (var j = 0; j < tree.Joints.Count; j++)
+            parentJoint[tree.Joints[j].ChildLinkIndex] = j;
+
+        // Nearest moving joint above a link (-1 = the root's rigid body), and its mimic master.
+        int Mover(int link)
+        {
+            for (var j = parentJoint[link]; j >= 0; j = parentJoint[tree.Joints[j].ParentLinkIndex])
+                if (tree.Joints[j].Type != KinematicJointType.Fixed)
+                    return j;
+            return -1;
+        }
+        int Master(int j) => j >= 0 && tree.Joints[j].Mimic is { } m ? m.JointIndex : j;
+
+        var links = tree.Links.Select((l, i) => (l.Name, i)).Where(l => geometryLinks.Contains(l.Name))
+            .Select(l => (l.Name, Mover: Mover(l.i))).ToArray();
+        var pairs = AllowedPairs(tree, geometryLinks, fixedSiblingsTouch: true).ToList();
+        for (var a = 0; a < links.Length; a++)
+            for (var b = a + 1; b < links.Length; b++)
+            {
+                int ma = links[a].Mover, mb = links[b].Mover;
+                var rigid = ma == mb;
+                var mimic = ma >= 0 && mb >= 0 && Master(ma) == Master(mb) && (tree.Joints[ma].Mimic is not null || tree.Joints[mb].Mimic is not null);
+                if (rigid || mimic)
+                    pairs.Add((links[a].Name, links[b].Name));
+            }
+        return pairs;
+    }
 }

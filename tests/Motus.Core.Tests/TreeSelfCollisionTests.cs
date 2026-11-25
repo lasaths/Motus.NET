@@ -105,6 +105,51 @@ public class TreeSelfCollisionTests
     }
 
     [Fact]
+    public void FactoryDefault_IsOn_AndAllowsDesignContacts()
+    {
+        // Two bases fixed to the world touch; two mimic fingers touch when closed. Both are design contacts.
+        var doc = XDocument.Parse("""
+            <robot name="cell">
+              <link name="world"/>
+              <link name="base_a"><collision><origin xyz="0 0 0.05"/><geometry><box size="0.2 0.2 0.1"/></geometry></collision></link>
+              <link name="base_b"><collision><origin xyz="0 0 0.05"/><geometry><box size="0.2 0.2 0.1"/></geometry></collision></link>
+              <link name="arm"><collision><origin xyz="0.2 0 0.025"/><geometry><box size="0.4 0.05 0.05"/></geometry></collision></link>
+              <link name="hand"><collision><geometry><box size="0.05 0.05 0.05"/></geometry></collision></link>
+              <link name="finger_l"><collision><origin xyz="0 0.01 0"/><geometry><box size="0.04 0.02 0.02"/></geometry></collision></link>
+              <link name="finger_r"><collision><origin xyz="0 -0.01 0"/><geometry><box size="0.04 0.02 0.02"/></geometry></collision></link>
+              <joint name="wa" type="fixed"><parent link="world"/><child link="base_a"/></joint>
+              <joint name="wb" type="fixed"><parent link="world"/><child link="base_b"/><origin xyz="0.2 0 0"/></joint>
+              <joint name="j1" type="revolute"><parent link="base_a"/><child link="arm"/><origin xyz="0 0 0.12"/><axis xyz="0 1 0"/><limit lower="-1" upper="1" velocity="1"/></joint>
+              <joint name="jh" type="fixed"><parent link="arm"/><child link="hand"/><origin xyz="0.4 0 0.025"/></joint>
+              <joint name="fl" type="prismatic"><parent link="hand"/><child link="finger_l"/><origin xyz="0.05 0 0"/><axis xyz="0 1 0"/><limit lower="0" upper="0.04" velocity="1"/></joint>
+              <joint name="fr" type="prismatic"><parent link="hand"/><child link="finger_r"/><origin xyz="0.05 0 0"/><axis xyz="0 -1 0"/><limit lower="0" upper="0.04" velocity="1"/><mimic joint="fl"/></joint>
+            </robot>
+            """);
+        var tree = UrdfRobotLoader.LoadTree(doc);
+        var col = UrdfCollisionLoader.LoadTree(doc.Root!, tree, ".")!;
+        var names = tree.DriverJointIndices.Select(i => tree.Joints[i].Name).ToArray();
+        var robot = new RobotModel(new RobotPreset
+        {
+            Manufacturer = RobotManufacturer.Unknown, ModelName = "cell", Family = "cell", AxisCount = tree.DriverCount,
+            JointLimits = tree.DriverJointIndices.Select(i => new JointLimit(tree.Joints[i].Lower, tree.Joints[i].Upper)).ToArray(),
+        }, col, names);
+        var empty = new CollisionScene();
+        var home = new JointState([0.0, 0.0]);
+        var dipped = new JointState([0.6, 0.0]); // arm swings down into base_b
+
+        var factory = Assert.IsType<TreeFkCollisionChecker>(CollisionCheckerFactory.Create(robot, tree, null, names));
+        Assert.True(factory.IsCollisionFree(home, empty), factory.LastHit);
+        Assert.False(factory.IsCollisionFree(dipped, empty));
+        Assert.Contains("base_b", factory.LastHit);
+
+        // Adjacency alone does not allow the design contacts; the explicit opt-out checks no link pairs.
+        var adjacentOnly = new TreeFkCollisionChecker(robot, tree, planJointNames: names, selfCollision: new TreeSelfCollision(0,
+            TreeAdjacency.AllowedPairs(tree, col.Links.Select(l => l.LinkName).ToHashSet(), fixedSiblingsTouch: true)));
+        Assert.False(adjacentOnly.IsCollisionFree(home, empty));
+        Assert.True(new TreeFkCollisionChecker(robot, tree, planJointNames: names, selfCollision: null).IsCollisionFree(dipped, empty));
+    }
+
+    [Fact]
     public void Clearance_OnlyAddsContacts()
     {
         var poses = Poses(400, seed: 7);
