@@ -2,7 +2,7 @@
 
 .NET 8 **host-agnostic** motion-planning core: models, FK/IK, collision, sampling/Cartesian planners, retiming, export, and robotic assembly planning. **Version 2.2.0.**
 
-<video src="docs/media/warren_truss_dark_annotated_detailed.mp4" autoplay muted loop playsinline controls width="100%" aria-label="Bamboo arm placing the 7 members of a Warren truss over a pit, from the shipped AssemblyPlanner plan"></video>
+<a href="docs/media/warren_truss_dark_annotated_detailed.mp4" aria-label="Bamboo arm placing the 7 members of a Warren truss over a pit, from the shipped AssemblyPlanner plan"><img src="docs/media/warren_truss_dark_annotated_detailed.gif" alt="Bamboo arm placing the 7 members of a Warren truss over a pit, from the shipped AssemblyPlanner plan" width="100%"></a>
 
 *The shipped `AssemblyPlanner` plan for the 7-member bamboo Warren truss (21 tasks, collision-free). This Dark studio video shows that plan. The interactive replay is in [Motus.Viewer](src/Motus.Viewer/README.md) at `/bamboo-truss`.*
 
