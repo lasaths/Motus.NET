@@ -116,6 +116,18 @@ public class PoEJacobianTests
         return j;
     }
 
+    /// <summary>2.3.0 keeps the removed 2.2.0 method as an obsolete shim with its 2.2.0 results.</summary>
+    [Fact]
+    public void EstimateConditionJjT_ObsoleteShim_KeepsV220Results()
+    {
+#pragma warning disable CS0618
+        Assert.Equal(2.0, PoEJacobian.EstimateConditionJjT(new double[,] { { 2, 0 }, { 0, 1 } }), 12);
+        Assert.Equal(double.PositiveInfinity, PoEJacobian.EstimateConditionJjT(new double[,] { { 1, 0 }, { 0, 0 } }));
+#pragma warning restore CS0618
+        Assert.NotNull(typeof(PoEJacobian).GetMethod(nameof(PoEJacobian.EstimateConditionJjT))!
+            .GetCustomAttributes(typeof(ObsoleteAttribute), false).SingleOrDefault());
+    }
+
     private static void AssertJacobianClose(double[,] a, double[,] b, double tol)
     {
         Assert.Equal(a.GetLength(0), b.GetLength(0));

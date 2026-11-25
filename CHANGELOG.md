@@ -5,24 +5,43 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [2.3.0] - Unreleased
+
+<!-- Not tagged yet. Put the date here when the tag is made. Other PRs for 2.3.0 add their lines at the end of each subsection. -->
 
 ### Added
 
 - Dark studio renderer for the shipped Warren truss plan (`tools/studio/`): an adapter from `BambooTrussDefaultPlan.json`, Clean and Annotated 3-pane videos, and a storyboard. Look: background `#111214`, locked jaws Signal Vermilion `#E64A19`, open jaws graphite, matte bamboo. See `tools/studio/README.md` and `docs/media/warren_truss_dark_storyboard.png`.
 - Opt-in box prefilter for pose collision checks (`RobotMeshCollisionChecker.BoxPrefilter`, default off; tower harness `BOXPRE=1`). Before the exact test of a robot part against a scene mesh (or a mesh part against a box), the checker compares the two oriented bounding boxes. If they are apart by more than 1 µm, the pair is clear and the exact test is not run. If not, the exact test decides. The prefilter never reports a collision, so every verdict and every plan stays the same. The clearance margin is already in the grown obstacles, so the prefilter works for each `ClearanceMarginM`.
+- `SegmentCertifier` and `ICertifiableSegment` in Motus.Core: a generic certifier for the clearance between two samples (bisection, chain motion bound, growth quantum). `BambooSegmentCertifier` is now a thin adapter. Its public API does not change.
+- Rigidity rule for grid shells that are not planar (`BambooStructureGraph.IsPlanar`). A planar structure uses the 2D triangle rule, as before (Warren does not change). A spatial structure uses first-order rigidity.
+- Anchor-to-anchor walk: `BambooTrussPlanner.WalkToAnchor`, `BambooBuildSearch.Options.AnchorWalks` (default off) and `BambooBuildSearch.Mode.Walk`.
+- One stock spot for each member (opt-in): `BambooTrussLayout.FeedSpot`, `StructureMember.Feed`, `MemberDef.FeedIndex`, `BambooTrussLayout.FeedSpots`, `FeedSpotsInUse`, `UsesFeedSpots`, `StoreAt`, `FeedPegObjects` and `BambooReachMap.Stock(member)`. A layout without feed spots does not change.
+- Build search options. All are off by default. They change only the candidate order, the skips and the RRT budgets. The collision checks and the clearance do not change. `NearestFirst`, `PlacedFootholds`, `StagedConfirm` with `StagedRrtIters` (`Result.Deferred` counts the deferred confirmations), `Reposition` with `MaxRepositions` (`Mode.Reposition`, `Choice.RepositionTo`, `Choice.RepositionF`), `LandPrecheck`, `RelayPrecheck` and `ConstrainedFirst`.
+- `BambooReachMap.SiteGrid`: one clamp-site grid for the scene check and the build search, with the same sites in the same order.
+- Build-search outcome log: each row has the stand, the node, the position and layout-free features (`FeatureVersion` 1). Opt-in `Sorted` rows list each sorted candidate before the search tries it. Logging only: the search order does not change.
+- Example: a 3×3 grid-shell dome as Site JSON (`tests/fixtures/gridshell_dome3x3`), with a load test and an opt-in build test (`MOTUS_DOME_BUILD=1`, 24/24). See README.
 
 ### Changed
 
 - Bamboo planner speed. The results do not change: the same IK answers, the same collision verdicts and the same plans (bit for bit). `BambooGripKinematics.SolveGrip` uses no heap memory in its loop and does not compute the current gripper pose two times. `BambooTrussCollision.Contacts` makes the grown obstacles, clamp flags and mesh axes one time per hold state, not for each pose. `RobotMeshCollisionChecker` computes each link world matrix one time per pose, and the scene loop uses the matrices of the self-collision pass (the same products). The mount-part memo keeps two results, as the scene memo does. The reach-query cache stores the layout fingerprint one time and holds 600 000 queries (before: 250 000), so the second scene check in the build search uses the first one's answers.
 - Reach grid speed. The results do not change (bit for bit). Kinematic reach queries (no collision check) do not use the target line's touch object in the cache key, because the answer does not depend on it. Thus relay lines with the same parked pose share one answer. In `SolveGrip`, a Jacobian column runs the arm chain again only from its own joint, with the cosines and sines of the other joints kept from the current pose. The loop computes only the slot axis and origin of the free gripper, because it reads no other values.
 - Collision clearance (`MotionConstraints.ClearanceMarginM`, default 2 mm) is one setting. The planner and the final scan always use the same value. `Validate` rejects a non-finite value. The default does not change. The tower harness accepts `CLEARANCE_MM` (unset = 2). Path sampling must stay finer than the clearance.
+- Plans for non-UR robots can change, because IK now finds answers that it did not find before.
+- Build search: transit cache. The search planner keeps each RRT transit path. The key has every input of the path: scene, held cane, jaws, start, goal, RRT budget and random-stream position. The search uses a kept path only after an exact clearance check in the current scene. The replay planner does not use the cache.
+- Collision speed: each collision object keeps its world bounding box, and the scene and BVH stay the same between the margin passes. The broad phase is still exact.
+- Build search structure. The behaviour does not change. Search and replay use one move interpreter (`BambooMoveRunner`). The cell state is one value (`CellState`). Candidate generation is in `BambooFrontier`. The backtrack-search kernel and the replay contract are in the internal namespace `Motus.Construction.Search`. The public API, the options and the log text do not change.
+- Binary compatibility: these Motus.Construction members have a new optional parameter. Source code compiles with no change, but code compiled against 2.2.0 must be compiled again: the `BambooTrussLayout.MemberDef` and `BambooTrussLayout.StructureMember` constructors and `Deconstruct` methods, and `BambooTrussPlanner.LandingCandidates`.
+- Release workflow: a tag with `-` (for example `v2.3.0-preview.1`) makes a GitHub pre-release. Its notes come from the `## [2.3.0-preview.1]` section if there is one. If not, they come from the `## [2.3.0]` section.
+
+### Deprecated
+
+- `PoEJacobian.EstimateConditionJjT` is back, with its 2.2.0 behaviour, as an `[Obsolete]` method. A change after 2.2.0 removed it. That breaks SemVer for a minor release. Do not use it: its Gershgorin bound is infinite for most real Jacobians. It will be removed in 3.0.0.
 
 ### Fixed
 
-- Numerical IK (`NumericalInverseKinematics`) now converges from a seed that is not the answer. Before, it failed for all non-UR robots (0/40). Now: 40/40 each for UR10e URDF, rail + UR10e, Panda, KR 210 URDF, KR 10 and iiwa 7. Causes: `PoEJacobian.JacobianBody` multiplied the transforms in the wrong order; the finite-difference step had the wrong sign; a singularity estimate that was almost always infinite stopped the solve at iteration 1. `PoEJacobian.EstimateConditionJjT` is removed.
+- Numerical IK (`NumericalInverseKinematics`) now converges from a seed that is not the answer. Before, it failed for all non-UR robots (0/40). Now: 40/40 each for UR10e URDF, rail + UR10e, Panda, KR 210 URDF, KR 10 and iiwa 7. Causes: `PoEJacobian.JacobianBody` multiplied the transforms in the wrong order; the finite-difference step had the wrong sign; a singularity estimate that was almost always infinite stopped the solve at iteration 1. The solve does not use `PoEJacobian.EstimateConditionJjT` now (see Deprecated).
 - `UrdfUniversalRobotsKinematics` also tries the base frame without the Rz(π) turn, so analytic UR IK works on `ur10e.urdf`. Each answer is still checked with the URDF FK.
-- Plans for non-UR robots can change, because IK now finds answers that it did not find before.
 - `CollisionMeshCache` (shared mesh BVH cache): a cache hit must also have the same mesh vertices and indices. Before this fix, two different meshes with the same 32-bit `ContentHash` shared one BVH, and the second mesh was tested with the bounding boxes of the first. A collision could then show as clear. Results for meshes that do not collide by hash do not change.
 - URDF loaders (`UrdfRobotLoader`, `UrdfCollisionLoader`) fail closed. When a number attribute is absent, the loader uses the default, as before. When the attribute is present but is not a finite number (for example `abc`, `NaN`, `1e999`, or a triple with fewer than three values), the load stops with an `InvalidDataException` that names the joint or collision. Before this fix, a bad limit became ±π, a bad radius became 0.05 m, and `NaN` was accepted. All shipped fixtures load the same as before.
 - `UrdfFixedChain.TryTipAttachOffset` and `UrdfWriter.TryParse` read numbers the same fail-closed way. `UrdfFixedChain` throws the `InvalidDataException`. `UrdfWriter.TryParse` returns false with the message in its errors. Before this fix, a bad fixed-joint origin became 0, and a bad link mass was ignored.
